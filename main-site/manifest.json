@@ -38,6 +38,22 @@
             "purpose": "maskable"
         }
     ],
+    "screenshots": [
+        {
+            "src": "/images/screenshot_1.png",
+            "type": "image/png",
+            "sizes": "1080x2340",
+            "form_factor": "narrow",
+            "label": "GFTV HelloEvents event list on a phone"
+        },
+        {
+            "src": "/images/screenshot_2.png",
+            "type": "image/png",
+            "sizes": "1920x1080",
+            "form_factor": "wide",
+            "label": "GFTV HelloEvents event list on a computer"
+        }
+    ],
     "shortcuts": [
         {
             "name": "My events",
