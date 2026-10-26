@@ -220,7 +220,9 @@ export function validateEvent(input) {
   out.is_online = body.isOnline === true;
   out.address_attendees_only = body.addressAttendeesOnly === true;
 
-  for (const [key, column] of [['coverImageUrl', 'cover_image_url'], ['externalUrl', 'external_url'], ['onlineUrl', 'online_url']]) {
+  // The cover picture is not a field here: it is uploaded on its own to the
+  // covers bucket (api/manage/cover.js, migrations/002).
+  for (const [key, column] of [['externalUrl', 'external_url'], ['onlineUrl', 'online_url']]) {
     const check = httpsUrl(body[key]);
     if (!check.ok) return bad(key);
     out[column] = check.url;

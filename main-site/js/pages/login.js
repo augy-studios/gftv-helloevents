@@ -1,21 +1,17 @@
-// Sign in: password, then the second factor, or setting one up first when
-// the account has none (the mandatory 2FA gate). No session exists until
-// the second step is done; the server enforces that, this only draws it.
+// Sign in: password, then the second factor when the account has one. Staff
+// must have one (set up on gftv.asia); for public accounts it is optional,
+// and the server answers step "done" straight after the password.
 
 import { session } from '../app.js';
 import { t, onChange } from '../../assets/i18n/i18n.js';
 import { post } from '../api.js';
 import { withBusy, toast, errorText } from '../ui.js';
-import { passkeysSupported, usePasskey, createPasskey, passkeyErrorCode } from '../passkeys.js';
+import { passkeysSupported, usePasskey, passkeyErrorCode } from '../passkeys.js';
 import { humanCheck } from '../turnstile.js';
-import { qrSvg } from '../qr.js';
-import { showCodes } from '../codes.js';
 
 const $ = (id) => document.getElementById(id);
 let challenge = null;
 let method = null;
-let setupMethod = null;
-let totpStarted = false;
 const check = humanCheck($('humanCheck'), 'login');
 
 // Only a path on this site, so ?next= cannot send anyone elsewhere.
@@ -27,7 +23,7 @@ function nextPath() {
 session.then((s) => { if (s.signedIn) location.replace(nextPath()); });
 
 function show(step) {
-  for (const id of ['stepPassword', 'stepFactor', 'stepSetup', 'stepCodes']) $(id).hidden = id !== step;
+  for (const id of ['stepPassword', 'stepFactor']) $(id).hidden = id !== step;
   const heading = document.querySelector(`#${step} h1`);
   if (heading && step !== 'stepPassword') {
     heading.tabIndex = -1;
@@ -61,7 +57,7 @@ $('passwordForm').addEventListener('submit', (e) => {
       });
       challenge = data.challenge;
       $('password').value = '';
-      if (data.step === 'setup') showSetup(data.options);
+      if (data.step === 'done') signedIn();
       else showFactors(data.methods);
     } finally {
       check.reset();
@@ -163,102 +159,6 @@ $('passkeyUse').addEventListener('click', () => {
 });
 
 $('startOver').addEventListener('click', () => startOver());
-
-// ---------------------------------------------------------------------------
-// The 2FA gate: setting up a first factor
-// ---------------------------------------------------------------------------
-
-function showSetup(options) {
-  $('setupPicker').querySelector('[data-setup="passkey"]').hidden = !(options.passkey && passkeysSupported());
-  $('setupPicker').querySelector('[data-setup="telegram"]').hidden = !options.telegram;
-  totpStarted = false;
-  show('stepSetup');
-  pickSetup('totp');
-}
-
-function enrol(body) {
-  return post('/api/auth/enrol', { challenge, ...body }).catch((error) => {
-    handleExpiry(error);
-    throw error;
-  });
-}
-
-function pickSetup(name) {
-  setupMethod = name;
-  document.querySelectorAll('#setupPicker [data-setup]').forEach((b) => {
-    b.setAttribute('aria-pressed', String(b.dataset.setup === name));
-  });
-  $('setupTotp').hidden = name !== 'totp';
-  $('setupPasskey').hidden = name !== 'passkey';
-  $('setupTelegram').hidden = name !== 'telegram';
-  $('setupError').textContent = '';
-  if (name === 'totp' && !totpStarted) startTotp();
-  if (name === 'telegram') startTelegram();
-}
-
-document.querySelectorAll('#setupPicker [data-setup]').forEach((b) => {
-  b.addEventListener('click', () => pickSetup(b.dataset.setup));
-});
-
-async function startTotp() {
-  totpStarted = true;
-  try {
-    const { secret, uri } = await enrol({ action: 'totp-start' });
-    $('totpQr').innerHTML = qrSvg(uri, t('setup.totp-qr-label'));
-    // Groups of four, easier to type into an app by hand.
-    $('totpSecret').textContent = secret.replace(/(.{4})/g, '$1 ').trim();
-  } catch (error) {
-    totpStarted = false;
-    $('setupError').textContent = errorText(error);
-  }
-}
-
-async function startTelegram() {
-  $('telegramOpen').hidden = true;
-  try {
-    const { url } = await enrol({ action: 'telegram-link' });
-    $('telegramOpen').href = url;
-    $('telegramOpen').hidden = false;
-  } catch (error) {
-    $('setupError').textContent = errorText(error);
-  }
-}
-
-function finished(data) {
-  if (!data.backupCodes || data.backupCodes.length === 0) return signedIn();
-  showCodes($('codesList'), data.backupCodes, { copyButton: $('codesCopy'), downloadButton: $('codesDownload') });
-  show('stepCodes');
-}
-
-$('totpForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  withBusy($('totpSubmit'), $('setupError'), async () => {
-    finished(await enrol({ action: 'totp-finish', code: $('totpCode').value }));
-  });
-});
-
-$('passkeyCreate').addEventListener('click', () => {
-  withBusy($('passkeyCreate'), $('setupError'), async () => {
-    const { options } = await enrol({ action: 'passkey-options' });
-    let response;
-    try {
-      response = await createPasskey(options);
-    } catch (cause) {
-      throw Object.assign(new Error('passkey'), { code: passkeyErrorCode(cause) });
-    }
-    finished(await enrol({ action: 'passkey-finish', response, label: $('passkeyLabel').value }));
-  });
-});
-
-$('telegramForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  withBusy($('telegramSubmit'), $('setupError'), async () => {
-    finished(await enrol({ action: 'telegram-finish', code: $('telegramCode').value }));
-  });
-});
-
-$('setupStartOver').addEventListener('click', () => startOver());
-$('codesDone').addEventListener('click', signedIn);
 
 onChange(() => {
   if (method && !$('stepFactor').hidden) pick(method);

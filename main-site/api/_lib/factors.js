@@ -2,19 +2,22 @@
 // and Telegram codes.
 //
 // What counts as a second factor here:
-//   totp      the authenticator app set up on gftv.asia (gftvhello_users
-//             .totp_secret, plain base32, read the same way gftv-linktree
-//             reads it), or one set up on this site (gftvevents_totp_secrets,
-//             AES-256-GCM encrypted). Either one works.
+//   totp      for staff, the authenticator app set up on gftv.asia
+//             (gftvhello_users.totp_secret, plain base32, read the same way
+//             gftv-linktree reads it); for anyone, one set up on this site
+//             (gftvevents_totp_secrets, AES-256-GCM encrypted).
 //   passkey   a passkey registered on this site.
 //   telegram  a Telegram chat linked on this site, when the bot is set up.
-//   backup    a one-time backup code: a shared one from gftvhello_backup_codes
-//             (either format other GFTV sites write), or one issued here. A
+//   backup    a one-time backup code: for staff, a shared one from
+//             gftvhello_backup_codes (either format other GFTV sites write);
+//             for anyone, one issued here. A
 //             backup code gets past the second step only, never the password,
 //             and on its own it does not count as having a second factor.
 //
-// This site never writes a secret into gftvhello_users. An account with no
-// factor at all sets one up here, and it lives in this site's own tables.
+// This site never writes a secret into gftvhello_users. Staff must already
+// have a factor to get in (from gftv.asia, as on OneLink GFTV) and can add
+// passkeys and Telegram here afterwards. Public accounts may add any of them
+// from the account page; for them 2FA is optional.
 
 import bcrypt from 'bcryptjs';
 import { db, T } from './supabase.js';
@@ -60,7 +63,9 @@ export async function totpOk(user, code) {
   return Boolean(local) && verifyTotp(code, local);
 }
 
-async function sharedBackupCount(userId) {
+async function sharedBackupCount(account) {
+  if (account.kind !== 'staff') return 0;
+  const userId = account.id;
   const { count, error } = await db()
     .from(T.sharedBackupCodes)
     .select('id', { count: 'exact', head: true })
@@ -79,14 +84,15 @@ export async function localBackupCount(userId) {
   return count ?? 0;
 }
 
-// { totp, passkey, telegram, backup } for the sign-in page. user must have
-// been read with USER_AUTH_COLUMNS, since the shared secret is part of it.
+// { totp, passkey, telegram, backup } for the sign-in page. user is a
+// normalised account loaded with { auth: true }, since the shared secret is
+// part of it.
 export async function methodsFor(user) {
   const [local, passkeys, chat, shared, own] = await Promise.all([
     user.totp_secret ? true : hasLocalTotp(user.id),
     countPasskeys(user.id),
     telegramConfigured() ? linkedChat(user.id) : Promise.resolve(null),
-    sharedBackupCount(user.id),
+    sharedBackupCount(user),
     localBackupCount(user.id),
   ]);
   return {
@@ -97,8 +103,14 @@ export async function methodsFor(user) {
   };
 }
 
-export function hasSecondFactor(methods) {
-  return methods.totp || methods.passkey || methods.telegram;
+// Whether 2FA is on. For staff, any of the three. For a public account only
+// an authenticator or a passkey switches it on: a linked Telegram chat is
+// also how notices and password resets arrive, and linking it for those
+// should not start demanding a code at every sign-in. Once 2FA is on,
+// Telegram is accepted as the second step too.
+export function hasSecondFactor(methods, account = null) {
+  if (account?.kind === 'public') return Boolean(methods.totp || methods.passkey);
+  return Boolean(methods.totp || methods.passkey || methods.telegram);
 }
 
 // Spend one backup code, this site's first, then the shared ones. True if one
@@ -106,7 +118,9 @@ export function hasSecondFactor(methods) {
 // issued them: bcrypt of the lowercased code (careers-gftv), or SHA-256 of
 // the uppercased code with its hyphen removed (gftv-redirects-portal). The
 // matching shared row is deleted, as every GFTV site does.
-export async function spendBackupCode(userId, typed) {
+// account: a normalised account; only staff have shared codes.
+export async function spendBackupCode(account, typed) {
+  const userId = account.id;
   if (normaliseCode(typed).length < 6) return false;
 
   const { data: own, error } = await db()
@@ -129,6 +143,7 @@ export async function spendBackupCode(userId, typed) {
     return (spent ?? []).length === 1;
   }
 
+  if (account.kind !== 'staff') return false;
   const { data: shared, error: sharedError } = await db()
     .from(T.sharedBackupCodes)
     .select('id, code_hash')

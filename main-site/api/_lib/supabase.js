@@ -24,6 +24,9 @@ export function db() {
 // Table names, written once. Everything this app owns carries the
 // gftvevents_ prefix (migrations/001_helloevents_schema.sql).
 export const T = Object.freeze({
+  // Every account this site knows: staff (a pointer to gftvhello_users) or
+  // public (its own username, email and password). migrations/002.
+  accounts: 'gftvevents_accounts',
   sessions: 'gftvevents_sessions',
   challenges: 'gftvevents_auth_challenges',
   webauthn: 'gftvevents_webauthn_challenges',
@@ -36,6 +39,9 @@ export const T = Object.freeze({
   attendees: 'gftvevents_attendees',
   audit: 'gftvevents_audit_logs',
   rateLimits: 'gftvevents_rate_limits',
+  // Cover pictures (migrations/002), a public-read Storage bucket that only
+  // the API writes to.
+  coversBucket: 'gftvevents_covers',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).

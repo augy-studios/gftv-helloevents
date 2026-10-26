@@ -1,8 +1,7 @@
 // POST /api/auth/verify  { challenge, method, code? | response? }
 //
-// Step two of signing in: the second factor, for an account that has one.
-// The only place a sign-in session is issued apart from first-time set-up
-// (enrol.js).
+// Step two of signing in: the second factor, for an account that has one
+// (staff always; public accounts that chose to set one up).
 //
 //   method "totp"             { code }      authenticator app
 //   method "backup"           { code }      a one-time backup code
@@ -18,7 +17,7 @@ import { sha256 } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
 import { authenticationOptions, finishAuthentication } from '../_lib/webauthn.js';
 import { createSession, findChallenge, failChallengeAttempt, deleteChallenge } from '../_lib/session.js';
-import { findUserById, USER_AUTH_COLUMNS, canSignIn } from '../_lib/users.js';
+import { loadAccount, canSignIn } from '../_lib/users.js';
 import { totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
 import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
 import { selfView } from '../_lib/serialize.js';
@@ -31,7 +30,7 @@ export default route('auth/verify', async (req, res) => {
 
   const challenge = await findChallenge(body.challenge, 'login');
   if (!challenge) return fail(res, 401, 'challenge_expired');
-  const user = await findUserById(challenge.user_id, USER_AUTH_COLUMNS);
+  const user = await loadAccount(challenge.user_id, { auth: true });
   if (!user || !canSignIn(user)) {
     await deleteChallenge(challenge);
     return fail(res, 403, 'no_access');
@@ -43,7 +42,7 @@ export default route('auth/verify', async (req, res) => {
       passed = await totpOk(user, body.code);
       break;
     case 'backup':
-      passed = await spendBackupCode(user.id, body.code);
+      passed = await spendBackupCode(user, body.code);
       break;
     case 'telegram-send': {
       if (!telegramConfigured()) return fail(res, 400, 'telegram_off');
@@ -75,7 +74,7 @@ export default route('auth/verify', async (req, res) => {
   }
 
   await deleteChallenge(challenge);
-  await createSession(req, res, user.id, body.method);
+  await createSession(req, res, user, body.method);
   await audit(req, { action: 'auth.signed_in', actorId: user.id, details: { method: body.method } });
   ok(res, { user: selfView(user) });
 });

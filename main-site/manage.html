@@ -96,11 +96,17 @@
                             <textarea id="f-description" name="description" maxlength="8000" rows="6"></textarea>
                             <span class="field-hint" data-i18n="manage.hint.description">Plain text. Line breaks are kept.</span>
                         </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.coverImageUrl">Cover picture address</span>
-                            <input id="f-coverImageUrl" name="coverImageUrl" type="url" maxlength="500" placeholder="https://">
-                            <span class="field-hint" data-i18n="manage.hint.coverImageUrl">An https:// address of a picture, wide rather than tall.</span>
-                        </label>
+                        <div class="field span-2 cover-field">
+                            <span data-i18n="manage.field.cover">Cover picture</span>
+                            <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
+                            <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">A wide picture works best. Your browser turns it into a small WebP before it is uploaded.</p>
+                            <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">Save the event first, then add a picture.</p>
+                            <div class="actions inline">
+                                <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
+                                <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
+                            </div>
+                            <div class="callout danger" id="coverError" role="alert"></div>
+                        </div>
                         <label class="field">
                             <span data-i18n="manage.field.organiserName">Organiser</span>
                             <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
@@ -280,6 +286,7 @@
         <nav>
             <a href="/" data-i18n="footer.events">All events</a>
             <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
         </nav>
         <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
         <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>

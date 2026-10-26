@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="reset.meta-title">Reset your password | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Reset your password | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/reset">
+    <link rel="canonical" href="https://events.globalfurry.tv/reset">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="center">
+        <section class="glass-card page-card" id="stepStart">
+            <div class="page-head">
+                <h1 data-i18n="reset.title">Reset your password</h1>
+                <p data-i18n="reset.lede">HelloEvents sends reset codes by Telegram, to the chat linked on your account page.</p>
+            </div>
+            <form id="startForm" novalidate>
+                <label class="field">
+                    <span data-i18n="field.identifier">Username or email</span>
+                    <input id="identifier" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
+                </label>
+                <div class="callout danger" id="startError" role="alert"></div>
+                <div class="actions"><button class="btn btn-primary" type="submit" id="startSubmit"><span data-i18n="common.continue">Continue</span></button></div>
+            </form>
+            <div class="callout warn" id="noTelegram" hidden data-i18n="reset.no-telegram">This account has no Telegram chat linked, so its password cannot be reset here. Ask GFTV staff for help.</div>
+            <div class="callout warn" id="staffNote" hidden data-i18n="reset.staff">This is a GFTV staff account. Reset its password on gftv.asia.</div>
+        </section>
+
+        <section class="glass-card page-card" id="stepCode" hidden>
+            <div class="page-head">
+                <h1 data-i18n="reset.code-title">Choose a new password</h1>
+                <p data-i18n="reset.code-lede">Send yourself a code on Telegram, then type it with your new password.</p>
+            </div>
+            <form id="finishForm" novalidate>
+                <div class="actions"><button class="btn" type="button" id="sendCode"><span data-icon="send"></span><span data-i18n="telegram.send">Send me a code</span></button></div>
+                <label class="field u-mt-1">
+                    <span data-i18n="field.telegram-code">Code from Telegram</span>
+                    <input class="code-input" id="telegramCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                </label>
+                <div id="factorBox" hidden>
+                    <p class="small" data-i18n="reset.factor-help">Your account has a second step, so it is needed too.</p>
+                    <div class="segmented" role="group" id="resetPicker" aria-label="Second step" data-i18n-attr="aria-label:login.factor-group">
+                        <button type="button" data-factor="totp" aria-pressed="false" hidden><span data-icon="smartphone"></span><span data-i18n="factor.totp">Authenticator app</span></button>
+                        <button type="button" data-factor="passkey" aria-pressed="false" hidden><span data-icon="key"></span><span data-i18n="factor.passkey">Passkey</span></button>
+                        <button type="button" data-factor="backup" aria-pressed="false" hidden><span data-icon="lifebuoy"></span><span data-i18n="factor.backup">Backup code</span></button>
+                    </div>
+                    <label class="field" id="factorCodeField">
+                        <span id="factorCodeLabel" data-i18n="field.code">Six digit code</span>
+                        <input id="factorCode" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" maxlength="16">
+                    </label>
+                </div>
+                <label class="field">
+                    <span data-i18n="field.new-password">Password</span>
+                    <input id="newPassword" type="password" autocomplete="new-password" minlength="10" maxlength="72" required>
+                    <span class="field-hint" data-i18n="signup.password-hint">At least 10 characters.</span>
+                </label>
+                <div class="callout danger" id="finishError" role="alert"></div>
+                <div class="actions"><button class="btn btn-primary" type="submit" id="finishSubmit"><span data-i18n="reset.submit">Set the new password</span></button></div>
+            </form>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/reset.js"></script>
+</body>
+
+</html>

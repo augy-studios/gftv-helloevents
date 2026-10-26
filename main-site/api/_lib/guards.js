@@ -16,6 +16,10 @@ export const LIMITS = Object.freeze({
   rsvp: [30, 60],
   manageWrite: [120, 60],
   securityWrite: [30, 900],
+  signup: [5, 3600],
+  recover: [5, 3600],
+  notifyWrite: [30, 900],
+  cover: [30, 3600],
 });
 
 // Count one hit for each subject and answer 429 if any is over. Returns true

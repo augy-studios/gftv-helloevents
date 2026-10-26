@@ -6,7 +6,10 @@
 // POST { action: "create", event }                 -> { event }
 // POST { action: "update", id, event }             -> { event }
 // POST { action: "delete", id }                    admins only
-// POST { action: "remove-attendee", id, username } take someone off the list
+// POST { action: "remove-attendee", id, username, staff } take someone off
+//
+// Saving a change to when or where a released event happens, or cancelling
+// it, tells the people going (notify.js), in the background.
 //
 // event is the edit form's fields (event-rules.js validateEvent picks what it
 // knows and ignores the rest). Answers are built by serialize.js, never rows.
@@ -19,6 +22,8 @@ import { isAdmin } from '../_lib/users.js';
 import { validateEvent } from '../_lib/event-rules.js';
 import { MANAGE_COLUMNS } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
+import { deleteCover } from '../_lib/covers.js';
+import { background, notifyEventChange } from '../_lib/notify.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,7 +36,7 @@ async function loadEvent(id) {
 async function loadAttendees(eventId) {
   const { data, error } = await db()
     .from(T.attendees)
-    .select(`created_at, user:${T.users} ( username, display_name )`)
+    .select(`user_id, created_at, account:${T.accounts} ( kind, username, display_name, staff:${T.users} ( username, display_name ) )`)
     .eq('event_id', eventId)
     .order('created_at', { ascending: true })
     .limit(2000);
@@ -90,6 +95,8 @@ export default route('manage/events', async (req, res) => {
     }
 
     if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
+    const before = await loadEvent(body.id);
+    if (!before) return fail(res, 404, 'not_found');
     const { data, error } = await db()
       .from(T.events)
       .update(fields)
@@ -99,15 +106,17 @@ export default route('manage/events', async (req, res) => {
     if (error) return saveError(res, error);
     if (!data) return fail(res, 404, 'not_found');
     await audit(req, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
+    background(notifyEventChange(before, data));
     return ok(res, { event: managedEvent(data) });
   }
 
   if (body.action === 'delete') {
     if (!isAdmin(user)) return fail(res, 403, 'admin_only');
     if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
-    const { data, error } = await db().from(T.events).delete().eq('id', body.id).select('id, slug');
+    const { data, error } = await db().from(T.events).delete().eq('id', body.id).select('id, slug, cover_image_path');
     if (error) throw error;
     if (!data?.length) return fail(res, 404, 'not_found');
+    await deleteCover(data[0].cover_image_path);
     // event_id is set null on the audit rows by the foreign key, so the slug
     // goes in the details to keep the trail readable.
     await audit(req, { action: 'event.deleted', actorId: user.id, details: { slug: data[0].slug } });
@@ -118,10 +127,19 @@ export default route('manage/events', async (req, res) => {
     if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
     const username = String(body.username ?? '').trim();
     if (!username || username.length > 64) return fail(res, 400, 'bad_request');
-    const { data: person, error: personError } = await db().from(T.users).select('id').eq('username', username).maybeSingle();
-    if (personError) throw personError;
-    if (!person) return fail(res, 404, 'not_found');
-    const { error } = await db().from(T.attendees).delete().eq('event_id', body.id).eq('user_id', person.id);
+    // Matched against this event's own list, so only someone on it can go.
+    const { data: rows, error: rowsError } = await db()
+      .from(T.attendees)
+      .select(`user_id, account:${T.accounts} ( kind, username, staff:${T.users} ( username ) )`)
+      .eq('event_id', body.id);
+    if (rowsError) throw rowsError;
+    const match = (rows ?? []).find((r) => {
+      const a = r.account ?? {};
+      const name = a.kind === 'staff' ? a.staff?.username : a.username;
+      return name === username && (body.staff === undefined || body.staff === (a.kind === 'staff'));
+    });
+    if (!match) return fail(res, 404, 'not_found');
+    const { error } = await db().from(T.attendees).delete().eq('event_id', body.id).eq('user_id', match.user_id);
     if (error) throw error;
     await audit(req, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
     return ok(res, { attendees: await loadAttendees(body.id) });

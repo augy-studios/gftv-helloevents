@@ -16,33 +16,42 @@
 //   Staff notes, who created or edited an event, and attendee identities go
 //   only to editors, and an attendee is a display name and username, never
 //   an email.
-//   Password hashes, TOTP secrets, code and token hashes, Telegram chat ids
-//   and IP hashes have no serializer at all, so they cannot reach a browser.
+//   Password hashes, TOTP secrets, code and token hashes, Telegram chat ids,
+//   emails, notification choices of other people and IP hashes have no
+//   serializer at all, so they cannot reach a browser. Public accounts are
+//   held to exactly the same lists as staff ones.
 
 import { isOver, datesAnnounced, utcToWall } from './event-rules.js';
 import { roleOf, canManage } from './users.js';
+import { coverUrl } from './covers.js';
 
 // ---------------------------------------------------------------------------
 // People
 // ---------------------------------------------------------------------------
 
-// The signed-in person, about themselves.
+// The signed-in person, about themselves. Their own notification choices are
+// theirs to see; the email is not sent even to them (nothing here needs it).
 export function selfView(user) {
   return {
     username: user.username,
     displayName: user.display_name || user.username,
     avatarUrl: typeof user.avatar_url === 'string' && user.avatar_url.startsWith('https://') ? user.avatar_url : null,
+    kind: user.kind === 'public' ? 'public' : 'staff',
     role: roleOf(user),
     canManage: canManage(user),
   };
 }
 
-// An attendee, for an editor's attendee list.
+// An attendee, for an editor's attendee list: a name, a username and
+// whether it is a staff or a public account. Never an email or an id.
+// row: { created_at, account: { kind, username, display_name, staff: {...} } }
 export function attendeeView(row) {
-  const user = row.user ?? {};
+  const account = row.account ?? {};
+  const person = account.kind === 'staff' ? account.staff ?? {} : account;
   return {
-    username: user.username ?? null,
-    displayName: user.display_name || user.username || null,
+    username: person.username ?? null,
+    displayName: person.display_name || person.username || null,
+    staff: account.kind === 'staff',
     rsvpAt: row.created_at,
   };
 }
@@ -101,7 +110,7 @@ export function publicEventCard(row, now = Date.now()) {
     title: row.title,
     kind: row.kind,
     summary: row.summary || null,
-    coverImageUrl: row.cover_image_url || null,
+    coverImageUrl: coverUrl(row.cover_image_path),
     cancelled: row.status === 'cancelled',
     when: whenView(row),
     where: {
@@ -187,7 +196,8 @@ export function managedEvent(row, now = Date.now()) {
     addressAttendeesOnly: row.address_attendees_only === true,
     city: row.city || '',
     country: row.country || '',
-    coverImageUrl: row.cover_image_url || '',
+    coverImageUrl: coverUrl(row.cover_image_path) || '',
+    hasCover: Boolean(row.cover_image_path),
     externalUrl: row.external_url || '',
     organiserName: row.organiser_name || '',
     priceType: row.price_type,

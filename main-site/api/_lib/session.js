@@ -9,17 +9,23 @@
 //
 // Sessions live in gftvevents_sessions, so signing in or out here never
 // touches a session on gftv.asia, links.gftv.asia or any other GFTV site.
+// A session belongs to an account (users.js): staff or public. The factor
+// "password" is only ever written for a public account with no second
+// factor set up, since 2FA is optional for those (login.js decides).
 
 import { db, T } from './supabase.js';
 import { randomToken, sha256, hashIp } from './crypto.js';
 import { readCookie, setCookie, clearCookie, fail, clientIp } from './http.js';
-import { USER_COLUMNS, canSignIn, canManage, isAdmin } from './users.js';
+import { SESSION_ACCOUNT_SELECT, normaliseAccount, ensureStaffAccount, canSignIn, canManage, isAdmin } from './users.js';
 
 export const SESSION_COOKIE = '__Host-ghe_session';
 const SESSION_DAYS = 7;
-const FACTORS = new Set(['totp', 'passkey', 'telegram', 'backup']);
+const FACTORS = new Set(['password', 'totp', 'passkey', 'telegram', 'backup']);
 
-export async function createSession(req, res, userId, factor) {
+// account: a normalised account (users.js).
+export async function createSession(req, res, account, factor) {
+  const userId = account.id;
+  if (account.kind === 'staff') await ensureStaffAccount(userId);
   const token = randomToken(32);
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
   const { error } = await db().from(T.sessions).insert({
@@ -30,34 +36,37 @@ export async function createSession(req, res, userId, factor) {
     expires_at: expires.toISOString(),
   });
   if (error) throw error;
+  await db().from(T.accounts).update({ last_sign_in_at: new Date().toISOString() }).eq('id', userId);
   setCookie(res, SESSION_COOKIE, token, SESSION_DAYS * 86400);
 }
 
-// { sessionId, user } for a live session of an approved account, or null.
+// { sessionId, user } for a live session of an account that may still sign
+// in, or null. user is the normalised account.
 export async function currentSession(req) {
   const token = readCookie(req, SESSION_COOKIE);
   if (!token || token.length > 100) return null;
 
   const { data, error } = await db()
     .from(T.sessions)
-    .select(`id, expires_at, last_seen_at, user:${T.users} ( ${USER_COLUMNS} )`)
+    .select(`id, expires_at, last_seen_at, account:${T.accounts} ( ${SESSION_ACCOUNT_SELECT} )`)
     .eq('token_hash', sha256(token))
     .maybeSingle();
 
   if (error) throw error;
-  if (!data || !data.user) return null;
+  const user = normaliseAccount(data?.account);
+  if (!data || !user) return null;
   if (new Date(data.expires_at).getTime() <= Date.now()) {
     await db().from(T.sessions).delete().eq('id', data.id);
     return null;
   }
-  // Approval is re-checked on every request, so revoking it on gftv.asia
-  // takes effect here on the next click rather than at the next sign in.
-  if (!canSignIn(data.user)) return null;
+  // Approval (staff) and status (public) are re-checked on every request, so
+  // revoking either takes effect on the next click, not at the next sign in.
+  if (!canSignIn(user)) return null;
   // Touch at most every ten minutes, to keep writes off the hot path.
   if (Date.now() - new Date(data.last_seen_at).getTime() > 600_000) {
     await db().from(T.sessions).update({ last_seen_at: new Date().toISOString() }).eq('id', data.id);
   }
-  return { sessionId: data.id, user: data.user };
+  return { sessionId: data.id, user };
 }
 
 // The signed-in user, or null after answering 401/403.
@@ -97,18 +106,24 @@ export async function endOtherSessions(userId, exceptSessionId) {
 //
 //   login  the password is right and the account has a second factor; the
 //          next request must prove it.
-//   enrol  the password is right and the account has no second factor yet;
-//          the next requests set one up, and only then is a session issued.
+//   recover    a public account resetting a forgotten password (recover.js).
+//   totp-setup a signed-in account setting up an authenticator app; holds
+//              the pending secret until a first code proves it.
+//   enrol      no longer issued (round 3: staff set 2FA up on gftv.asia, as
+//              on OneLink GFTV); still allowed by the table.
 // ---------------------------------------------------------------------------
 
-const CHALLENGE_MINUTES = { login: 10, enrol: 30 };
+const CHALLENGE_MINUTES = { login: 10, enrol: 30, recover: 15, 'totp-setup': 15 };
 export const CHALLENGE_ATTEMPTS = 5;
 
 const CHALLENGE_COLUMNS =
   'id, user_id, purpose, attempts, pending_totp_secret, telegram_code_hash, telegram_code_expires_at, ' +
   'pending_telegram_chat_id, pending_telegram_username, expires_at';
 
-export async function createChallenge({ purpose, userId }) {
+// account, when given, makes sure a staff member's accounts row exists
+// first, since challenges reference gftvevents_accounts.
+export async function createChallenge({ purpose, userId, account = null }) {
+  if (account?.kind === 'staff') await ensureStaffAccount(userId);
   // One open challenge per account and purpose: starting again replaces it.
   await db().from(T.challenges).delete().eq('purpose', purpose).eq('user_id', userId);
 

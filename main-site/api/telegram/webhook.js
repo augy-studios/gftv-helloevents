@@ -5,9 +5,9 @@
 // secret is compared in constant time before anything else is read; there is
 // no request signing.
 //
-//   /start <token>   from a set-up page: send a confirmation code to this
-//                    chat (the link is made when the code comes back);
-//                    from the account page: link this chat straight away
+//   /start <token>   from the account page of someone signed in: link this
+//                    chat to that account (sign-in codes, password reset
+//                    codes, and event notices if they switch those on)
 //   /unlink          unlink this chat from every account it is linked to
 //   anything else    the help message, as a rich message
 //
@@ -22,9 +22,7 @@ import { safeEqual } from '../_lib/crypto.js';
 import { audit } from '../_lib/guards.js';
 import { sendTelegram, sendRichTelegram, spendLinkToken, saveLink } from '../_lib/telegram.js';
 import { helpMessage } from '../_lib/telegram-messages.js';
-import { findChallengeById, updateChallenge } from '../_lib/session.js';
-import { sendTelegramCode } from '../_lib/factors.js';
-import { findUserById, canSignIn } from '../_lib/users.js';
+import { loadAccount, canSignIn } from '../_lib/users.js';
 
 export default route('telegram/webhook', async (req, res) => {
   if (req.method !== 'POST') return send(res, 405, { ok: false });
@@ -53,29 +51,18 @@ export default route('telegram/webhook', async (req, res) => {
   const start = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/);
   if (start && start[1]) {
     const token = await spendLinkToken(start[1]);
-    const user = token ? await findUserById(token.userId) : null;
-    if (!token || !user || !canSignIn(user)) {
-      await reply('That link has expired or was already used. Make a new one from the page you were on.');
-      return send(res, 200, { ok: true });
-    }
-
-    if (token.challengeId) {
-      // Setting up a first factor: park the chat on the challenge and send a
-      // code; the sign-in page links it when the code is typed there.
-      const challenge = await findChallengeById(token.challengeId);
-      if (!challenge || challenge.purpose !== 'enrol') {
-        await reply('That set-up has expired. Sign in again to start over.');
-        return send(res, 200, { ok: true });
-      }
-      await updateChallenge(challenge, { pending_telegram_chat_id: chat.id, pending_telegram_username: username });
-      await sendTelegramCode(challenge, chat.id, { purpose: 'confirm', username: user.username });
+    const user = token ? await loadAccount(token.userId) : null;
+    // Tokens made during the old first-time set-up (challengeId set) are no
+    // longer issued and are refused like an expired one.
+    if (!token || token.challengeId || !user || !canSignIn(user)) {
+      await reply('That link has expired or was already used. Make a new one from your account page.');
       return send(res, 200, { ok: true });
     }
 
     // From the account page, by someone already signed in.
     await saveLink(user.id, chat.id, username);
     await audit(null, { action: 'security.telegram_linked', actorId: user.id });
-    await reply(`Linked to the GFTV account ${user.username}. Sign-in codes for ${siteHost()} will arrive here.`);
+    await reply(`Linked to the account ${user.username} on ${siteHost()}. Sign-in codes will arrive here, and event notices if you switch them on in your account.`);
     return send(res, 200, { ok: true });
   }
 

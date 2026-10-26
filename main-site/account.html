@@ -60,7 +60,7 @@
                     </div>
                 </div>
                 <div class="actions inline u-mt-1">
-                    <a class="btn" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+                    <a class="btn" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span data-i18n="nav.manage">Manage</span></a>
                     <button class="btn" type="button" id="signOut"><span data-icon="logout"></span><span data-i18n="account.sign-out">Sign out</span></button>
                     <button class="btn btn-quiet" type="button" id="signOutOthers"><span data-i18n="account.sign-out-others">Sign out everywhere else</span></button>
                 </div>
@@ -77,12 +77,52 @@
                 </details>
             </section>
 
+            <section class="glass-card page-card" aria-labelledby="notifyTitle">
+                <h2 id="notifyTitle" data-i18n="notify.title">Notifications</h2>
+                <p class="muted small" data-i18n="notify.lede">Only about events. Nothing else is ever sent.</p>
+                <label class="check u-mt-1"><input type="checkbox" id="prefUpdates"><span data-i18n="notify.updates">When an event I am going to changes time or place, or is cancelled</span></label>
+                <label class="check"><input type="checkbox" id="prefReminders"><span data-i18n="notify.reminders">A reminder the day before an event I am going to</span></label>
+                <label class="check"><input type="checkbox" id="prefNewEvents"><span data-i18n="notify.new-events">When a new event is announced</span></label>
+
+                <h3 class="section-label" data-i18n="notify.this-device">This device</h3>
+                <p class="small" id="pushState"></p>
+                <div class="actions inline">
+                    <button class="btn" type="button" id="pushOn" hidden><span data-icon="bell"></span><span data-i18n="notify.push-on">Turn on notifications here</span></button>
+                    <button class="btn btn-quiet" type="button" id="pushOff" hidden><span data-i18n="notify.push-off">Turn off on this device</span></button>
+                    <button class="btn btn-quiet" type="button" id="pushTest" hidden><span data-i18n="notify.test">Send a test</span></button>
+                </div>
+
+                <div id="notifyTelegramBox" hidden>
+                    <h3 class="section-label" data-i18n="factor.telegram">Telegram</h3>
+                    <label class="check"><input type="checkbox" id="prefTelegram"><span data-i18n="notify.telegram">Also send these to my linked Telegram chat</span></label>
+                    <p class="small muted" id="notifyTelegramNote" hidden data-i18n="notify.telegram-link-first">Link Telegram under Security first.</p>
+                </div>
+                <div class="callout danger" id="notifyError" role="alert"></div>
+            </section>
+
             <section class="glass-card page-card" aria-labelledby="securityTitle">
                 <h2 id="securityTitle" data-i18n="security.title">Security</h2>
-                <p class="muted small" data-i18n="security.lede">Ways to get past the second step when you sign in here. Your password is managed on gftv.asia.</p>
+                <p class="muted small" id="securityLede"></p>
 
                 <h3 class="section-label" data-i18n="factor.totp">Authenticator app</h3>
                 <p id="totpState" class="small"></p>
+                <div class="actions inline">
+                    <button class="btn" type="button" id="totpAdd" hidden><span data-icon="smartphone"></span><span data-i18n="security.totp-add">Set up an authenticator app</span></button>
+                    <button class="btn btn-quiet" type="button" id="totpRemove" hidden><span data-i18n="security.remove">Remove</span></button>
+                </div>
+                <div id="totpSetup" hidden>
+                    <p class="small" data-i18n="setup.totp-help">Scan this with Google Authenticator or any authenticator app, then type the six digit code it shows.</p>
+                    <div class="qr-code" id="totpQr"></div>
+                    <p class="small muted" data-i18n="setup.totp-manual">Or type this key into the app:</p>
+                    <code class="secret" id="totpSecret"></code>
+                    <form id="totpForm" novalidate>
+                        <label class="field u-mt-1">
+                            <span data-i18n="field.code">Six digit code</span>
+                            <input class="code-input" id="totpCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                        </label>
+                        <div class="actions"><button class="btn btn-primary" type="submit" id="totpSubmit"><span data-i18n="setup.confirm">Confirm</span></button></div>
+                    </form>
+                </div>
 
                 <h3 class="section-label" data-i18n="security.passkeys">Passkeys</h3>
                 <ul class="item-list" id="passkeyList"></ul>
@@ -109,6 +149,12 @@
                 </div>
                 <div class="callout danger" id="securityError" role="alert"></div>
             </section>
+
+            <section class="glass-card page-card" id="deleteBox" hidden aria-labelledby="deleteTitle">
+                <h2 id="deleteTitle" data-i18n="account.delete-title">Delete my account</h2>
+                <p class="muted small" data-i18n="account.delete-lede">Removes your account, your RSVPs and your notification settings for good.</p>
+                <div class="actions inline"><button class="btn btn-danger" type="button" id="deleteAccount"><span data-icon="trash"></span><span data-i18n="account.delete">Delete my account</span></button></div>
+            </section>
         </div>
 
         <section class="glass-card page-card loading-card" id="accountLoading" aria-busy="true">
@@ -124,7 +170,7 @@
                 <button class="icon-btn small" type="button" data-close-modal="passwordModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
             </div>
             <form id="passwordModalForm" novalidate>
-                <p class="small" data-i18n="security.password-lede">For your safety, type your GFTV password again.</p>
+                <p class="small" id="passwordModalLede" data-i18n="security.password-lede">For your safety, type your password again.</p>
                 <label class="field u-mt-1" id="passkeyLabelField" hidden>
                     <span data-i18n="field.passkey-label">Name for this passkey (optional)</span>
                     <input id="newPasskeyLabel" type="text" maxlength="60" placeholder="My phone" data-i18n-attr="placeholder:field.passkey-placeholder">
@@ -143,6 +189,7 @@
         <nav>
             <a href="/" data-i18n="footer.events">All events</a>
             <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
         </nav>
         <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
         <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
@@ -170,6 +217,7 @@
         </div>
     </div>
 
+    <script src="/js/vendor/qrcode.js"></script>
     <script type="module" src="/js/pages/account.js"></script>
 </body>
 

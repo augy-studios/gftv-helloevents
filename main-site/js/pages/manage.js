@@ -6,12 +6,13 @@ import { t, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { el, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
 import { iconNode } from '../icons.js';
+import { coverToWebp } from '../cover-upload.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('eventForm');
 
 const TEXT_FIELDS = [
-  'title', 'slug', 'kind', 'summary', 'description', 'coverImageUrl', 'organiserName', 'externalUrl',
+  'title', 'slug', 'kind', 'summary', 'description', 'organiserName', 'externalUrl',
   'timezone', 'startsLocal', 'endsLocal', 'venueName', 'city', 'venueAddress', 'country', 'onlineUrl',
   'priceType', 'currency', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
 ];
@@ -29,6 +30,7 @@ let me = null;
 let events = [];
 let editing = null; // { id, slug } of the event in the form, or null for a new one
 let attendees = [];
+let cover = { url: '', has: false };
 
 function fillTimeZones() {
   const list = $('tzList');
@@ -70,8 +72,48 @@ async function loadList() {
 function setForm(values) {
   for (const name of TEXT_FIELDS) $(`f-${name}`).value = values[name] ?? '';
   for (const name of CHECK_FIELDS) $(`f-${name}`).checked = values[name] === true;
+  cover = { url: values.coverImageUrl || '', has: values.hasCover === true };
+  renderCover();
   syncDependent();
 }
+
+// The cover picture is uploaded on its own (api/manage/cover.js), so a new
+// event is saved first.
+function renderCover() {
+  const box = $('coverPreview');
+  box.replaceChildren();
+  box.classList.toggle('no-image', !cover.has);
+  if (cover.has && cover.url) {
+    box.append(el('img', { src: cover.url, alt: '', referrerpolicy: 'no-referrer' }));
+  } else {
+    box.append(iconNode('image'));
+  }
+  $('coverPick').hidden = !editing;
+  $('coverSaveFirst').hidden = Boolean(editing);
+  $('coverRemove').hidden = !(editing && cover.has);
+  $('coverError').textContent = '';
+}
+
+$('coverFile').addEventListener('change', () => {
+  const file = $('coverFile').files?.[0];
+  $('coverFile').value = '';
+  if (!file || !editing) return;
+  withBusy($('coverPick'), $('coverError'), async () => {
+    const { dataUrl } = await coverToWebp(file);
+    const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl });
+    cover = { url: data.event.coverImageUrl, has: data.event.hasCover };
+    renderCover();
+    $('manageNotice').textContent = t('manage.cover-saved');
+  });
+});
+
+$('coverRemove').addEventListener('click', () => {
+  withBusy($('coverRemove'), $('coverError'), async () => {
+    const data = await post('/api/manage/cover', { id: editing.id, remove: true });
+    cover = { url: '', has: data.event.hasCover };
+    renderCover();
+  });
+});
 
 function readForm() {
   const out = {};
@@ -103,14 +145,14 @@ function renderAttendees() {
         iconNode('user'),
         el('span', { class: 'item-main' }, [
           el('span', { text: a.displayName || a.username }),
-          el('span', { class: 'muted small', text: `${a.username} · ${formatDate(a.rsvpAt)}` }),
+          el('span', { class: 'muted small', text: `${a.username} · ${t(a.staff ? 'role.staff' : 'role.member')} · ${formatDate(a.rsvpAt)}` }),
         ]),
         el('button', {
           class: 'btn btn-small btn-quiet',
           type: 'button',
           text: t('security.remove'),
           'aria-label': t('manage.attendee-remove', { name: a.displayName || a.username }),
-          onclick: () => removeAttendee(a.username),
+          onclick: () => removeAttendee(a.username, a.staff),
         }),
       ])))
   );
@@ -123,6 +165,7 @@ function showEditor(title) {
   $('editorView').hidden = !editing;
   if (editing) $('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
   form.hidden = false;
+  renderCover();
   renderAttendees();
   $('editorTitle').tabIndex = -1;
   $('editorTitle').focus();
@@ -164,9 +207,9 @@ form.addEventListener('submit', (e) => {
   });
 });
 
-async function removeAttendee(username) {
+async function removeAttendee(username, staff) {
   await withBusy(null, $('editorError'), async () => {
-    const data = await post('/api/manage/events', { action: 'remove-attendee', id: editing.id, username });
+    const data = await post('/api/manage/events', { action: 'remove-attendee', id: editing.id, username, staff });
     attendees = data.attendees;
     renderAttendees();
     await loadList();

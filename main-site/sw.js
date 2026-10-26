@@ -14,7 +14,7 @@
 // Analytics, Turnstile). Event pages at /e/<slug> are the event.html shell,
 // which fetches the event itself.
 
-const VERSION = '2026-10-27.1';
+const VERSION = '2026-10-27.2';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 
@@ -24,6 +24,8 @@ const PRECACHE = [
   '/login',
   '/account',
   '/manage',
+  '/signup',
+  '/reset',
   '/404.html',
   '/style.css',
   '/manifest.json',
@@ -55,15 +57,19 @@ const PRECACHE = [
   '/js/format.js',
   '/js/cards.js',
   '/js/vendor/qrcode.js',
+  '/js/cover-upload.js',
+  '/js/push-client.js',
   '/js/pages/home.js',
   '/js/pages/event.js',
   '/js/pages/login.js',
   '/js/pages/account.js',
   '/js/pages/manage.js',
+  '/js/pages/signup.js',
+  '/js/pages/reset.js',
 ];
 
 // The pages that are part of the shell, by their clean path.
-const SHELL_PAGES = new Set(['/', '/event', '/login', '/account', '/manage']);
+const SHELL_PAGES = new Set(['/', '/event', '/login', '/account', '/manage', '/signup', '/reset']);
 const EVENT_PATH = /^\/e\/[a-z0-9-]{3,60}$/;
 
 // A redirected response cannot be served to a navigation, so store a clean copy.
@@ -102,6 +108,45 @@ self.addEventListener('message', (event) => {
   if (type === 'skip-waiting') {
     event.waitUntil(self.skipWaiting().then(() => self.clients.claim()));
   }
+});
+
+// Web Push (api/_lib/push.js): show what the server sent. The payload is
+// { title, body, url, tag }; a notice with the same tag replaces the last.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: 'GFTV HelloEvents', body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(
+    self.registration.showNotification(String(data.title || 'GFTV HelloEvents').slice(0, 120), {
+      body: String(data.body || '').slice(0, 300),
+      tag: typeof data.tag === 'string' ? data.tag.slice(0, 64) : undefined,
+      icon: '/GHE-192.png',
+      badge: '/GHE-192.png',
+      data: { url: typeof data.url === 'string' ? data.url : '/' },
+    })
+  );
+});
+
+// Clicking a notice opens its page, on this site only: a tab already on it
+// is focused, otherwise a new one opens.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  let target = new URL('/', self.location.origin);
+  try {
+    const url = new URL(event.notification.data?.url || '/', self.location.origin);
+    if (url.origin === self.location.origin) target = url;
+  } catch {
+    /* keep the home page */
+  }
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => c.url === target.href);
+      return open ? open.focus() : self.clients.openWindow(target.href);
+    })
+  );
 });
 
 // /login, /login/ and /login.html are the same page.

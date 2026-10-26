@@ -1,7 +1,7 @@
 // An in-memory stand-in for the supabase-js client, covering the query
 // builder calls the API makes, with the schema's unique constraints, foreign
 // key cascades, the generated last_at column and the RPC functions from
-// migrations/001. Adapted from gftv-linktree's tests/fake-db.js. Enough to
+// migrations/001 and 002 (accounts; Storage for cover pictures). Adapted from gftv-linktree's tests/fake-db.js. Enough to
 // drive the routes end to end in tests; not a general PostgREST.
 
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,11 @@ import { randomUUID } from 'node:crypto';
 const now = () => new Date().toISOString();
 
 const DEFAULTS = {
+  gftvevents_accounts: () => ({
+    staff_user_id: null, username: null, display_name: null, email: null, password_hash: null, terms_accepted_at: null,
+    email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true,
+    notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null,
+  }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
   gftvevents_sessions: () => ({ last_seen_at: now(), ip_hash: null }),
   gftvevents_auth_challenges: () => ({ attempts: 0, pending_totp_secret: null, telegram_code_hash: null, telegram_code_expires_at: null, pending_telegram_chat_id: null, pending_telegram_username: null }),
@@ -21,6 +26,7 @@ const DEFAULTS = {
     address_attendees_only: false, city: null, country: null, cover_image_url: null, external_url: null, organiser_name: null,
     price_type: 'free', price_min: null, price_max: null, currency: null, price_note: null, price_hidden: false,
     capacity: null, rsvp_open: true, staff_notes: null, created_by: null, updated_by: null, updated_at: now(),
+    cover_image_url: null, cover_image_path: null, announced_at: null,
   }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
 };
@@ -38,6 +44,7 @@ const PRIMARY = {
   gftvevents_attendees: ['event_id', 'user_id'],
 };
 const UNIQUE = {
+  gftvevents_accounts: ['username', 'email', 'staff_user_id'],
   gftvhello_users: ['username', 'email'],
   gftvevents_sessions: ['token_hash'],
   gftvevents_auth_challenges: ['token_hash'],
@@ -46,21 +53,24 @@ const UNIQUE = {
   gftvevents_events: ['slug'],
 };
 
-const toUser = (column, onDelete = 'cascade') => ({ column, parent: 'gftvhello_users', onDelete });
+// Since migrations/002 every account reference points at gftvevents_accounts.
+const toAccount = (column, onDelete = 'cascade') => ({ column, parent: 'gftvevents_accounts', onDelete });
 // child table -> [{ column, parent, onDelete }]
 const FKS = {
-  gftvevents_sessions: [toUser('user_id')],
-  gftvevents_auth_challenges: [toUser('user_id')],
-  gftvevents_webauthn_challenges: [toUser('user_id')],
-  gftvevents_passkeys: [toUser('user_id')],
-  gftvevents_totp_secrets: [toUser('user_id')],
-  gftvevents_backup_codes: [toUser('user_id')],
-  gftvevents_telegram_links: [toUser('user_id')],
-  gftvevents_telegram_link_tokens: [toUser('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
-  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toUser('user_id')],
-  gftvevents_audit_logs: [toUser('actor_id', 'set null'), { column: 'event_id', parent: 'gftvevents_events', onDelete: 'set null' }],
-  gftvhello_backup_codes: [toUser('user_id')],
+  gftvevents_accounts: [{ column: 'staff_user_id', parent: 'gftvhello_users', onDelete: 'cascade' }],
+  gftvevents_sessions: [toAccount('user_id')],
+  gftvevents_auth_challenges: [toAccount('user_id')],
+  gftvevents_webauthn_challenges: [toAccount('user_id')],
+  gftvevents_passkeys: [toAccount('user_id')],
+  gftvevents_totp_secrets: [toAccount('user_id')],
+  gftvevents_backup_codes: [toAccount('user_id')],
+  gftvevents_telegram_links: [toAccount('user_id')],
+  gftvevents_telegram_link_tokens: [toAccount('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
+  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id')],
+  gftvevents_audit_logs: [toAccount('actor_id', 'set null'), { column: 'event_id', parent: 'gftvevents_events', onDelete: 'set null' }],
+  gftvhello_backup_codes: [{ column: 'user_id', parent: 'gftvhello_users', onDelete: 'cascade' }],
 };
+
 
 function splitTop(s) {
   const parts = [];
@@ -299,7 +309,26 @@ export function createFakeDb() {
     },
   };
 
+  // Supabase Storage: upload and remove, kept in a map of "bucket/path".
+  const objects = new Map();
+  const storage = {
+    from: (bucket) => ({
+      async upload(path, body, opts = {}) {
+        const key = `${bucket}/${path}`;
+        if (objects.has(key) && !opts.upsert) return { data: null, error: { message: 'The resource already exists' } };
+        objects.set(key, { body, contentType: opts.contentType });
+        return { data: { path }, error: null };
+      },
+      async remove(paths) {
+        paths.forEach((p) => objects.delete(`${bucket}/${p}`));
+        return { data: paths.map((name) => ({ name })), error: null };
+      },
+    }),
+  };
+
   return {
+    objects,
+    storage,
     tables,
     table,
     from: (name) => new Query(name),

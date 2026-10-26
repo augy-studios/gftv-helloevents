@@ -9,12 +9,22 @@
     "functions": {
         "api/cron/cleanup.js": {
             "maxDuration": 60
+        },
+        "api/cron/notify.js": {
+            "maxDuration": 300
+        },
+        "api/manage/events.js": {
+            "maxDuration": 60
         }
     },
     "crons": [
         {
             "path": "/api/cron/cleanup",
             "schedule": "30 19 * * *"
+        },
+        {
+            "path": "/api/cron/notify",
+            "schedule": "5 * * * *"
         }
     ],
     "rewrites": [
@@ -29,7 +39,7 @@
             "headers": [
                 {
                     "key": "Content-Security-Policy",
-                    "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.googletagmanager.com; font-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+                    "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data: blob: https://*.supabase.co https://*.googletagmanager.com https://*.google-analytics.com https://*.g.doubleclick.net https://www.google.com; connect-src 'self' https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.googletagmanager.com; font-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
                 },
                 {
                     "key": "Strict-Transport-Security",
@@ -67,7 +77,7 @@
             ]
         },
         {
-            "source": "/(login|account|manage)",
+            "source": "/(login|account|manage|signup|reset)",
             "headers": [
                 {
                     "key": "X-Robots-Tag",

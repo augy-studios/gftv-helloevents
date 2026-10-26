@@ -1,7 +1,8 @@
 // Routes end to end against the in-memory database (fake-db.js), with
-// Telegram's API replaced by a recorder. Covers the 2FA gate, sign in with a
-// shared GFTV account, data minimisation on the public routes, RSVP and
-// capacity, editor roles, the Telegram webhook, and the cross-site checks.
+// Telegram's API replaced by a recorder. Staff accounts: the 2FA rule, sign
+// in with a shared GFTV account, data minimisation on the public routes,
+// RSVP and capacity, editor roles, the Telegram webhook, and the cross-site
+// checks. Public accounts, notifications and covers are in public.test.js.
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +20,6 @@ const { useTestClient } = await import('../api/_lib/supabase.js');
 const { totpAt } = await import('../api/_lib/totp.js');
 const login = (await import('../api/auth/login.js')).default;
 const verify = (await import('../api/auth/verify.js')).default;
-const enrol = (await import('../api/auth/enrol.js')).default;
 const sessionRoute = (await import('../api/auth/session.js')).default;
 const feed = (await import('../api/events/feed.js')).default;
 const detail = (await import('../api/events/detail.js')).default;
@@ -86,47 +86,32 @@ beforeEach(() => {
 // The 2FA gate
 // ---------------------------------------------------------------------------
 
-test('an account with no second factor must set one up, and gets no session before that', async () => {
+test('a staff account with no second factor is refused and told to use gftv.asia, as on OneLink', async () => {
   await addUser({ username: 'newfox' });
   const b = browser();
   const r = await b.call(login, { method: 'POST', body: { identifier: 'newfox', password: PASSWORD } });
-  assert.equal(r.status, 200);
-  assert.equal(r.json.step, 'setup');
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error, 'staff_needs_2fa');
+  assert.equal(r.json.challenge, undefined);
   assert.equal(r.headers['set-cookie'], undefined, 'no cookie after the password alone');
   assert.equal(db.table('gftvevents_sessions').length, 0);
+  assert.equal(db.table('gftvevents_auth_challenges').length, 0);
   assert.equal((await b.call(sessionRoute)).json.signedIn, false);
-
-  // The login challenge cannot be used to skip set-up.
-  const skip = await b.call(verify, { method: 'POST', body: { challenge: r.json.challenge, method: 'backup', code: 'aaaaa-aaaaa' } });
-  assert.equal(skip.status, 401);
-  assert.equal(skip.json.error, 'challenge_expired');
-
-  const start = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'totp-start' } });
-  assert.match(start.json.secret, /^[A-Z2-7]{32}$/);
-  const wrong = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'totp-finish', code: '000000' } });
-  assert.equal(wrong.status, 401);
-  const done = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'totp-finish', code: totpAt(start.json.secret) } });
-  assert.equal(done.status, 200);
-  assert.equal(done.json.backupCodes.length, 10);
-  assert.match(String(done.headers['set-cookie']), /^__Host-ghe_session=.+; Path=\/; Max-Age=\d+; HttpOnly; Secure; SameSite=Strict/);
-  assert.deepEqual(leaks(done.json), []);
-
-  // Stored encrypted, never in the shared table.
-  const stored = db.table('gftvevents_totp_secrets')[0];
-  assert.match(stored.secret_enc, /^v1:/);
+  // Nothing is ever written to the shared account.
   assert.equal(db.table('gftvhello_users')[0].totp_secret, null);
-  // The session token is stored as a hash only.
+});
+
+test('a staff session is a hashed cookie, and the staff account row is made on first sign-in', async () => {
+  const id = await addUser({ username: 'firstfox', totp_secret: SHARED_SECRET });
+  const b = browser();
+  const v = await signIn(b, 'firstfox');
+  assert.match(String(v.headers['set-cookie']), /^__Host-ghe_session=.+; Path=\/; Max-Age=\d+; HttpOnly; Secure; SameSite=Strict/);
   const cookie = b.jar.get('__Host-ghe_session');
   assert.equal(db.table('gftvevents_sessions')[0].token_hash, createHash('sha256').update(cookie).digest('hex'));
-
-  const s = await b.call(sessionRoute);
-  assert.equal(s.json.signedIn, true);
-  assert.deepEqual(leaks(s.json), []);
-
-  // Next time, the factor set up here is asked for.
-  const again = await browser().call(login, { method: 'POST', body: { identifier: 'newfox', password: PASSWORD } });
-  assert.equal(again.json.step, 'verify');
-  assert.equal(again.json.methods.totp, true);
+  const account = db.table('gftvevents_accounts').find((a) => a.id === id);
+  assert.equal(account.kind, 'staff');
+  assert.equal(account.staff_user_id, id);
+  assert.deepEqual(leaks(v.json), []);
 });
 
 test('a staff account with an authenticator on gftv.asia signs in with it here', async () => {
@@ -360,36 +345,16 @@ test('the webhook refuses calls without the secret token header', async () => {
   assert.equal(sent.length, 0);
 });
 
-test('setting up Telegram as the first factor: deep link, code by rich message, then a session', async () => {
-  const userId = await addUser({ username: 'tgfox' });
+test('linking Telegram from the account page, then signing in with it', async () => {
+  const userId = await addUser({ username: 'tgfox', totp_secret: SHARED_SECRET });
   const b = browser();
-  const r = await b.call(login, { method: 'POST', body: { identifier: 'tgfox', password: PASSWORD } });
-  assert.equal(r.json.options.telegram, true);
-  const link = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'telegram-link' } });
-  const token = new URL(link.json.url).searchParams.get('start');
+  await signIn(b, 'tgfox');
+  const link = await b.call(security, { method: 'POST', body: { action: 'telegram-link' } });
   assert.match(link.json.url, /^https:\/\/t\.me\/HelloEventsTestBot\?start=/);
+  const token = new URL(link.json.url).searchParams.get('start');
 
-  // Not ready until Start is pressed.
-  const early = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'telegram-finish', code: '123456' } });
-  assert.equal(early.json.error, 'telegram_not_ready');
-
-  const hook = await browser().call(webhook, {
-    method: 'POST',
-    body: update(`/start ${token}`),
-    headers: { 'x-telegram-bot-api-secret-token': 'test_webhook_secret' },
-  });
+  const hook = await browser().call(webhook, { method: 'POST', body: update(`/start ${token}`), headers: { 'x-telegram-bot-api-secret-token': 'test_webhook_secret' } });
   assert.equal(hook.status, 200);
-  const message = sent.find((m) => m.url.endsWith('/sendRichMessage'));
-  assert.ok(message, 'sent with sendRichMessage');
-  assert.equal(message.body.chat_id, 4242);
-  assert.equal('parse_mode' in message.body, false);
-  assert.match(message.body.rich_message.markdown, /^## Confirm this chat/);
-  const code = message.body.rich_message.markdown.match(/`(\d{6})`/)[1];
-  // Not linked yet: only the code coming back links it.
-  assert.equal(db.table('gftvevents_telegram_links').length, 0);
-
-  const done = await b.call(enrol, { method: 'POST', body: { challenge: r.json.challenge, action: 'telegram-finish', code } });
-  assert.equal(done.status, 200, JSON.stringify(done.json));
   assert.equal(db.table('gftvevents_telegram_links')[0].user_id, userId);
   assert.equal(db.table('gftvevents_telegram_links')[0].chat_id, 4242);
 
@@ -398,18 +363,18 @@ test('setting up Telegram as the first factor: deep link, code by rich message, 
   await browser().call(webhook, { method: 'POST', body: update(`/start ${token}`, 9999), headers: { 'x-telegram-bot-api-secret-token': 'test_webhook_secret' } });
   assert.match(sent[0].body.text, /expired or was already used/);
 
-  // Signing in later with Telegram.
   sent = [];
   const again = browser();
   const r2 = await again.call(login, { method: 'POST', body: { identifier: 'tgfox', password: PASSWORD } });
   assert.equal(r2.json.methods.telegram, true);
   await again.call(verify, { method: 'POST', body: { challenge: r2.json.challenge, method: 'telegram-send' } });
-  const code2 = sent[0].body.rich_message.markdown.match(/`(\d{6})`/)[1];
-  assert.match(sent[0].body.rich_message.markdown, /## Sign-in code/);
-  const v = await again.call(verify, { method: 'POST', body: { challenge: r2.json.challenge, method: 'telegram', code: code2 } });
+  const message = sent.find((m) => m.url.endsWith('/sendRichMessage'));
+  assert.ok(message, 'sent with sendRichMessage');
+  assert.equal('parse_mode' in message.body, false);
+  assert.match(message.body.rich_message.markdown, /## Sign-in code/);
+  const code = message.body.rich_message.markdown.match(/`(\d{6})`/)[1];
+  const v = await again.call(verify, { method: 'POST', body: { challenge: r2.json.challenge, method: 'telegram', code } });
   assert.equal(v.status, 200);
-
-  // /unlink in the chat.
   const sec = await again.call(security);
   assert.equal(sec.json.telegram.linked, true);
   assert.equal(JSON.stringify(sec.json).includes('4242'), false, 'chat id never sent');

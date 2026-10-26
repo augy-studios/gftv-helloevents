@@ -1065,3 +1065,15 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 /* Without a cover picture the event page shows a short band, not a large
    empty frame. */
 .event-cover.large.no-image { aspect-ratio: auto; height: 7.5rem; }
+
+/* manage: the cover picture */
+.cover-field > span:first-child { display: block; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.9375rem; }
+.cover-preview { max-width: 28rem; margin-bottom: 0.4rem; border-radius: var(--radius-sm); }
+.cover-preview.no-image > .icon svg { width: 2rem; height: 2rem; }
+.file-btn { cursor: pointer; }
+.file-btn:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 45%, transparent);
+}
+.check .text-link { display: inline; }

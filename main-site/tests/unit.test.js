@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 process.env.TOTP_ENCRYPTION_KEY = 'a'.repeat(64);
 process.env.SITE_URL = 'https://events.globalfurry.tv';
+process.env.SUPABASE_URL = 'https://project.supabase.co';
 
 const rules = await import('../api/_lib/event-rules.js');
 const ser = await import('../api/_lib/serialize.js');
@@ -20,6 +21,11 @@ const crypto = await import('../api/_lib/crypto.js');
 const tg = await import('../api/_lib/telegram.js');
 const msgs = await import('../api/_lib/telegram-messages.js');
 const users = await import('../api/_lib/users.js');
+const acct = await import('../api/_lib/account-rules.js');
+const push = await import('../api/_lib/push.js');
+const covers = await import('../api/_lib/covers.js');
+const notify = await import('../api/_lib/notify.js');
+const { default: sharp } = await import('sharp');
 
 const HOUR = 3600_000;
 const now = Date.parse('2026-10-26T12:00:00Z');
@@ -127,9 +133,9 @@ test('a good event validates and gets a slug from its title', () => {
 });
 
 test('unknown fields never reach the table', () => {
-  const r = rules.validateEvent(form({ created_by: 'x', id: 'y', staff_only: true, gftvevents_attendees: [] }));
+  const r = rules.validateEvent(form({ created_by: 'x', id: 'y', staff_only: true, gftvevents_attendees: [], coverImageUrl: 'https://evil.example/x.png', cover_image_path: 'x' }));
   assert.equal(r.ok, true);
-  for (const key of ['created_by', 'id', 'staff_only', 'gftvevents_attendees']) assert.equal(key in r.fields, false, key);
+  for (const key of ['created_by', 'id', 'staff_only', 'gftvevents_attendees', 'cover_image_url', 'cover_image_path']) assert.equal(key in r.fields, false, key);
 });
 
 test('bad input is refused with the field named', () => {
@@ -138,8 +144,8 @@ test('bad input is refused with the field named', () => {
   assert.equal(rules.validateEvent(form({ kind: 'party' })).field, 'kind');
   assert.equal(rules.validateEvent(form({ endsLocal: '2027-02-01T10:00' })).field, 'endsLocal');
   assert.equal(rules.validateEvent(form({ startsLocal: '' })).field, 'startsLocal');
-  assert.equal(rules.validateEvent(form({ coverImageUrl: 'http://example.com/a.png' })).field, 'coverImageUrl');
-  assert.equal(rules.validateEvent(form({ coverImageUrl: 'javascript:alert(1)' })).field, 'coverImageUrl');
+  assert.equal(rules.validateEvent(form({ externalUrl: 'http://example.com/a' })).field, 'externalUrl');
+  assert.equal(rules.validateEvent(form({ onlineUrl: 'javascript:alert(1)' })).field, 'onlineUrl');
   assert.equal(rules.validateEvent(form({ externalUrl: 'https://user:pw@example.com' })).field, 'externalUrl');
   assert.equal(rules.validateEvent(form({ priceType: 'paid' })).field, 'priceMin');
   assert.equal(rules.validateEvent(form({ priceType: 'paid', priceMin: '20', priceMax: '10' })).field, 'priceMax');
@@ -210,17 +216,29 @@ test('RSVP state and spaces come from the count', () => {
   assert.equal(ser.publicEventCard(row({ starts_at: '2026-10-01T00:00:00Z', ends_at: null }), now).rsvp, 'over');
 });
 
-test('an attendee is a name and username, never an email or id', () => {
-  const view = ser.attendeeView({ created_at: 'x', user: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } });
-  assert.deepEqual(Object.keys(view).sort(), ['displayName', 'rsvpAt', 'username']);
+test('an attendee is a name, a username and staff or not, never an email or id', () => {
+  const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
+  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'rsvpAt', 'staff', 'username']);
+  assert.equal(staff.staff, true);
+  const member = ser.attendeeView({ user_id: 'p1', created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', staff: false, rsvpAt: 'x' });
+  assert.equal(JSON.stringify(member).includes('example.com'), false);
 });
 
 test('the signed-in view of yourself has no secrets', () => {
   const view = ser.selfView({
-    id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
+    id: 'u1', kind: 'staff', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
     is_admin: false, is_editor: true, is_approved: true, avatar_url: 'http://insecure.example/a.png',
   });
-  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, role: 'editor', canManage: true });
+  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true });
+  const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$' });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false });
+});
+
+test('a public account can never manage events, whatever its row says', () => {
+  assert.equal(users.canManage({ kind: 'public', is_approved: true, is_admin: true, is_editor: true }), false);
+  assert.equal(users.secondFactorRequired({ kind: 'staff' }), true);
+  assert.equal(users.secondFactorRequired({ kind: 'public' }), false);
 });
 
 test('the editor view round-trips the form fields, including staff notes', () => {
@@ -251,11 +269,12 @@ test('no route sends a database result straight out', () => {
 // ---------------------------------------------------------------------------
 
 test('roles follow is_approved, is_editor and is_admin', () => {
-  assert.equal(users.canSignIn({ is_approved: false, is_admin: true }), false);
-  assert.equal(users.canManage({ is_approved: true, is_editor: false, is_admin: false }), false);
-  assert.equal(users.canManage({ is_approved: true, is_editor: true }), true);
-  assert.equal(users.isAdmin({ is_approved: true, is_admin: true }), true);
-  assert.equal(users.roleOf({ is_approved: true }), 'member');
+  assert.equal(users.canSignIn({ kind: 'staff', is_approved: false, is_admin: true }), false);
+  assert.equal(users.canManage({ kind: 'staff', is_approved: true, is_editor: false, is_admin: false }), false);
+  assert.equal(users.canManage({ kind: 'staff', is_approved: true, is_editor: true }), true);
+  assert.equal(users.isAdmin({ kind: 'staff', is_approved: true, is_admin: true }), true);
+  assert.equal(users.roleOf({ kind: 'staff', is_approved: true }), 'staff');
+  assert.equal(users.roleOf({ kind: 'public', is_approved: true }), 'member');
 });
 
 // ---------------------------------------------------------------------------
@@ -315,4 +334,112 @@ test('every rich message carries a plain fallback with the same code', () => {
   assert.ok(m.markdown.includes('fox\\_tail'));
   assert.equal(m.skipEntities, true);
   assert.ok(msgs.helpMessage().fallback.length > 20);
+});
+
+// ---------------------------------------------------------------------------
+// Public accounts (round 3)
+// ---------------------------------------------------------------------------
+
+const signup = (over = {}) => ({ username: 'Snow_Fox', displayName: '  Snow   Fox ', email: ' Snow@Example.com ', password: 'a long enough secret', agree: true, ...over });
+
+test('sign-up input is cleaned and checked', () => {
+  const r = acct.validateSignup(signup());
+  assert.deepEqual(r, { ok: true, fields: { username: 'snow_fox', displayName: 'Snow Fox', email: 'snow@example.com' } });
+  assert.equal(acct.validateSignup(signup({ username: 'ab' })).error, 'username_invalid');
+  assert.equal(acct.validateSignup(signup({ username: 'gftv_admin' })).error, 'username_reserved');
+  assert.equal(acct.validateSignup(signup({ username: 'official' })).error, 'username_reserved');
+  assert.equal(acct.validateSignup(signup({ displayName: '\u200b' })).error, 'display_name_invalid');
+  assert.equal(acct.validateSignup(signup({ email: 'not-an-email' })).error, 'email_invalid');
+  assert.equal(acct.validateSignup(signup({ password: 'short' })).error, 'password_short');
+  assert.equal(acct.validateSignup(signup({ password: 'é'.repeat(40) })).error, 'password_long');
+  assert.equal(acct.validateSignup(signup({ username: 'snow_fox_12', password: 'Snow_Fox_12' })).error, 'password_weak', 'password equals username');
+  assert.equal(acct.validateSignup(signup({ password: 'snow@example.com' })).error, 'password_weak', 'password equals email');
+  assert.equal(acct.validateSignup(signup({ password: 'aaaaaaaaaaaa' })).error, 'password_weak');
+  assert.equal(acct.validateSignup(signup({ agree: 'yes' })).error, 'terms_required');
+});
+
+// ---------------------------------------------------------------------------
+// Push subscriptions
+// ---------------------------------------------------------------------------
+
+const keys = { p256dh: 'B' + 'a'.repeat(86), auth: 'b'.repeat(22) };
+
+test('push endpoints must be a real browser push service (no SSRF)', () => {
+  assert.equal(push.checkSubscription({ endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys }).ok, true);
+  assert.equal(push.checkSubscription({ endpoint: 'https://updates.push.services.mozilla.com/wpush/v2/x', keys }).ok, true);
+  assert.equal(push.checkSubscription({ endpoint: 'https://web.push.apple.com/QH', keys }).ok, true);
+  for (const endpoint of [
+    'http://fcm.googleapis.com/fcm/send/abc',
+    'https://169.254.169.254/latest/meta-data',
+    'https://localhost/x',
+    'https://fcm.googleapis.com.evil.example/x',
+    'https://evilfcm.googleapis.com.example/x',
+    'https://user:pw@fcm.googleapis.com/x',
+    'https://fcm.googleapis.com:8443/x',
+  ]) {
+    assert.equal(push.checkSubscription({ endpoint, keys }).ok, false, endpoint);
+  }
+  assert.equal(push.checkSubscription({ endpoint: 'https://fcm.googleapis.com/x', keys: { p256dh: 'short', auth: keys.auth } }).error, 'push_invalid');
+  const clean = push.checkSubscription({ endpoint: 'https://fcm.googleapis.com/x', keys, expirationTime: 1, extra: 'dropped' });
+  assert.deepEqual(Object.keys(clean.subscription).sort(), ['endpoint', 'keys']);
+});
+
+// ---------------------------------------------------------------------------
+// Cover pictures
+// ---------------------------------------------------------------------------
+
+const picture = (w, h, format) => sharp({ create: { width: w, height: h, channels: 3, background: '#3fa7d6' } })[format]().toBuffer();
+const b64 = (buf, type = 'image/webp') => `data:${type};base64,${buf.toString('base64')}`;
+
+test('a cover must be a real WebP within size and dimension limits', async () => {
+  const good = await covers.prepareCover(b64(await picture(1600, 900, 'webp')));
+  assert.equal(good.ok, true);
+  assert.equal(good.buffer.toString('ascii', 8, 12), 'WEBP');
+  const big = await covers.prepareCover(b64(await picture(2400, 1200, 'webp')));
+  assert.equal(big.ok, true);
+  assert.equal(big.width, 1600, 'stored at most 1600 wide');
+  assert.equal((await covers.prepareCover(b64(await picture(800, 450, 'png'), 'image/png'))).error, 'cover_not_webp');
+  assert.equal((await covers.prepareCover(b64(await picture(800, 450, 'png')))).error, 'cover_not_webp', 'a PNG labelled as WebP');
+  assert.equal((await covers.prepareCover(b64(await picture(2500, 900, 'webp')))).error, 'cover_too_big');
+  assert.equal((await covers.prepareCover(b64(await picture(300, 200, 'webp')))).error, 'cover_too_small');
+  const fake = Buffer.concat([Buffer.from('RIFF\0\0\0\0WEBPVP8 '), Buffer.alloc(64)]);
+  assert.equal((await covers.prepareCover(b64(fake))).error, 'cover_invalid');
+  assert.equal((await covers.prepareCover('data:image/webp;base64,' + 'A'.repeat(1_400_000))).error, 'cover_too_large');
+  assert.equal((await covers.prepareCover('not base64 !!')).error, 'cover_invalid');
+});
+
+test('cover addresses are built from the stored path only', () => {
+  const path = '11111111-1111-4111-8111-111111111111/abcdefghijklmnopqrstuv.webp';
+  assert.equal(covers.coverUrl(path), `https://project.supabase.co/storage/v1/object/public/gftvevents_covers/${path}`);
+  assert.equal(covers.coverUrl('../../etc/passwd'), null);
+  assert.equal(covers.coverUrl(null), null);
+  assert.equal(ser.publicEventCard(row({ cover_image_path: path, cover_image_url: 'https://old.example/a.png' }), now).coverImageUrl, covers.coverUrl(path));
+});
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+test('only a change of time or place, or a cancellation, of a released event is announced', () => {
+  const live = row();
+  assert.equal(notify.changeKind(live, { ...live, title: 'New title' }), null);
+  assert.equal(notify.changeKind(live, { ...live, starts_at: '2026-11-15T06:00:00.000Z' }), 'updated');
+  assert.equal(notify.changeKind(live, { ...live, venue_name: 'Other Hall' }), 'updated');
+  assert.equal(notify.changeKind(live, { ...live, status: 'cancelled' }), 'cancelled');
+  assert.equal(notify.changeKind(row({ status: 'draft' }), row({ status: 'draft', venue_name: 'X' })), null);
+  assert.equal(notify.changeKind(live, { ...live, status: 'draft', venue_name: 'X' }), null, 'unpublished: nothing goes out');
+  assert.equal(notify.changeKind(live, { ...live, starts_at: '2026-11-14T06:00:00Z' }), null, 'same instant, other spelling');
+});
+
+test('a notice carries public fields only', () => {
+  const r = row({ is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
+  for (const kind of ['updated', 'cancelled', 'reminder', 'new']) {
+    const n = notify.noticeFor(kind, r);
+    const text = JSON.stringify(n);
+    assert.equal(text.includes('meet.example.com'), false, kind);
+    assert.equal(text.includes('Secret Road'), false, kind);
+    assert.equal(text.includes('internal only'), false, kind);
+    assert.equal(n.url, 'https://events.globalfurry.tv/e/sg-furmeet');
+  }
+  assert.ok(notify.noticeFor('reminder', row({ dates_hidden: true })).lines.includes('Dates to be announced'));
 });
