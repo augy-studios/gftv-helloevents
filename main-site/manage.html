@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="manage.meta-title">Manage events | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Manage events | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/manage">
+    <link rel="canonical" href="https://events.globalfurry.tv/manage">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="wide">
+        <section class="manage-head">
+            <div>
+                <h1 data-i18n="manage.title">Manage events</h1>
+                <p class="muted" data-i18n="manage.lede">Drafts and events with a release time in the future are seen by editors only.</p>
+            </div>
+            <button class="btn btn-primary" type="button" id="newEvent" hidden><span data-icon="plus"></span><span data-i18n="manage.new">New event</span></button>
+        </section>
+
+        <div class="callout danger" id="manageError" role="alert"></div>
+        <div class="callout ok" id="manageNotice" role="status"></div>
+
+            <form id="eventForm" class="glass-card page-card editor" novalidate hidden aria-labelledby="editorTitle">
+                <div class="row between">
+                    <h2 id="editorTitle"></h2>
+                    <button class="btn btn-small btn-quiet" type="button" id="editorClose"><span data-icon="close"></span><span data-i18n="common.close">Close</span></button>
+                </div>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.basics">Basics</legend>
+                    <div class="form-grid">
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.title">Title</span>
+                            <input id="f-title" name="title" type="text" maxlength="120" required>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.slug">Address</span>
+                            <input id="f-slug" name="slug" type="text" maxlength="60" autocapitalize="none" spellcheck="false" pattern="[a-z0-9]+(-[a-z0-9]+)*">
+                            <span class="field-hint" data-i18n="manage.hint.slug">Lowercase letters, numbers and hyphens. Blank makes one from the title.</span>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.kind">Kind</span>
+                            <select id="f-kind" name="kind">
+                                <option value="furmeet" data-i18n="kind.furmeet">Furmeet</option>
+                                <option value="convention" data-i18n="kind.convention">Convention</option>
+                                <option value="other" data-i18n="kind.other">Other</option>
+                            </select>
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.summary">Short summary</span>
+                            <input id="f-summary" name="summary" type="text" maxlength="280">
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.description">Description</span>
+                            <textarea id="f-description" name="description" maxlength="8000" rows="6"></textarea>
+                            <span class="field-hint" data-i18n="manage.hint.description">Plain text. Line breaks are kept.</span>
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.coverImageUrl">Cover picture address</span>
+                            <input id="f-coverImageUrl" name="coverImageUrl" type="url" maxlength="500" placeholder="https://">
+                            <span class="field-hint" data-i18n="manage.hint.coverImageUrl">An https:// address of a picture, wide rather than tall.</span>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.organiserName">Organiser</span>
+                            <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.externalUrl">Tickets or website</span>
+                            <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://">
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.when">When</legend>
+                    <div class="form-grid">
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.timezone">Time zone</span>
+                            <input id="f-timezone" name="timezone" type="text" list="tzList" maxlength="64" autocapitalize="none" spellcheck="false">
+                            <span class="field-hint" data-i18n="manage.hint.timezone">Where the event happens, for example Asia/Singapore. Times below are in this zone.</span>
+                        </label>
+                        <datalist id="tzList"></datalist>
+                        <label class="field">
+                            <span data-i18n="manage.field.startsLocal">Starts</span>
+                            <input id="f-startsLocal" name="startsLocal" type="datetime-local">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.endsLocal">Ends</span>
+                            <input id="f-endsLocal" name="endsLocal" type="datetime-local">
+                        </label>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-datesHidden" name="datesHidden">
+                            <span data-i18n="manage.field.datesHidden">Dates to be announced: keep the dates off the public page</span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.where">Where</legend>
+                    <div class="form-grid">
+                        <label class="field">
+                            <span data-i18n="manage.field.venueName">Venue</span>
+                            <input id="f-venueName" name="venueName" type="text" maxlength="160">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.city">City</span>
+                            <input id="f-city" name="city" type="text" maxlength="80">
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.venueAddress">Street address</span>
+                            <input id="f-venueAddress" name="venueAddress" type="text" maxlength="300">
+                        </label>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-addressAttendeesOnly" name="addressAttendeesOnly">
+                            <span data-i18n="manage.field.addressAttendeesOnly">Show the street address only to people going</span>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.country">Country</span>
+                            <input id="f-country" name="country" type="text" maxlength="80">
+                        </label>
+                        <span></span>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-isOnline" name="isOnline">
+                            <span data-i18n="manage.field.isOnline">Online, or online too</span>
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.onlineUrl">Online link</span>
+                            <input id="f-onlineUrl" name="onlineUrl" type="url" maxlength="500" placeholder="https://">
+                            <span class="field-hint" data-i18n="manage.hint.onlineUrl">Only people going see this.</span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.price">Price</legend>
+                    <div class="form-grid">
+                        <label class="field">
+                            <span data-i18n="manage.field.priceType">Price</span>
+                            <select id="f-priceType" name="priceType">
+                                <option value="free" data-i18n="manage.price.free">Free</option>
+                                <option value="paid" data-i18n="manage.price.paid">Paid</option>
+                                <option value="tba" data-i18n="manage.price.tba">To be announced</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.currency">Currency</span>
+                            <input id="f-currency" name="currency" type="text" maxlength="3" placeholder="SGD" autocapitalize="characters">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.priceMin">From</span>
+                            <input id="f-priceMin" name="priceMin" type="number" min="0" step="0.01" inputmode="decimal">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.priceMax">Up to (optional)</span>
+                            <input id="f-priceMax" name="priceMax" type="number" min="0" step="0.01" inputmode="decimal">
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.priceNote">Price note</span>
+                            <input id="f-priceNote" name="priceNote" type="text" maxlength="200">
+                        </label>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-priceHidden" name="priceHidden">
+                            <span data-i18n="manage.field.priceHidden">Hide the price: show "to be announced" publicly</span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.rsvp">RSVP and publishing</legend>
+                    <div class="form-grid">
+                        <label class="field">
+                            <span data-i18n="manage.field.capacity">Spaces (blank for no limit)</span>
+                            <input id="f-capacity" name="capacity" type="number" min="1" step="1" inputmode="numeric">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.status">Status</span>
+                            <select id="f-status" name="status">
+                                <option value="draft" data-i18n="status.draft">Draft</option>
+                                <option value="published" data-i18n="status.published">Published</option>
+                                <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
+                            </select>
+                        </label>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
+                            <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
+                            <input id="f-publishLocal" name="publishLocal" type="datetime-local">
+                            <span class="field-hint" data-i18n="manage.hint.publishLocal">A published event stays hidden until this time, in the event time zone.</span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend data-i18n="manage.section.notes">Staff notes</legend>
+                    <label class="field">
+                        <span class="visually-hidden" data-i18n="manage.field.staffNotes">Staff notes</span>
+                        <textarea id="f-staffNotes" name="staffNotes" maxlength="4000" rows="3"></textarea>
+                        <span class="field-hint" data-i18n="manage.hint.staffNotes">Editors only. Never shown on the public page.</span>
+                    </label>
+                </fieldset>
+
+                <div class="callout danger" id="editorError" role="alert"></div>
+                <div class="actions inline">
+                    <button class="btn btn-primary" type="submit" id="editorSave"><span data-icon="check"></span><span data-i18n="manage.save">Save</span></button>
+                    <a class="btn" id="editorView" target="_blank" rel="noopener" hidden><span data-icon="external"></span><span data-i18n="manage.view">View page</span></a>
+                    <button class="btn btn-danger" type="button" id="editorDelete" hidden><span data-icon="trash"></span><span data-i18n="manage.delete">Delete</span></button>
+                </div>
+
+                <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
+                    <h3 id="attendeesTitle" class="section-label"></h3>
+                    <ul class="item-list" id="attendeeList"></ul>
+                </section>
+            </form>
+
+        <section class="glass-card page-card" id="listBox" aria-busy="true">
+            <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
+            <ul class="item-list" id="eventList"></ul>
+            <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
+        </section>
+    </main>
+
+    <div class="modal-backdrop hidden" id="deleteModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+            <div class="modal-head">
+                <h2 id="deleteTitle" data-i18n="manage.delete-title">Delete this event?</h2>
+                <button class="icon-btn small" type="button" data-close-modal="deleteModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <p data-i18n="manage.delete-lede">The event and its RSVP list are removed for good. To keep the record, set it to Cancelled instead.</p>
+            <div class="actions">
+                <button class="btn btn-danger" type="button" id="deleteConfirm"><span data-icon="trash"></span><span data-i18n="manage.delete">Delete</span></button>
+                <button class="btn" type="button" data-close-modal="deleteModal" data-i18n="common.cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/manage.js"></script>
+</body>
+
+</html>

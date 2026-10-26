@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="event.meta-title">Event | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/e/">
+    <link rel="canonical" href="https://events.globalfurry.tv/e/">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <!-- Google tag (gtag.js), public pages only -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-FMCYFTFPEL"></script>
+    <script src="/js/analytics.js"></script>
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="wide">
+        <p class="back-link"><a class="text-link" href="/"><span data-icon="arrow-left"></span><span data-i18n="event.back">All events</span></a></p>
+
+        <section class="glass-card page-card loading-card" id="eventLoading" aria-busy="true">
+            <span class="delayed"><span class="spinner"></span></span>
+            <span data-i18n="event.loading">Loading the event</span>
+        </section>
+
+        <section class="glass-card page-card" id="eventMissing" hidden>
+            <div class="page-head">
+                <h1 data-i18n="event.missing-title">Event not found</h1>
+                <p data-i18n="event.missing-lede">It may have moved, or it is not public yet.</p>
+            </div>
+            <div class="actions"><a class="btn btn-primary" href="/" data-i18n="event.back">All events</a></div>
+        </section>
+        <div class="callout danger" id="eventError" role="alert"></div>
+
+        <article class="event-page" id="eventView" hidden>
+            <div class="callout warn" id="previewNote" hidden data-i18n="event.preview">Preview: this event is not public yet. Only editors can see it.</div>
+
+            <header class="glass-card event-hero">
+                <div class="event-cover large" id="eventCover"></div>
+                <div class="event-hero-body">
+                    <div class="chips" id="eventChips"></div>
+                    <h1 id="eventTitle"></h1>
+                    <p class="lede" id="eventSummary" hidden></p>
+                </div>
+            </header>
+
+            <div class="event-layout">
+                <section class="glass-card event-section">
+                    <h2 data-i18n="event.about">About this event</h2>
+                    <p class="prewrap" id="eventDescription"></p>
+                    <p class="muted small u-mt-1" id="eventOrganiser" hidden></p>
+                </section>
+
+                <aside class="glass-card event-aside" aria-labelledby="factsTitle">
+                    <h2 class="visually-hidden" id="factsTitle" data-i18n="event.facts">Details</h2>
+                    <dl class="facts">
+                        <div><dt><span data-icon="calendar"></span><span data-i18n="event.when">When</span></dt><dd id="factWhen"></dd></div>
+                        <div><dt><span data-icon="map"></span><span data-i18n="event.where">Where</span></dt><dd id="factWhere"></dd></div>
+                        <div><dt><span data-icon="ticket"></span><span data-i18n="event.price">Price</span></dt><dd id="factPrice"></dd></div>
+                        <div><dt><span data-icon="users"></span><span data-i18n="event.going-label">Going</span></dt><dd id="factGoing"></dd></div>
+                    </dl>
+
+                    <div class="rsvp" id="rsvpBox">
+                        <p class="rsvp-status" id="rsvpStatus" hidden><span data-icon="check"></span><span data-i18n="event.you-are-going">You are going</span></p>
+                        <button class="btn btn-primary btn-block" type="button" id="rsvpBtn" hidden></button>
+                        <a class="btn btn-primary btn-block" id="rsvpSignIn" href="/login" hidden><span data-icon="lock"></span><span data-i18n="event.sign-in-to-rsvp">Sign in to RSVP</span></a>
+                        <p class="small muted" id="rsvpNote"></p>
+                        <div class="callout danger" id="rsvpError" role="alert"></div>
+                    </div>
+
+                    <div class="actions">
+                        <a class="btn btn-block" id="externalLink" target="_blank" rel="noopener noreferrer" hidden><span data-icon="external"></span><span data-i18n="event.external">Tickets and website</span></a>
+                        <button class="btn btn-block" type="button" id="shareBtn"><span data-icon="copy"></span><span data-i18n="event.share">Copy link</span></button>
+                        <a class="btn btn-block btn-quiet" id="manageLink" hidden><span data-icon="edit"></span><span data-i18n="event.edit">Edit this event</span></a>
+                    </div>
+                </aside>
+            </div>
+        </article>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/event.js"></script>
+</body>
+
+</html>

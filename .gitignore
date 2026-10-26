@@ -1,0 +1,11 @@
+# Agent worktrees (workspace convention)
+.claude/worktrees/
+
+node_modules/
+.vercel/
+.DS_Store
+
+# Environment files belong to their owner. Only the example is committed.
+.env
+.env.*
+!.env.example

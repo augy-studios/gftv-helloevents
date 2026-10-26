@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="login.meta-title">Sign in | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Sign in | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/login">
+    <link rel="canonical" href="https://events.globalfurry.tv/login">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="center">
+        <section class="glass-card page-card" id="stepPassword">
+            <div class="page-head">
+                <h1 data-i18n="login.title">Sign in</h1>
+                <p data-i18n="login.lede">Use your GFTV staff account, the same one as gftv.asia and links.gftv.asia.</p>
+            </div>
+            <form id="passwordForm" novalidate>
+                <label class="field">
+                    <span data-i18n="field.identifier">Username or email</span>
+                    <input id="identifier" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required>
+                </label>
+                <label class="field">
+                    <span data-i18n="field.password">Password</span>
+                    <input id="password" type="password" autocomplete="current-password" maxlength="200" required>
+                </label>
+                <div class="human-check" id="humanCheck"></div>
+                <div class="callout danger" id="passwordError" role="alert"></div>
+                <div class="actions">
+                    <button class="btn btn-primary" type="submit" id="passwordSubmit"><span data-i18n="common.continue">Continue</span></button>
+                </div>
+            </form>
+            <p class="muted small u-mt-1 u-center" data-i18n="login.forgot">Forgot your password? Reset it on gftv.asia.</p>
+        </section>
+
+        <section class="glass-card page-card" id="stepFactor" hidden>
+            <div class="page-head">
+                <h1 data-i18n="login.factor-title">One more step</h1>
+                <p data-i18n="login.factor-lede">Confirm it is you with one of these.</p>
+            </div>
+            <div class="segmented" role="group" id="methodPicker" aria-label="Second step" data-i18n-attr="aria-label:login.factor-group">
+                <button type="button" data-method="totp" aria-pressed="false" hidden><span data-icon="smartphone"></span><span data-i18n="factor.totp">Authenticator app</span></button>
+                <button type="button" data-method="passkey" aria-pressed="false" hidden><span data-icon="key"></span><span data-i18n="factor.passkey">Passkey</span></button>
+                <button type="button" data-method="telegram" aria-pressed="false" hidden><span data-icon="send"></span><span data-i18n="factor.telegram">Telegram</span></button>
+                <button type="button" data-method="backup" aria-pressed="false" hidden><span data-icon="lifebuoy"></span><span data-i18n="factor.backup">Backup code</span></button>
+            </div>
+
+            <form id="codeForm" novalidate>
+                <p class="small" id="codeHelp"></p>
+                <div class="actions" id="telegramSendRow" hidden>
+                    <button class="btn" type="button" id="telegramSend"><span data-icon="send"></span><span data-i18n="telegram.send">Send me a code</span></button>
+                </div>
+                <label class="field u-mt-1" id="codeField">
+                    <span id="codeLabel" data-i18n="field.code">Six digit code</span>
+                    <input class="code-input" id="code" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required>
+                </label>
+                <div class="actions" id="passkeyRow" hidden>
+                    <button class="btn btn-primary" type="button" id="passkeyUse"><span data-icon="key"></span><span data-i18n="passkey.use">Use my passkey</span></button>
+                </div>
+                <div class="callout danger" id="codeError" role="alert"></div>
+                <div class="actions" id="codeSubmitRow">
+                    <button class="btn btn-primary" type="submit" id="codeSubmit"><span data-i18n="login.submit">Sign in</span></button>
+                </div>
+            </form>
+            <p class="muted small u-mt-1 u-center"><button type="button" class="text-link" id="startOver" data-i18n="login.start-over">Start again</button></p>
+        </section>
+
+        <section class="glass-card page-card" id="stepSetup" hidden>
+            <div class="page-head">
+                <h1 data-i18n="setup.title">Set up a second step</h1>
+                <p data-i18n="setup.lede">Your account has no second step yet. HelloEvents needs one before you can sign in. Pick one; you can add more later.</p>
+            </div>
+            <div class="segmented" role="group" id="setupPicker" aria-label="Second step" data-i18n-attr="aria-label:login.factor-group">
+                <button type="button" data-setup="totp" aria-pressed="false"><span data-icon="smartphone"></span><span data-i18n="factor.totp">Authenticator app</span></button>
+                <button type="button" data-setup="passkey" aria-pressed="false" hidden><span data-icon="key"></span><span data-i18n="factor.passkey">Passkey</span></button>
+                <button type="button" data-setup="telegram" aria-pressed="false" hidden><span data-icon="send"></span><span data-i18n="factor.telegram">Telegram</span></button>
+            </div>
+
+            <div id="setupTotp" hidden>
+                <p class="small" data-i18n="setup.totp-help">Scan this with Google Authenticator or any authenticator app, then type the six digit code it shows.</p>
+                <div class="qr-code" id="totpQr"></div>
+                <p class="small muted" data-i18n="setup.totp-manual">Or type this key into the app:</p>
+                <code class="secret" id="totpSecret"></code>
+                <form id="totpForm" novalidate>
+                    <label class="field u-mt-1">
+                        <span data-i18n="field.code">Six digit code</span>
+                        <input class="code-input" id="totpCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    </label>
+                    <div class="actions"><button class="btn btn-primary" type="submit" id="totpSubmit"><span data-i18n="setup.confirm">Confirm and sign in</span></button></div>
+                </form>
+            </div>
+
+            <div id="setupPasskey" hidden>
+                <p class="small" data-i18n="setup.passkey-help">Your device will ask you to confirm with your face, fingerprint, PIN or a security key. The passkey works on this site only.</p>
+                <label class="field u-mt-1">
+                    <span data-i18n="field.passkey-label">Name for this passkey (optional)</span>
+                    <input id="passkeyLabel" type="text" maxlength="60" placeholder="My phone" data-i18n-attr="placeholder:field.passkey-placeholder">
+                </label>
+                <div class="actions"><button class="btn btn-primary" type="button" id="passkeyCreate"><span data-icon="key"></span><span data-i18n="setup.passkey-create">Create a passkey</span></button></div>
+            </div>
+
+            <div id="setupTelegram" hidden>
+                <ol class="steps-list small">
+                    <li data-i18n="setup.telegram-1">Open the HelloEvents bot in Telegram with the button below.</li>
+                    <li data-i18n="setup.telegram-2">Press Start. The bot sends you a six digit code.</li>
+                    <li data-i18n="setup.telegram-3">Type the code here.</li>
+                </ol>
+                <div class="actions"><a class="btn" id="telegramOpen" target="_blank" rel="noopener noreferrer" hidden><span data-icon="send"></span><span data-i18n="setup.telegram-open">Open Telegram</span></a></div>
+                <form id="telegramForm" novalidate>
+                    <label class="field u-mt-1">
+                        <span data-i18n="field.telegram-code">Code from Telegram</span>
+                        <input class="code-input" id="telegramCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                    </label>
+                    <div class="actions"><button class="btn btn-primary" type="submit" id="telegramSubmit"><span data-i18n="setup.confirm">Confirm and sign in</span></button></div>
+                </form>
+            </div>
+
+            <div class="callout danger" id="setupError" role="alert"></div>
+            <p class="muted small u-mt-1 u-center"><button type="button" class="text-link" id="setupStartOver" data-i18n="login.start-over">Start again</button></p>
+        </section>
+
+        <section class="glass-card page-card" id="stepCodes" hidden>
+            <div class="page-head">
+                <h1 data-i18n="codes.title">Save your backup codes</h1>
+                <p data-i18n="codes.lede">Each code gets you past the second step once, if you lose your phone or passkey. They are shown only now.</p>
+            </div>
+                <ol class="codes" id="codesList"></ol>
+                <div class="actions inline">
+                    <button class="btn" type="button" id="codesCopy"><span data-icon="copy"></span><span data-i18n="codes.copy">Copy</span></button>
+                    <button class="btn" type="button" id="codesDownload"><span data-icon="download"></span><span data-i18n="codes.download">Download</span></button>
+                </div>
+            <div class="actions">
+                <button class="btn btn-primary" type="button" id="codesDone"><span data-i18n="codes.done">I have saved them</span></button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script src="/js/vendor/qrcode.js"></script>
+    <script type="module" src="/js/pages/login.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "gftv-helloevents",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GFTV HelloEvents at events.globalfurry.tv: CE furmeets and furry conventions. Static frontend with no build step, plus Vercel serverless functions under api/.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^13.1.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "scripts": {
+    "check-i18n": "node assets/i18n/check-keys.js --scan",
+    "check-sw": "node scripts/check-sw.js",
+    "test": "node --test \"tests/**/*.test.js\""
+  }
+}
