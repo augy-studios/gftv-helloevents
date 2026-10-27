@@ -1,8 +1,9 @@
 // GET /api/public/config -> { turnstileSiteKey, telegram }
 //
-// What the sign-in page needs to draw itself: the Turnstile site key (public
-// by design; the secret key never leaves the server), or null when Turnstile
-// is off, and whether the Telegram option exists at all.
+// What the sign-in, sign-up and reset pages need to draw themselves: the
+// Turnstile site key (public by design; the secret never leaves the server),
+// or null when the check is skipped (no TURNSTILE_SECRET outside
+// production; turnstile.js), and whether the Telegram option exists at all.
 
 import { route, guard, ok } from '../_lib/http.js';
 import { turnstileSiteKey } from '../_lib/turnstile.js';

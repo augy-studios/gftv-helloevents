@@ -12,7 +12,7 @@ import { humanCheck } from '../turnstile.js';
 const $ = (id) => document.getElementById(id);
 let challenge = null;
 let method = null;
-const check = humanCheck($('humanCheck'), 'login');
+const check = humanCheck($('humanCheck'));
 
 // Only a path on this site, so ?next= cannot send anyone elsewhere.
 function nextPath() {
@@ -53,7 +53,7 @@ $('passwordForm').addEventListener('submit', (e) => {
       const data = await post('/api/auth/login', {
         identifier: $('identifier').value,
         password: $('password').value,
-        humanCheck: await check.token(),
+        ...(await check.fields()),
       });
       challenge = data.challenge;
       $('password').value = '';

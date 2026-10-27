@@ -1,4 +1,4 @@
-// POST /api/auth/login  { identifier, password, humanCheck? }
+// POST /api/auth/login  { identifier, password, "cf-turnstile-response"? }
 //
 // Step one of signing in, for both kinds of account (users.js): a staff
 // account on gftvhello_users, or a public account made on this site.
@@ -15,6 +15,9 @@
 // The same answer, invalid_credentials, for an unknown account and a wrong
 // password. Both lookups always cost a bcrypt comparison, real or dummy, so
 // the time taken does not say which kind of account a name belongs to.
+//
+// Turnstile (action "login", turnstile.js) runs after the rate limit and
+// before any account is looked up.
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { verifyPassword, sha256 } from '../_lib/crypto.js';
@@ -32,7 +35,7 @@ export default route('auth/login', async (req, res) => {
 
   const identifier = String(body.identifier ?? '').trim().toLowerCase();
   if (await limited(req, res, 'login', [`id:${sha256(identifier)}`])) return;
-  if (await refusedForTurnstile(req, res, body.humanCheck, 'login')) return;
+  if (await refusedForTurnstile(req, res, body, 'login')) return;
 
   const { staff, member } = await findForLogin(identifier);
   const [staffOk, memberOk] = await Promise.all([

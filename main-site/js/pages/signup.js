@@ -7,7 +7,7 @@ import { withBusy } from '../ui.js';
 import { humanCheck } from '../turnstile.js';
 
 const $ = (id) => document.getElementById(id);
-const check = humanCheck($('humanCheck'), 'signup');
+const check = humanCheck($('humanCheck'));
 
 function nextPath() {
   const next = new URLSearchParams(location.search).get('next') || '';
@@ -33,7 +33,7 @@ $('signupForm').addEventListener('submit', (e) => {
         email: $('email').value,
         password: $('password').value,
         agree: $('agree').checked,
-        humanCheck: await check.token(),
+        ...(await check.fields()),
       });
       $('password').value = '';
       location.replace(nextPath());

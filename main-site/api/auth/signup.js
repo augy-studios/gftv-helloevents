@@ -1,10 +1,10 @@
-// POST /api/auth/signup { username, displayName, email, password, agree, humanCheck? }
+// POST /api/auth/signup { username, displayName, email, password, agree, "cf-turnstile-response"? }
 //
 // A public account, for RSVPs and notifications. Signs the new account in
 // straight away (2FA is optional for public accounts; the account page
 // offers it). -> { user }
 //
-// Protected by Turnstile (action "signup", when the keys are set) and rate
+// Protected by Turnstile (action "signup", turnstile.js) and rate
 // limits on the connection and the email. The connection limit is 5 an hour,
 // or what a staff member set for it in /manage ("venue mode", a sign-up
 // allowance for one connection for a few hours; migrations/003).
@@ -36,7 +36,7 @@ export default route('auth/signup', async (req, res) => {
   const allowance = await signupAllowance(req);
   const subjects = [`email:${sha256(String(body.email ?? '').trim().toLowerCase())}`];
   if (await limited(req, res, 'signup', subjects, allowance ? { max: allowance.max_per_hour } : {})) return;
-  if (await refusedForTurnstile(req, res, body.humanCheck, 'signup')) return;
+  if (await refusedForTurnstile(req, res, body, 'signup')) return;
 
   const check = validateSignup(body);
   if (!check.ok) return fail(res, 400, check.error);

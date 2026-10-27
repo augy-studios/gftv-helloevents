@@ -264,6 +264,7 @@
   "error.telegram_not_linked": "No Telegram chat is linked to this account.",
   "error.human_check_failed": "The are-you-a-person check did not pass. Try again.",
   "error.human_check_pending": "Wait for the are-you-a-person check to finish.",
+  "error.human_check_unavailable": "The are-you-a-person check is not working on our side right now, so this cannot go through. Try again later.",
   "error.password_wrong": "That password is not right.",
   "error.last_factor": "This is your only second step. Add another one before removing it.",
   "error.not_found": "That event is not here any more.",

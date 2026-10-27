@@ -11,7 +11,11 @@
 //               neither Telegram nor 2FA (migrations/003), after checking
 //               who they are some other way.
 //
-//   start            { identifier }  -> { found, staff?, challenge?, telegram, backup, factor }
+//   start            { identifier, "cf-turnstile-response"? }
+//                       -> { found, staff?, challenge?, telegram, backup, factor }
+//                    Turnstile, action "reset" (turnstile.js). Every later
+//                    step needs the challenge this hands out, so one check
+//                    covers each reset, whichever way it goes.
 //   send             { challenge }                       Telegram code
 //   passkey-options  { challenge, telegramCode }  -> { options }
 //   finish           { challenge, method, newPassword, ... }
@@ -27,6 +31,7 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
 import { hashPassword, sha256, normaliseCode } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
+import { refusedForTurnstile } from '../_lib/turnstile.js';
 import { telegramConfigured, sendTelegram, linkedChat } from '../_lib/telegram.js';
 import { authenticationOptions, finishAuthentication } from '../_lib/webauthn.js';
 import { methodsFor, hasSecondFactor, totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
@@ -66,6 +71,7 @@ export default route('auth/recover', async (req, res) => {
   if (body.action === 'start') {
     const identifier = String(body.identifier ?? '').trim().toLowerCase().slice(0, 254);
     if (await limited(req, res, 'recover', [`id:${sha256(identifier)}`])) return;
+    if (await refusedForTurnstile(req, res, body, 'reset')) return;
     const { staff, member } = await findForLogin(identifier);
     if (!member && staff) return ok(res, { found: true, staff: true });
     if (!member || !canSignIn(member)) return ok(res, { found: false });
