@@ -1,0 +1,13 @@
+{
+  "name": "gftv-helloevents-tools",
+  "private": true,
+  "description": "Local tooling only, never deployed: renders the app icon.",
+  "type": "module",
+  "scripts": {
+    "icons": "node make-icons.mjs"
+  },
+  "devDependencies": {
+    "opentype.js": "^1.3.4",
+    "sharp": "^0.34.5"
+  }
+}

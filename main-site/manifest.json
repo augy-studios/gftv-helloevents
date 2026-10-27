@@ -1,44 +1,70 @@
 {
-    "name": "GFTV HelloEvents by UwU Apps",
-    "short_name": "GFTV HelloEvents",
-    "description": "A simple helloevents app; view live helloevents at a glance!",
-    "icons": [{
-            "src": "GHE-192.png",
+    "name": "GFTV HelloEvents",
+    "short_name": "HelloEvents",
+    "description": "Find furmeets and furry conventions, and RSVP. By Global Furry Television.",
+    "id": "helloevents",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+    "orientation": "any",
+    "theme_color": "#ffffff",
+    "background_color": "#ffffff",
+    "dir": "ltr",
+    "lang": "en",
+    "icons": [
+        {
+            "src": "/GHE-192.png",
             "type": "image/png",
-            "sizes": "192x192"
+            "sizes": "192x192",
+            "purpose": "any"
         },
         {
-            "src": "GHE-512.png",
+            "src": "/GHE-512.png",
             "type": "image/png",
-            "sizes": "512x512"
+            "sizes": "512x512",
+            "purpose": "any"
+        },
+        {
+            "src": "/GHE-192.png",
+            "type": "image/png",
+            "sizes": "192x192",
+            "purpose": "maskable"
+        },
+        {
+            "src": "/GHE-512.png",
+            "type": "image/png",
+            "sizes": "512x512",
+            "purpose": "maskable"
         }
     ],
-    "screenshots": [{
+    "screenshots": [
+        {
             "src": "/images/screenshot_1.png",
             "type": "image/png",
             "sizes": "1080x2340",
-            "form_factor": "narrow"
+            "form_factor": "narrow",
+            "label": "GFTV HelloEvents event list on a phone"
         },
         {
             "src": "/images/screenshot_2.png",
             "type": "image/png",
             "sizes": "1920x1080",
-            "form_factor": "wide"
+            "form_factor": "wide",
+            "label": "GFTV HelloEvents event list on a computer"
         }
     ],
-    "start_url": "/",
-    "theme_color": "#cfc",
-    "background_color": "#cfc",
-    "display": "standalone",
-    "display_override": ["fullscreen", "minimal-ui", "window-controls-overlay"],
-    "orientation": "any",
-    "id": "helloevents",
-    "dir": "ltr",
-    "scope": "/",
-    "lang": "en",
+    "shortcuts": [
+        {
+            "name": "My events",
+            "short_name": "My events",
+            "url": "/account",
+            "icons": [{ "src": "/GHE-192.png", "sizes": "192x192", "type": "image/png" }]
+        }
+    ],
     "categories": [
         "entertainment",
         "lifestyle",
-        "utilities"
+        "social"
     ]
 }
