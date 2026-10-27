@@ -54,6 +54,9 @@ the functions with the service role key. No Supabase Auth, no request signing.
 
 ## Setup, in order
 
+The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own step-by-step guide,
+[`../SETUP.md`](../SETUP.md). Steps 6 and 7 below are the short version.
+
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
    then `003_resets_signup_allowances_name_filters.sql`.
@@ -61,7 +64,8 @@ the functions with the service role key. No Supabase Auth, no request signing.
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
    if used). Required: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `TOTP_ENCRYPTION_KEY`, `IP_HASH_SALT`,
-   `CRON_SECRET`. Optional: Telegram, Turnstile, Web Push (`VAPID_*`) and Redis. Make random values
+   `CRON_SECRET`, and in Production `TURNSTILE_SECRET` and `TURNSTILE_HOSTNAMES` (step 7). Optional:
+   Telegram, Web Push (`VAPID_*`) and Redis. Make random values
    with `openssl rand -hex 32`, and the push keys with `npx web-push generate-vapid-keys`.
 3. **Redis (for push).** Vercel > Storage > Upstash for Redis (Marketplace), create a database and
    connect it to this project. Vercel sets `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
@@ -71,8 +75,9 @@ the functions with the service role key. No Supabase Auth, no request signing.
 5. **Domain.** Add `events.globalfurry.tv` to the Vercel project. Passkeys are bound to this
    hostname (`SITE_URL`), so they do not work on preview URLs.
 6. **Telegram (optional).** Make a new bot with @BotFather (not the OneLink one: a bot has one
-   webhook), set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` and `TELEGRAM_WEBHOOK_SECRET`, deploy,
-   then point the bot at the site:
+   webhook; [`../SETUP.md`](../SETUP.md) walks through BotFather, the command list and testing),
+   set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` and `TELEGRAM_WEBHOOK_SECRET`, deploy, then
+   point the bot at the site:
 
    ```sh
    curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
@@ -83,8 +88,13 @@ the functions with the service role key. No Supabase Auth, no request signing.
    Check it with `curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"`. Messages
    go out with `sendRichMessage` (Bot API 10.1 Rich Messages) and fall back to a plain message.
    Without Telegram, members reset a forgotten password with a backup code or a code from an admin.
-7. **Turnstile (optional).** Add `events.globalfurry.tv` to a Turnstile widget and set both keys. It
-   then guards sign-in and sign-up.
+7. **Turnstile.** The widget exists and its site key is built in (`api/_lib/turnstile.js`). In
+   Cloudflare, check `events.globalfurry.tv` is on the widget's hostnames; in Vercel (Production)
+   set `TURNSTILE_SECRET` to the widget's secret and `TURNSTILE_HOSTNAMES=events.globalfurry.tv`,
+   then redeploy. It guards sign-in, sign-up and starting a password reset (actions `login`,
+   `signup`, `reset`). Production without the secret refuses those forms (fail closed); local and
+   preview deploys without it skip the check and show no widget. See [`../SETUP.md`](../SETUP.md)
+   section 6.
 8. **Android app link.** `.well-known/assetlinks.json` names `tv.globalfurry.events`; replace the
    placeholder fingerprint with the app signing key's SHA-256 before it is relied on.
 

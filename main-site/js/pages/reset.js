@@ -8,12 +8,15 @@ import { t, onChange } from '../../assets/i18n/i18n.js';
 import { post } from '../api.js';
 import { withBusy, toast } from '../ui.js';
 import { passkeysSupported, usePasskey, passkeyErrorCode } from '../passkeys.js';
+import { humanCheck } from '../turnstile.js';
 
 const $ = (id) => document.getElementById(id);
 let challenge = null;
 let way = null;
 let factor = null;
 let needsFactor = false;
+// Turnstile on the first step only: every later step needs its challenge.
+const check = humanCheck($('humanCheck'));
 
 function pickFactor(name) {
   factor = name;
@@ -37,7 +40,12 @@ $('startForm').addEventListener('submit', (e) => {
   $('notFound').hidden = true;
   $('staffNote').hidden = true;
   withBusy($('startSubmit'), $('startError'), async () => {
-    const data = await post('/api/auth/recover', { action: 'start', identifier: $('identifier').value });
+    let data;
+    try {
+      data = await post('/api/auth/recover', { action: 'start', identifier: $('identifier').value, ...(await check.fields()) });
+    } finally {
+      check.reset();
+    }
     if (data.staff) { $('staffNote').hidden = false; return; }
     if (!data.found) { $('notFound').hidden = false; return; }
     challenge = data.challenge;
