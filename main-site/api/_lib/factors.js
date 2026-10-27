@@ -193,3 +193,13 @@ export async function telegramCodeOk(challenge, typed) {
   if (digits.length !== 6) return false;
   return bcrypt.compare(digits, challenge.telegram_code_hash);
 }
+
+// After a second factor is added (authenticator or passkey): ten backup
+// codes if the account has none to fall back on, so everyone who turns 2FA
+// on can get back in, and can reset a forgotten password with one
+// (recover.js). Returns the plain codes to show once, or null.
+export async function backupCodesForNewFactor(account) {
+  if ((await localBackupCount(account.id)) > 0) return null;
+  if ((await sharedBackupCount(account)) > 0) return null;
+  return issueBackupCodes(account.id);
+}

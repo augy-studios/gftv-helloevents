@@ -175,7 +175,9 @@ test('state-changing requests from another origin, or not JSON, are refused', as
 // ---------------------------------------------------------------------------
 
 test('the feed shows released events only, with hidden prices and dates kept back', async () => {
-  addEvent({ slug: 'live-one', price_type: 'paid', price_min: 30, currency: 'SGD', price_hidden: true, staff_notes: 'secret note' });
+  // A fixed start and a distinctive hidden price, so the "no price leaked"
+  // check below cannot match digits that happen to be in a timestamp.
+  addEvent({ slug: 'live-one', starts_at: '2099-03-14T10:00:00.000Z', price_type: 'paid', price_min: 98765.43, currency: 'XTS', price_hidden: true, staff_notes: 'secret note' });
   addEvent({ slug: 'a-draft', status: 'draft' });
   addEvent({ slug: 'not-yet', publish_at: new Date(Date.now() + 3600_000).toISOString() });
   addEvent({ slug: 'tba-one', dates_hidden: true, starts_at: '2027-05-01T00:00:00.000Z' });
@@ -186,7 +188,8 @@ test('the feed shows released events only, with hidden prices and dates kept bac
   assert.deepEqual(upcoming.json.events.map((e) => e.slug), ['live-one']);
   assert.deepEqual(upcoming.json.events[0].price, { type: 'tba' });
   assert.equal(JSON.stringify(upcoming.json).includes('secret note'), false);
-  assert.equal(JSON.stringify(upcoming.json).includes('30'), false);
+  assert.equal(JSON.stringify(upcoming.json).includes('98765'), false, 'hidden price amount');
+  assert.equal(JSON.stringify(upcoming.json).includes('XTS'), false, 'hidden price currency');
   assert.deepEqual(leaks(upcoming.json), []);
   assert.match(upcoming.headers['cache-control'], /s-maxage=60/);
 

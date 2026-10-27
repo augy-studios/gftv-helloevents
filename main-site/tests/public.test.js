@@ -281,7 +281,11 @@ test('reset needs the second factor too when there is one; staff and accounts wi
   assert.equal(withIt.status, 200);
 
   await member(browser(), { username: 'nochat', email: 'nochat@example.com' });
-  assert.deepEqual((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'nochat' } })).json, { ok: true, telegram: false });
+  const none = (await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'nochat' } })).json;
+  assert.equal(none.found, true);
+  assert.equal(none.telegram, false);
+  assert.equal(none.backup, false, 'no 2FA, so only a staff code can reset it');
+  assert.equal((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'nobody-here' } })).json.found, false);
   await staff('stafffox');
   assert.equal((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'stafffox' } })).json.staff, true);
 });

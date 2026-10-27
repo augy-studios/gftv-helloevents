@@ -14,7 +14,7 @@
 // Analytics, Turnstile). Event pages at /e/<slug> are the event.html shell,
 // which fetches the event itself.
 
-const VERSION = '2026-10-27.2';
+const VERSION = '2026-10-28.1';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 
@@ -59,6 +59,7 @@ const PRECACHE = [
   '/js/vendor/qrcode.js',
   '/js/cover-upload.js',
   '/js/push-client.js',
+  '/js/manage-tools.js',
   '/js/pages/home.js',
   '/js/pages/event.js',
   '/js/pages/login.js',

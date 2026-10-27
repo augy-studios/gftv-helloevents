@@ -33,6 +33,9 @@ function renderProfile() {
     $('avatar').hidden = false;
   }
   $('deleteBox').hidden = me.kind !== 'public';
+  // Staff names come from gftv.asia.
+  $('nameForm').hidden = me.kind !== 'public';
+  if (document.activeElement !== $('nameInput')) $('nameInput').value = me.displayName;
 }
 
 function renderRsvps() {
@@ -208,7 +211,10 @@ $('passwordModalForm').addEventListener('submit', (e) => {
       } catch (cause) {
         throw Object.assign(new Error('passkey'), { code: passkeyErrorCode(cause) });
       }
-      security = await post('/api/me/security', { action: 'passkey-finish', response, label: $('newPasskeyLabel').value });
+      const { codes, ...rest } = await post('/api/me/security', { action: 'passkey-finish', response, label: $('newPasskeyLabel').value });
+      security = rest;
+      // A first passkey that turns 2FA on comes with backup codes.
+      if (codes) showNewCodes(codes);
       $('newPasskeyLabel').value = '';
     } else if (action.kind === 'passkey-remove') {
       security = await post('/api/me/security', { action: 'passkey-remove', id: action.id, password });
@@ -248,6 +254,16 @@ $('totpForm').addEventListener('submit', (e) => {
     security = rest;
     if (codes) showNewCodes(codes);
     renderSecurity();
+  });
+});
+
+$('nameForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  withBusy($('nameSubmit'), $('nameError'), async () => {
+    const { user } = await post('/api/me/profile', { displayName: $('nameInput').value });
+    me = user;
+    renderProfile();
+    $('accountNotice').textContent = t('account.name-saved');
   });
 });
 

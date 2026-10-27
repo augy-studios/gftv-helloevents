@@ -27,7 +27,7 @@ import { db, T } from '../_lib/supabase.js';
 import { requireUser, createChallenge, findChallenge, updateChallenge, failChallengeAttempt, deleteChallenge, endSession } from '../_lib/session.js';
 import { loadAccount, secondFactorRequired } from '../_lib/users.js';
 import { listPasskeys, registrationOptions, finishRegistration, removePasskey } from '../_lib/webauthn.js';
-import { methodsFor, hasSecondFactor, issueBackupCodes, localBackupCount, hasLocalTotp, saveEventsTotp } from '../_lib/factors.js';
+import { methodsFor, hasSecondFactor, issueBackupCodes, localBackupCount, hasLocalTotp, saveEventsTotp, backupCodesForNewFactor } from '../_lib/factors.js';
 import { createLinkToken, linkedChat, telegramConfigured } from '../_lib/telegram.js';
 import { generateTotpSecret, verifyTotp, otpauthUri } from '../_lib/totp.js';
 import { forgetAllSubscriptions } from '../_lib/push.js';
@@ -109,8 +109,7 @@ export default route('me/security', async (req, res) => {
       }
       await saveEventsTotp(userId, secret);
       await deleteChallenge(challenge);
-      // The first factor on a public account comes with backup codes.
-      const codes = (await localBackupCount(userId)) === 0 ? await issueBackupCodes(userId) : null;
+      const codes = await backupCodesForNewFactor(user);
       await audit(req, { action: 'security.totp_added', actorId: userId });
       return ok(res, { ...(await summary(userId)), codes });
     }
@@ -131,7 +130,8 @@ export default route('me/security', async (req, res) => {
       const result = await finishRegistration(userId, body.response, name);
       if (!result.ok) return fail(res, 400, result.error);
       await audit(req, { action: 'security.passkey_added', actorId: userId });
-      return ok(res, await summary(userId));
+      const codes = await backupCodesForNewFactor(user);
+      return ok(res, { ...(await summary(userId)), codes });
     }
     case 'passkey-remove': {
       if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');

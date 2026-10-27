@@ -64,6 +64,14 @@
                     <button class="btn" type="button" id="signOut"><span data-icon="logout"></span><span data-i18n="account.sign-out">Sign out</span></button>
                     <button class="btn btn-quiet" type="button" id="signOutOthers"><span data-i18n="account.sign-out-others">Sign out everywhere else</span></button>
                 </div>
+                <form class="u-mt-1" id="nameForm" novalidate hidden>
+                    <label class="field">
+                        <span data-i18n="field.display-name">Display name</span>
+                        <input id="nameInput" type="text" autocomplete="nickname" maxlength="60" required>
+                    </label>
+                    <div class="actions inline"><button class="btn" type="submit" id="nameSubmit"><span data-i18n="account.name-save">Save display name</span></button></div>
+                    <div class="callout danger" id="nameError" role="alert"></div>
+                </form>
                 <div class="callout ok" id="accountNotice" role="status"></div>
             </section>
 

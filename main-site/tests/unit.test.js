@@ -25,6 +25,7 @@ const acct = await import('../api/_lib/account-rules.js');
 const push = await import('../api/_lib/push.js');
 const covers = await import('../api/_lib/covers.js');
 const notify = await import('../api/_lib/notify.js');
+const names = await import('../api/_lib/name-filter.js');
 const { default: sharp } = await import('sharp');
 
 const HOUR = 3600_000;
@@ -178,10 +179,10 @@ test('public cards and pages never carry staff notes, ids, creators or raw colum
 });
 
 test('a hidden price goes out as "to be announced", without the amounts', () => {
-  const card = ser.publicEventCard(row({ price_hidden: true }), now);
+  const card = ser.publicEventCard(row({ price_hidden: true, price_min: 98765.43, price_max: 98999, currency: 'XTS' }), now);
   assert.deepEqual(card.price, { type: 'tba' });
-  assert.equal(json(card).includes('25'), false);
-  assert.equal(json(card).includes('SGD'), false);
+  assert.equal(json(card).includes('98765'), false);
+  assert.equal(json(card).includes('XTS'), false);
 });
 
 test('dates to be announced go out without the stored dates', () => {
@@ -346,8 +347,6 @@ test('sign-up input is cleaned and checked', () => {
   const r = acct.validateSignup(signup());
   assert.deepEqual(r, { ok: true, fields: { username: 'snow_fox', displayName: 'Snow Fox', email: 'snow@example.com' } });
   assert.equal(acct.validateSignup(signup({ username: 'ab' })).error, 'username_invalid');
-  assert.equal(acct.validateSignup(signup({ username: 'gftv_admin' })).error, 'username_reserved');
-  assert.equal(acct.validateSignup(signup({ username: 'official' })).error, 'username_reserved');
   assert.equal(acct.validateSignup(signup({ displayName: '\u200b' })).error, 'display_name_invalid');
   assert.equal(acct.validateSignup(signup({ email: 'not-an-email' })).error, 'email_invalid');
   assert.equal(acct.validateSignup(signup({ password: 'short' })).error, 'password_short');
@@ -442,4 +441,32 @@ test('a notice carries public fields only', () => {
     assert.equal(n.url, 'https://events.globalfurry.tv/e/sg-furmeet');
   }
   assert.ok(notify.noticeFor('reminder', row({ dates_hidden: true })).lines.includes('Dates to be announced'));
+});
+
+// ---------------------------------------------------------------------------
+// Name filter (round 4)
+// ---------------------------------------------------------------------------
+
+test('names that look like staff are caught through case, spacing, accents, leetspeak and look-alikes', () => {
+  for (const name of ['Staff', 'GFTV Staff', 'S.T.A.F.F', 's t a f f', '5taff', '$taff', 'St\u00e4ff', '\u0405taff', 'Off1c1al', '0FFICIAL', '\u043e\u0066ficial',
+    'gftv_fan', 'G F T V', 'gf7v', 'Global Furry', 'The Admin', 'adm1n', '4dmin', 'Moderator Wolf', 'Mod', 'm0d', 'Mods Team', 'HelloEvents Team', 'S\u200btaff']) {
+    assert.ok(names.blockedTerm(name), name);
+  }
+  for (const name of ['Snow Fox', 'Admiral Otter', 'Modesty', 'Devon', 'Gmail Fox', 'Stuffed Bear', 'Moddy']) {
+    assert.equal(names.blockedTerm(name), null, name);
+  }
+});
+
+test('the admin list matches the same way, by its folded form', () => {
+  assert.equal(names.fold('Pr1de Gu4rd'), 'prideguard');
+  assert.equal(names.blockedTerm('The PRIDE guard', ['prideguard']), 'prideguard');
+  assert.equal(names.blockedTerm('pr!de_gu@rd', ['prideguard']), 'prideguard');
+  assert.equal(names.blockedTerm('Pride parade', ['prideguard']), null);
+  assert.equal(names.blockedTerm('xx', ['x']), null, 'words under 3 letters are ignored');
+});
+
+test('an admin reset code is three groups of five unambiguous characters', () => {
+  const code = crypto.randomBytesCode();
+  assert.match(code, /^[23456789a-hjkmnp-z]{5}-[23456789a-hjkmnp-z]{5}-[23456789a-hjkmnp-z]{5}$/);
+  assert.notEqual(crypto.randomBytesCode(), code);
 });

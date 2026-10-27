@@ -15,10 +15,17 @@ the functions with the service role key. No Supabase Auth, no request signing.
     Passkeys and Telegram can be added here afterwards. Passwords are reset on gftv.asia.
   - **Public**: anyone can sign up at `/signup` (username, display name, email, password, agreeing
     to the Terms of Use and Privacy Policy) to RSVP and get notifications. Passwords are bcrypt,
-    cost 12. 2FA is optional: an authenticator app or a passkey switches it on, and then Telegram
-    codes and backup codes are accepted too. A forgotten password is reset at `/reset` with a code
-    sent to the Telegram chat linked on the account page, plus the second factor when there is
-    one. There is no email sender, so emails are not verified and nothing is emailed.
+    cost 12. 2FA is optional: an authenticator app or a passkey switches it on, comes with ten
+    backup codes, and then Telegram codes and backup codes are accepted too. No email is ever sent
+    (emails are only for signing in and are not verified). A forgotten password is reset at
+    `/reset` in one of three ways: a code sent to the linked Telegram chat (plus the second factor
+    when 2FA is on), one backup code (when 2FA is on), or a one-time code an admin makes in
+    `/manage` for a member with neither, after checking who they are. A staff code on an account
+    with 2FA only sets the password; signing in still needs the second step.
+  - **Names**: usernames and display names may not contain words that look like the team (staff,
+    official, admin, GFTV, moderator, ...), compared after folding case, spacing, accents,
+    look-alike Cyrillic and Greek letters and numbers used as letters. Admins add their own words
+    in `/manage`; names that already match are listed there for follow-up, not changed.
 - **Who can do what.** Any signed-in account can RSVP. Staff with `is_editor` or `is_admin` (and
   `is_approved`) manage events at `/manage`; only `is_admin` deletes. Roles are re-checked on every
   request. Anything set up on this site lives in `gftvevents_` tables; nothing is written to
@@ -30,6 +37,10 @@ the functions with the service role key. No Supabase Auth, no request signing.
   "to be announced" go out without the stored values; attendees-only addresses and online links go
   only to people going and to editors; staff notes and attendee lists go only to editors, and an
   attendee is a name, a username and staff or not, never an email. `npm test` checks this.
+- **Venue sign-ups.** New accounts are limited to 5 an hour per connection. At a meet or con where
+  everyone shares the venue's Wi-Fi, a staff member opens `/manage` on that Wi-Fi and raises the
+  limit for that connection (its salted IP hash) for 2 to 12 hours, to 50 to 500 an hour. It ends
+  by itself or with "End now", and is in the audit log.
 - **Cover pictures** are uploaded from `/manage`. The browser converts the picture to a compressed
   WebP (longest side 1600 px, at most 1 MB); the server checks it really is a still WebP within the
   size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
@@ -44,7 +55,8 @@ the functions with the service role key. No Supabase Auth, no request signing.
 ## Setup, in order
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
-   once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`.
+   once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
+   then `003_resets_signup_allowances_name_filters.sql`.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
@@ -70,7 +82,7 @@ the functions with the service role key. No Supabase Auth, no request signing.
 
    Check it with `curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"`. Messages
    go out with `sendRichMessage` (Bot API 10.1 Rich Messages) and fall back to a plain message.
-   Without Telegram, public accounts cannot reset a forgotten password.
+   Without Telegram, members reset a forgotten password with a backup code or a code from an admin.
 7. **Turnstile (optional).** Add `events.globalfurry.tv` to a Turnstile widget and set both keys. It
    then guards sign-in and sign-up.
 8. **Android app link.** `.well-known/assetlinks.json` names `tv.globalfurry.events`; replace the

@@ -7,6 +7,7 @@ import { api, post } from '../api.js';
 import { el, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
 import { iconNode } from '../icons.js';
 import { coverToWebp } from '../cover-upload.js';
+import { startTools } from '../manage-tools.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('eventForm');
@@ -249,6 +250,7 @@ async function start() {
   }
   $('newEvent').hidden = false;
   fillTimeZones();
+  startTools(me);
   try {
     await loadList();
   } catch (error) {

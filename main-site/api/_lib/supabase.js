@@ -39,6 +39,10 @@ export const T = Object.freeze({
   attendees: 'gftvevents_attendees',
   audit: 'gftvevents_audit_logs',
   rateLimits: 'gftvevents_rate_limits',
+  // migrations/003
+  passwordResets: 'gftvevents_password_resets',
+  signupAllowances: 'gftvevents_signup_allowances',
+  nameFilters: 'gftvevents_name_filters',
   // Cover pictures (migrations/002), a public-read Storage bucket that only
   // the API writes to.
   coversBucket: 'gftvevents_covers',

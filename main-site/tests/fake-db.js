@@ -29,6 +29,8 @@ const DEFAULTS = {
     cover_image_url: null, cover_image_path: null, announced_at: null,
   }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
+  gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
+  gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
 };
 
 // Generated columns, recomputed on every write.
@@ -51,6 +53,8 @@ const UNIQUE = {
   gftvevents_passkeys: ['credential_id'],
   gftvevents_telegram_link_tokens: ['token_hash'],
   gftvevents_events: ['slug'],
+  gftvevents_password_resets: ['code_hash'],
+  gftvevents_name_filters: ['term'],
 };
 
 // Since migrations/002 every account reference points at gftvevents_accounts.
@@ -69,6 +73,10 @@ const FKS = {
   gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id')],
   gftvevents_audit_logs: [toAccount('actor_id', 'set null'), { column: 'event_id', parent: 'gftvevents_events', onDelete: 'set null' }],
   gftvhello_backup_codes: [{ column: 'user_id', parent: 'gftvhello_users', onDelete: 'cascade' }],
+  // migrations/003
+  gftvevents_password_resets: [toAccount('account_id'), toAccount('created_by', 'set null')],
+  gftvevents_signup_allowances: [toAccount('created_by', 'set null')],
+  gftvevents_name_filters: [toAccount('created_by', 'set null')],
 };
 
 

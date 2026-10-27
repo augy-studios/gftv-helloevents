@@ -6,8 +6,9 @@ const USERNAME = /^[a-z0-9_]{3,32}$/;
 // no email sender yet. This only refuses what cannot be an address.
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-// Words a public username may not use, so nobody signs up looking official.
-const RESERVED = /(^|_)(admin|administrator|staff|mod|moderator|gftv|globalfurry|official|support|helloevents|system|root)(_|$)/;
+// Words a name may not contain (staff, official, GFTV, ...) are checked by
+// name-filter.js, which needs the admins' list from the database, so the
+// sign-up and profile routes call it after these checks.
 
 export const PASSWORD_MIN = 10;
 // bcrypt reads at most 72 bytes; anything after that would be ignored, so a
@@ -46,7 +47,6 @@ export function validateSignup(body) {
   const input = body && typeof body === 'object' ? body : {};
   const username = normaliseUsername(input.username);
   if (!USERNAME.test(username)) return { ok: false, error: 'username_invalid' };
-  if (RESERVED.test(username)) return { ok: false, error: 'username_reserved' };
   const displayName = cleanDisplayName(input.displayName);
   if (displayName.length < 1 || [...displayName].length > 60) return { ok: false, error: 'display_name_invalid' };
   const email = normaliseEmail(input.email);

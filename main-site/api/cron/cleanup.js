@@ -2,8 +2,9 @@
 // Vercel sends Authorization: Bearer $CRON_SECRET; anything else is refused.
 //
 // Sweeps what expiry-on-read misses, so the free-tier database stays small:
-// expired sessions, challenges, WebAuthn ceremonies, Telegram link tokens and
-// rate limit buckets, and audit entries older than AUDIT_DAYS.
+// expired sessions, challenges, WebAuthn ceremonies, Telegram link tokens,
+// admin reset codes, sign-up allowances and rate limit buckets, and audit
+// entries older than AUDIT_DAYS.
 
 import { route, send } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
@@ -35,6 +36,15 @@ export default route('cron/cleanup', async (req, res) => {
     'rateLimits',
     del(T.rateLimits).lt('window_start', new Date(Date.now() - RATE_BUCKET_HOURS * 3600_000).toISOString())
   );
+  // migrations/003; harmless before it has run (the error is the missing
+  // table, which is logged and skipped).
+  for (const [name, table] of [['passwordResets', T.passwordResets], ['signupAllowances', T.signupAllowances]]) {
+    try {
+      await sweep(name, del(table).lt('expires_at', now));
+    } catch (cause) {
+      console.warn('[helloevents] cleanup', name, cause?.message ?? cause);
+    }
+  }
   await sweep('audit', del(T.audit).lt('created_at', new Date(Date.now() - AUDIT_DAYS * 86400_000).toISOString()));
 
   send(res, 200, { ok: true, swept: counts });

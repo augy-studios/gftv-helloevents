@@ -25,9 +25,12 @@ export const LIMITS = Object.freeze({
 // Count one hit for each subject and answer 429 if any is over. Returns true
 // when the request has been answered. A failure of the limiter itself lets
 // the request through, so a database hiccup does not lock everybody out.
-export async function limited(req, res, name, subjects = []) {
+// { max } raises the limit on the connection's bucket only (a staff member's
+// sign-up allowance); subject buckets keep the normal limit.
+export async function limited(req, res, name, subjects = [], { max: connectionMax = null } = {}) {
   const [max, windowSeconds] = LIMITS[name];
-  const keys = [`${name}:ip:${hashIp(clientIp(req))}`, ...subjects.map((s) => `${name}:${s}`)];
+  const ipBucket = `${name}:ip:${hashIp(clientIp(req))}`;
+  const keys = [ipBucket, ...subjects.map((s) => `${name}:${s}`)];
   try {
     for (const bucket of keys) {
       const { data, error } = await db().rpc('gftvevents_rate_hit', {
@@ -35,7 +38,8 @@ export async function limited(req, res, name, subjects = []) {
         p_window_seconds: windowSeconds,
       });
       if (error) throw error;
-      if (Number(data) > max) {
+      const limit = bucket === ipBucket && connectionMax ? connectionMax : max;
+      if (Number(data) > limit) {
         res.setHeader('Retry-After', String(windowSeconds));
         fail(res, 429, 'rate_limited');
         return true;
@@ -60,4 +64,25 @@ export async function audit(req, { action, actorId = null, eventId = null, detai
   };
   const { error } = await db().from(T.audit).insert(row);
   if (error) console.error('[helloevents] audit insert:', action, error.message);
+}
+
+// The live sign-up allowance for this request's connection, or null. Staff
+// grant one from /manage for the connection they are on ("venue mode",
+// migrations/003); it raises the sign-up limit for that connection only,
+// until it expires or is revoked.
+export async function signupAllowance(req) {
+  const { data, error } = await db()
+    .from(T.signupAllowances)
+    .select('id, max_per_hour, expires_at')
+    .eq('ip_hash', hashIp(clientIp(req)))
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('max_per_hour', { ascending: false })
+    .limit(1);
+  if (error) {
+    // Before migration 003, or a hiccup: the normal limit applies.
+    console.error('[helloevents] sign-up allowance:', error.message);
+    return null;
+  }
+  return data?.[0] ?? null;
 }

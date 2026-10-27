@@ -78,6 +78,18 @@ export function generateBackupCodes(count = 10) {
   return codes;
 }
 
+// A one-time password reset code an admin hands to a member: three groups
+// of five from the same unambiguous alphabet, about 74 bits.
+export function randomBytesCode() {
+  const bytes = randomBytes(15);
+  let code = '';
+  for (let i = 0; i < 15; i += 1) {
+    if (i === 5 || i === 10) code += '-';
+    code += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  }
+  return code;
+}
+
 // Six digits, uniform, for Telegram codes.
 export function randomDigits() {
   let value;

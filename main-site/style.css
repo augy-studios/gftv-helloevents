@@ -1077,3 +1077,9 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--text) 45%, transparent);
 }
 .check .text-link { display: inline; }
+
+/* manage: staff tools */
+.admin-tools { margin-top: 1rem; max-width: none; }
+.admin-tools h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.35rem; }
+.row .field.grow { flex: 1 1 14rem; margin-bottom: 0; }
+.row:has(.field.grow) { align-items: flex-end; }
