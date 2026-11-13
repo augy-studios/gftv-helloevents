@@ -2,9 +2,9 @@
 
 Context for whoever merges this repo's `dev` branch into `main`. Augy, give this file to Claude: "Read `.claude/merge-dev-into-main.md` and help me merge `dev` into `main`."
 
-- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. 7 of 9 jobs have landed so far.
+- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. 8 of 9 jobs have landed so far.
 - **What merging does:** Merging into `main` deploys `main-site/` (pages and API) on Vercel.
-- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 16:46 SGT.
+- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 18:06 SGT.
 
 ## Claude: how to run the merge
 
@@ -28,7 +28,7 @@ Work through these in order, and stop to ask Augy wherever a step says so.
 | 03 | Rename the shared short helpers | `1eabdef` |
 | 04 | Readability: api/_lib, part 1 | `8d49a04` |
 | 05 | Readability: api/_lib, part 2 | `e5027de` |
-| 06 | Readability: API routes | to come |
+| 06 | Readability: API routes | `b74050c` |
 | 07 | Readability: pages (js/) | `4cbc658` |
 | 08 | Readability: service worker, scripts and tools | `32f9a2b` |
 | 09 | Lint config and final check | to come |
