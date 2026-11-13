@@ -108,10 +108,14 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 npm install
 npm test             # unit and route tests, no network, database or Redis
 npm run check-sw     # no skipWaiting() outside the update bar's message handler
-npm run check-i18n   # en.json against every data-i18n and t() key
+npm run check-i18n   # en.json against every data-i18n key and t() call (see below)
 ```
 
 Bump `VERSION` in `sw.js` on every deploy that changes a served file, or nobody sees the update bar.
+
+`check-i18n` runs the shared scanner `assets/i18n/check-keys.js`, which finds keys in `t(` calls.
+HelloEvents' own code calls `translate(` since help desk #18's job 03, so keys used only there
+aren't checked against `en.json` until the shared scanner also looks for `translate(`.
 
 **End-to-end tests:** `npm ci`, then `npm run test:e2e` (7 tests, about 5 seconds).
 

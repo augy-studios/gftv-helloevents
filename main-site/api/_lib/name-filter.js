@@ -5,7 +5,7 @@
 // A name is "folded" before it is compared: lowercased, accents dropped,
 // common look-alike letters from Cyrillic and Greek mapped to Latin, digits
 // and symbols used as letters (leetspeak) mapped back, and everything that
-// is not a letter or a digit removed, so "S.TABLES.A.F.F", "5taff", "Ѕtaff" (with
+// is not a letter or a digit removed, so "S.T.A.F.F", "5taff", "Ѕtaff" (with
 // a Cyrillic S) and "s t a f f" all fold to "staff". "1" and "|" can stand
 // for i or l, so both readings are tried.
 //
