@@ -5,6 +5,9 @@ node_modules/
 .vercel/
 .DS_Store
 
+# Playwright's traces and screenshots of failed end-to-end tests.
+main-site/tests/e2e/output/
+
 # Environment files belong to their owner. Only the example is committed.
 .env
 .env.*
