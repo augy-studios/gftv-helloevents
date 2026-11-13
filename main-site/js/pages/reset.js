@@ -1,7 +1,8 @@
 // A forgotten password, for public accounts. No email: a Telegram code to
 // the linked chat (plus the second step when 2FA is on), a backup code (when
-// 2FA is on), or a one-time code from GFTV staff. Staff are sent to
-// gftv.asia.
+// 2FA is on), or a one-time code from GFTV staff. A name the server cannot
+// start a reset for (unknown, suspended or a staff account: it answers all
+// three the same way) gets one message that also sends staff to gftv.asia.
 
 import '../app.js';
 import { t, onChange } from '../../assets/i18n/i18n.js';
@@ -38,7 +39,6 @@ function pickWay(name) {
 $('startForm').addEventListener('submit', (e) => {
   e.preventDefault();
   $('notFound').hidden = true;
-  $('staffNote').hidden = true;
   withBusy($('startSubmit'), $('startError'), async () => {
     let data;
     try {
@@ -46,7 +46,6 @@ $('startForm').addEventListener('submit', (e) => {
     } finally {
       check.reset();
     }
-    if (data.staff) { $('staffNote').hidden = false; return; }
     if (!data.found) { $('notFound').hidden = false; return; }
     challenge = data.challenge;
     needsFactor = data.factor.required;

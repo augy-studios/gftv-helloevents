@@ -36,7 +36,7 @@ async function loadEvent(id) {
 async function loadAttendees(eventId) {
   const { data, error } = await db()
     .from(T.attendees)
-    .select(`user_id, created_at, account:${T.accounts} ( kind, username, display_name, staff:${T.users} ( username, display_name ) )`)
+    .select(`created_at, account:${T.accounts} ( kind, username, display_name, staff:${T.users} ( username, display_name ) )`)
     .eq('event_id', eventId)
     .order('created_at', { ascending: true })
     .limit(2000);
@@ -66,7 +66,7 @@ export default route('manage/events', async (req, res) => {
     }
     const { data, error } = await db()
       .from(T.events)
-      .select('id, slug, title, kind, status, publish_at, starts_at, dates_hidden, timezone, capacity, updated_at, gftvevents_attendees(count)')
+      .select('id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, gftvevents_attendees(count)')
       .order('updated_at', { ascending: false })
       .limit(500);
     if (error) throw error;

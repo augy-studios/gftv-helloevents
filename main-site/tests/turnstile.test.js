@@ -214,7 +214,8 @@ test('sign-up needs a passed "signup" check; the name filter and the rest still 
   assert.equal(r.json.error, 'username_reserved');
   r = await post(b, signup, join({ [TOKEN_FIELD]: TOKEN }));
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.user.username, 'otter');
+  // The answer is only ok (help desk #18); the session cookie says it signed in.
+  assert.match(String(r.headers['set-cookie']), /__Host-ghe_session=/);
 });
 
 test('sign-in needs a passed "login" check before any account is looked up', async () => {

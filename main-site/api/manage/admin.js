@@ -37,7 +37,7 @@ async function allowances(req) {
   const here = hashIp(clientIp(req));
   const { data, error } = await db()
     .from(T.signupAllowances)
-    .select(`id, ip_hash, max_per_hour, label, expires_at, created_at, by:${T.accounts} ( kind, username, staff:${T.users} ( username ) )`)
+    .select(`id, ip_hash, max_per_hour, label, expires_at, by:${T.accounts} ( kind, username, staff:${T.users} ( username ) )`)
     .is('revoked_at', null)
     .gt('expires_at', new Date().toISOString())
     .order('expires_at', { ascending: true })
@@ -48,7 +48,6 @@ async function allowances(req) {
     perHour: row.max_per_hour,
     label: row.label || null,
     expiresAt: row.expires_at,
-    createdAt: row.created_at,
     by: row.by?.kind === 'staff' ? row.by?.staff?.username ?? null : row.by?.username ?? null,
     // Whether it is for the connection the viewer is on, not which one.
     here: row.ip_hash === here,
@@ -56,9 +55,9 @@ async function allowances(req) {
 }
 
 async function filters() {
-  const { data, error } = await db().from(T.nameFilters).select('id, term, created_at').order('term', { ascending: true }).limit(2000);
+  const { data, error } = await db().from(T.nameFilters).select('id, term').order('term', { ascending: true }).limit(2000);
   if (error) throw error;
-  return (data ?? []).map((r) => ({ id: r.id, term: r.term, createdAt: r.created_at }));
+  return (data ?? []).map((r) => ({ id: r.id, term: r.term }));
 }
 
 // Public accounts whose username or display name now matches a listed word:
@@ -68,7 +67,7 @@ async function flagged() {
   const custom = await customTerms();
   const { data, error } = await db()
     .from(T.accounts)
-    .select('username, display_name, created_at')
+    .select('username, display_name')
     .eq('kind', 'public')
     .order('created_at', { ascending: false })
     .limit(5000);

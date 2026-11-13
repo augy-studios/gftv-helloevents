@@ -12,7 +12,13 @@
 //               who they are some other way.
 //
 //   start            { identifier, "cf-turnstile-response"? }
-//                       -> { found, staff?, challenge?, telegram, backup, factor }
+//                       -> { found: true, challenge, telegram, backup, factor }
+//                          for a public account that may sign in, and
+//                          exactly { found: false } for anything else: an
+//                          unknown name, a suspended account, and a staff
+//                          account alike (help desk #18), so the answer never
+//                          says whether a staff account exists. Second factors
+//                          are listed only in the first answer.
 //                    Turnstile, action "reset" (turnstile.js). Every later
 //                    step needs the challenge this hands out, so one check
 //                    covers each reset, whichever way it goes.
@@ -25,7 +31,8 @@
 //
 // Finishing sets the new password (bcrypt), signs every other device out,
 // and signs this one in (except a staff code on an account with 2FA, which
-// only sets the password). 2FA, when on, stays on.
+// only sets the password). 2FA, when on, stays on. -> { signedIn }, and the
+// page goes on to /account or to "sign in now".
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
@@ -45,7 +52,6 @@ import {
   createSession,
   endOtherSessions,
 } from '../_lib/session.js';
-import { selfView } from '../_lib/serialize.js';
 
 // A staff-issued reset code, spent if it is live for this account.
 async function spendStaffCode(accountId, typed) {
@@ -72,8 +78,10 @@ export default route('auth/recover', async (req, res) => {
     const identifier = String(body.identifier ?? '').trim().toLowerCase().slice(0, 254);
     if (await limited(req, res, 'recover', [`id:${sha256(identifier)}`])) return;
     if (await refusedForTurnstile(req, res, body, 'reset')) return;
-    const { staff, member } = await findForLogin(identifier);
-    if (!member && staff) return ok(res, { found: true, staff: true });
+    // Only a public account is looked at. A staff-only name gets the same
+    // answer as a name nobody has: staff reset their password on gftv.asia,
+    // and the reset page says so to everyone it cannot help.
+    const { member } = await findForLogin(identifier);
     if (!member || !canSignIn(member)) return ok(res, { found: false });
     const methods = await methodsFor(member);
     const twoFactor = hasSecondFactor(methods, member);
@@ -168,5 +176,5 @@ export default route('auth/recover', async (req, res) => {
       (cause) => console.warn('[helloevents] reset notice not sent:', cause?.message ?? cause)
     );
   }
-  ok(res, signIn ? { signedIn: true, user: selfView(account) } : { signedIn: false });
+  ok(res, { signedIn: signIn });
 });

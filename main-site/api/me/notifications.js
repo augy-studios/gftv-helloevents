@@ -5,7 +5,9 @@
 // POST { action: "subscribe", subscription }   this browser, from PushManager
 // POST { action: "unsubscribe", endpoint }
 // POST { action: "test" }                       a test notice to every device
+//                                               (and the linked chat); no count
 //
+// prefs, subscribe and unsubscribe answer with the same summary as GET.
 // What each choice sends is described in api/_lib/notify.js.
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
@@ -76,14 +78,15 @@ export default route('me/notifications', async (req, res) => {
 
   if (body.action === 'test') {
     const { prefs } = await loadAccount(user.id);
-    const reached = await deliver([{ id: user.id, notify_telegram: prefs.telegram }], {
+    // The notice itself is the answer; the page shows no count.
+    await deliver([{ id: user.id, notify_telegram: prefs.telegram }], {
       heading: 'Test',
       title: 'GFTV HelloEvents',
       lines: ['Notifications work on this device.'],
       url: `${siteUrl()}/account`,
       tag: 'test',
     });
-    return ok(res, { reached });
+    return ok(res);
   }
 
   fail(res, 400, 'bad_request');
