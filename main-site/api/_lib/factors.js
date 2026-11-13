@@ -128,8 +128,8 @@ export async function localBackupCount(userId) {
 }
 
 // { totp, passkey, telegram, backup } for the sign-in page. user is a
-// normalised account loaded with { auth: true }, since the shared secret is
-// part of it. The five lookups run at the same time.
+// normalised account loaded with { withSecrets: true }, since the shared
+// secret is part of it. The five lookups run at the same time.
 export async function methodsFor(user) {
   // A shared authenticator is enough, so this site's own is only looked up
   // when there is none.

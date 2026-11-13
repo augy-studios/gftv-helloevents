@@ -13,22 +13,46 @@ import { cleanDisplayName } from '../_lib/account-rules.js';
 import { refusedName } from '../_lib/name-filter.js';
 import { selfView } from '../_lib/serialize.js';
 
+// Checks the new display name like sign-up does, saves it, and answers with
+// the account as the page shows it.
 export default route('me/profile', async (request, response) => {
-  if (guard(request, response, ['POST'])) return;
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
   const session = await requireUser(request, response);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   const user = session.user;
-  if (user.kind !== 'public') return fail(response, 403, 'staff_account');
+  if (user.kind !== 'public') {
+    return fail(response, 403, 'staff_account');
+  }
   const body = await readJson(request, response);
-  if (!body) return;
-  if (await limited(request, response, 'securityWrite', [`u:${user.id}`])) return;
+  if (!body) {
+    return;
+  }
+  if (await limited(request, response, 'securityWrite', [`u:${user.id}`])) {
+    return;
+  }
 
   const displayName = cleanDisplayName(body.displayName);
-  if (displayName.length < 1 || [...displayName].length > 60) return fail(response, 400, 'display_name_invalid');
-  if (await refusedName(displayName)) return fail(response, 400, 'display_name_reserved');
+  // The 60 is counted in Unicode code points, not UTF-16 units.
+  if (displayName.length < 1 || [...displayName].length > 60) {
+    return fail(response, 400, 'display_name_invalid');
+  }
+  if (await refusedName(displayName)) {
+    return fail(response, 400, 'display_name_reserved');
+  }
 
-  const { error } = await database().from(TABLES.accounts).update({ display_name: displayName }).eq('id', user.id).eq('kind', 'public');
-  if (error) throw error;
+  const { error } = await database()
+    .from(TABLES.accounts)
+    .update({ display_name: displayName })
+    .eq('id', user.id)
+    .eq('kind', 'public');
+  if (error) {
+    throw error;
+  }
   await audit(request, { action: 'account.display_name_changed', actorId: user.id });
-  ok(response, { user: selfView(await loadAccount(user.id)) });
+  const account = await loadAccount(user.id);
+  ok(response, { user: selfView(account) });
 });

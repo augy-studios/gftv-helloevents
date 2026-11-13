@@ -23,22 +23,10 @@ import {
 } from '@simplewebauthn/server';
 import { database, TABLES } from './supabase.js';
 import { siteUrl, optionalEnv } from './env.js';
+import { errorDetail } from './http.js';
 
 const CHALLENGE_MINUTES = 5;
 const RELYING_PARTY_NAME = 'GFTV HelloEvents';
-
-// What to log for a failure: its message, or the thrown value itself when
-// it has none.
-function describeCause(cause) {
-  if (cause === null || cause === undefined) {
-    return cause;
-  }
-  const message = cause.message;
-  if (message === null || message === undefined) {
-    return cause;
-  }
-  return message;
-}
 
 // A stored passkey's transports in the form SimpleWebAuthn takes: the list,
 // or undefined (never null) when none were stored.
@@ -163,7 +151,7 @@ export async function finishRegistration(userId, browserResponse, label) {
       requireUserVerification: false,
     });
   } catch (cause) {
-    console.warn('[helloevents] passkey registration rejected:', describeCause(cause));
+    console.warn('[helloevents] passkey registration rejected:', errorDetail(cause));
     return { ok: false, error: 'passkey_failed' };
   }
   if (!verification.verified) {
@@ -283,7 +271,7 @@ export async function finishAuthentication(userId, browserResponse) {
     });
   } catch (cause) {
     // Includes a counter that went backwards, the sign of a cloned key.
-    console.warn('[helloevents] passkey assertion rejected:', describeCause(cause));
+    console.warn('[helloevents] passkey assertion rejected:', errorDetail(cause));
     return false;
   }
   if (!verification.verified) {

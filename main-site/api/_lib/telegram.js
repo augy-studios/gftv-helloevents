@@ -11,22 +11,10 @@
 import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 import { randomToken, sha256 } from './crypto.js';
+import { errorDetail } from './http.js';
 
 export const LINK_TOKEN_MINUTES = 10;
 export const CODE_MINUTES = 5;
-
-// What to log for a failure: its message, or the thrown value itself when
-// it has none.
-function describeCause(cause) {
-  if (cause === null || cause === undefined) {
-    return cause;
-  }
-  const message = cause.message;
-  if (message === null || message === undefined) {
-    return cause;
-  }
-  return message;
-}
 
 export function telegramConfigured() {
   if (
@@ -107,7 +95,7 @@ export async function sendRichTelegram(chatId, rich, replyMarkup = null) {
       ...extra,
     });
   } catch (error) {
-    console.warn(`[helloevents] rich send failed, falling back: ${describeCause(error)}`);
+    console.warn(`[helloevents] rich send failed, falling back: ${errorDetail(error)}`);
     await callBot('sendMessage', {
       chat_id: chatId,
       text: rich.fallback,
