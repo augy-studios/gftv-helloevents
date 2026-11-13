@@ -243,11 +243,12 @@ const CONTENT_TYPES = {
 
 // Never served: what .vercelignore keeps out of a deploy, the functions'
 // source, installed packages, and dotfiles other than .well-known.
-const HIDDEN_TOP_LEVEL = new Set(['api', 'tests', 'scripts', 'node_modules', 'README.md', 'playwright.config.js']);
+// Lower case: macOS file names ignore case, so /Tests/ would otherwise reach tests/.
+const HIDDEN_TOP_LEVEL = new Set(['api', 'tests', 'scripts', 'node_modules', 'readme.md', 'playwright.config.js']);
 
 function isServable(pathname) {
   const segments = pathname.split('/').filter((segment) => segment !== '');
-  if (segments.length > 0 && HIDDEN_TOP_LEVEL.has(segments[0])) {
+  if (segments.length > 0 && HIDDEN_TOP_LEVEL.has(segments[0].toLowerCase())) {
     return false;
   }
   for (const segment of segments) {
