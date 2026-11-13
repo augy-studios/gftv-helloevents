@@ -14,58 +14,85 @@ import { passkeysSupported, createPasskey, passkeyErrorCode } from '../passkeys.
 import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice } from '../push-client.js';
 
 const byId = (id) => document.getElementById(id);
-let me = null;
+let currentUser = null;
 let security = null;
 let rsvps = null;
-let notify = null;
+let notifications = null;
 let deviceOn = false;
 let totpSetup = null; // the set-up token while an authenticator is being added
 // The action waiting on the password dialog.
-let pending = null;
+let pendingAction = null;
 
 function renderProfile() {
-  byId('displayName').textContent = me.displayName;
-  byId('username').textContent = me.username;
-  byId('role').textContent = translate(`role.${me.role}`);
-  if (me.avatarUrl) {
+  byId('displayName').textContent = currentUser.displayName;
+  byId('username').textContent = currentUser.username;
+  byId('role').textContent = translate(`role.${currentUser.role}`);
+  if (currentUser.avatarUrl) {
     byId('avatar').referrerPolicy = 'no-referrer';
-    byId('avatar').src = me.avatarUrl;
+    byId('avatar').src = currentUser.avatarUrl;
     byId('avatar').hidden = false;
   }
-  byId('deleteBox').hidden = me.kind !== 'public';
+  byId('deleteBox').hidden = currentUser.kind !== 'public';
   // Staff names come from gftv.asia.
-  byId('nameForm').hidden = me.kind !== 'public';
-  if (document.activeElement !== byId('nameInput')) byId('nameInput').value = me.displayName;
+  byId('nameForm').hidden = currentUser.kind !== 'public';
+  if (document.activeElement !== byId('nameInput')) {
+    byId('nameInput').value = currentUser.displayName;
+  }
 }
 
 function renderRsvps() {
-  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((r) => r.event).map((r) => eventCard(r.event)));
+  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event)));
   byId('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
   byId('pastBox').hidden = rsvps.past.length === 0;
-  byId('rsvpPast').replaceChildren(...rsvps.past.filter((r) => r.event).map((r) => eventCard(r.event)));
+  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event)));
 }
 
+// The notification settings: the four switches, the Telegram row (offered
+// when the site has Telegram; usable once a chat is linked), and the push
+// buttons and status line for this device.
 function renderNotify() {
-  const n = notify;
-  byId('prefUpdates').checked = n.prefs.updates;
-  byId('prefReminders').checked = n.prefs.reminders;
-  byId('prefNewEvents').checked = n.prefs.newEvents;
-  byId('prefTelegram').checked = n.prefs.telegram;
-  byId('notifyTelegramBox').hidden = !n.telegram.available;
-  byId('prefTelegram').disabled = !n.telegram.linked;
-  byId('notifyTelegramNote').hidden = n.telegram.linked;
+  const settings = notifications;
+  byId('prefUpdates').checked = settings.prefs.updates;
+  byId('prefReminders').checked = settings.prefs.reminders;
+  byId('prefNewEvents').checked = settings.prefs.newEvents;
+  byId('prefTelegram').checked = settings.prefs.telegram;
+  byId('notifyTelegramBox').hidden = !settings.telegram.available;
+  byId('prefTelegram').disabled = !settings.telegram.linked;
+  byId('notifyTelegramNote').hidden = settings.telegram.linked;
 
-  const can = n.push.available && pushSupported();
-  byId('pushOn').hidden = !can || deviceOn;
-  byId('pushOff').hidden = !can || !deviceOn;
-  byId('pushTest').hidden = !(deviceOn || (n.telegram.linked && n.prefs.telegram));
-  byId('pushState').textContent = !n.push.available
-    ? translate('notify.push-unavailable')
-    : !pushSupported()
-      ? translate('notify.push-unsupported')
-      : deviceOn
-        ? translate('notify.push-on-here')
-        : translate('notify.push-off-here');
+  // Push on this device needs push set up on the site and a browser that
+  // supports it; then one button shows: Turn on, or Turn off.
+  let canPush = settings.push.available;
+  if (canPush) {
+    canPush = pushSupported();
+  }
+  if (!canPush) {
+    byId('pushOn').hidden = true;
+    byId('pushOff').hidden = true;
+  } else {
+    byId('pushOn').hidden = deviceOn;
+    byId('pushOff').hidden = !deviceOn;
+  }
+
+  // A test needs somewhere to go: this device, or Telegram with Telegram
+  // notifications switched on.
+  let canTest = false;
+  if (deviceOn || (settings.telegram.linked && settings.prefs.telegram)) {
+    canTest = true;
+  }
+  byId('pushTest').hidden = !canTest;
+
+  let pushStateKey;
+  if (!settings.push.available) {
+    pushStateKey = 'notify.push-unavailable';
+  } else if (!pushSupported()) {
+    pushStateKey = 'notify.push-unsupported';
+  } else if (deviceOn) {
+    pushStateKey = 'notify.push-on-here';
+  } else {
+    pushStateKey = 'notify.push-off-here';
+  }
+  byId('pushState').textContent = translate(pushStateKey);
 }
 
 // "Last used 14 Nov 2026, 2:00 pm" under a passkey, or "Never used" for one
@@ -77,58 +104,94 @@ function passkeyLastUsed(lastUsedAt) {
   return translate('security.passkey-last-used', { date: formatDate(lastUsedAt) });
 }
 
-function renderSecurity() {
-  const s = security;
-  byId('securityLede').textContent = translate(s.required ? 'security.lede-staff' : 'security.lede-public');
-  byId('totpState').textContent = s.totp.shared
-    ? translate('security.totp-shared')
-    : s.totp.local
-      ? translate('security.totp-local')
-      : translate('security.totp-none');
-  byId('totpAdd').hidden = s.totp.shared || s.totp.local || totpSetup !== null;
-  byId('totpRemove').hidden = !s.totp.local;
-  byId('totpSetup').hidden = totpSetup === null;
-
-  byId('passkeyList').replaceChildren(
-    ...(s.passkeys.length === 0
-      ? [createElement('li', { class: 'muted small', text: translate('security.passkeys-none') })]
-      : s.passkeys.map((p) => createElement('li', { class: 'item-row' }, [
-        iconNode('key'),
-        createElement('span', { class: 'item-main' }, [
-          createElement('span', { text: p.label || translate('security.passkey-unnamed') }),
-          createElement('span', { class: 'muted small', text: translate('security.passkey-added', { date: formatDate(p.createdAt) }) }),
-          createElement('span', { class: 'muted small', text: passkeyLastUsed(p.lastUsedAt) }),
-        ]),
-        createElement('button', {
-          class: 'btn btn-small btn-quiet',
-          type: 'button',
-          text: translate('security.remove'),
-          'aria-label': translate('security.passkey-remove', { name: p.label || translate('security.passkey-unnamed') }),
-          onclick: () => askPassword({ kind: 'passkey-remove', id: p.id }),
-        }),
-      ])))
-  );
-  byId('passkeyAdd').hidden = !passkeysSupported();
-
-  byId('telegramBox').hidden = !s.telegram.available;
-  byId('telegramState').textContent = s.telegram.linked
-    ? (s.telegram.username ? translate('security.telegram-linked-as', { username: s.telegram.username }) : translate('security.telegram-linked'))
-    : translate('security.telegram-none');
-  byId('telegramLink').hidden = s.telegram.linked;
-  byId('telegramUnlink').hidden = !s.telegram.linked;
-
-  byId('backupState').textContent = translate('security.backup-left', { count: s.backupCodesLeft });
+// One passkey in the list: its name, when it was added and last used, and a
+// Remove button, which asks for the password first.
+function passkeyRow(passkey) {
+  let name = passkey.label;
+  if (!name) {
+    name = translate('security.passkey-unnamed');
+  }
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('key'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: name }),
+      createElement('span', { class: 'muted small', text: translate('security.passkey-added', { date: formatDate(passkey.createdAt) }) }),
+      createElement('span', { class: 'muted small', text: passkeyLastUsed(passkey.lastUsedAt) }),
+    ]),
+    createElement('button', {
+      class: 'btn btn-small btn-quiet',
+      type: 'button',
+      text: translate('security.remove'),
+      'aria-label': translate('security.passkey-remove', { name }),
+      onclick: () => askPassword({ kind: 'passkey-remove', id: passkey.id }),
+    }),
+  ]);
 }
 
+// The ways in: the authenticator app (shared from gftv.asia, added here, or
+// none, with its add and remove buttons and set-up box), the passkeys,
+// Telegram, and how many backup codes are left.
+function renderSecurity() {
+  let ledeKey = 'security.lede-public';
+  if (security.required) {
+    ledeKey = 'security.lede-staff';
+  }
+  byId('securityLede').textContent = translate(ledeKey);
+
+  let totpStateKey = 'security.totp-none';
+  if (security.totp.shared) {
+    totpStateKey = 'security.totp-shared';
+  } else if (security.totp.local) {
+    totpStateKey = 'security.totp-local';
+  }
+  byId('totpState').textContent = translate(totpStateKey);
+  // Add is offered only with no authenticator and no set-up under way.
+  let totpAddHidden = false;
+  if (security.totp.shared || security.totp.local || totpSetup !== null) {
+    totpAddHidden = true;
+  }
+  byId('totpAdd').hidden = totpAddHidden;
+  byId('totpRemove').hidden = !security.totp.local;
+  byId('totpSetup').hidden = totpSetup === null;
+
+  let passkeyRows;
+  if (security.passkeys.length === 0) {
+    passkeyRows = [createElement('li', { class: 'muted small', text: translate('security.passkeys-none') })];
+  } else {
+    passkeyRows = security.passkeys.map((passkey) => passkeyRow(passkey));
+  }
+  byId('passkeyList').replaceChildren(...passkeyRows);
+  byId('passkeyAdd').hidden = !passkeysSupported();
+
+  byId('telegramBox').hidden = !security.telegram.available;
+  let telegramStateText;
+  if (!security.telegram.linked) {
+    telegramStateText = translate('security.telegram-none');
+  } else if (security.telegram.username) {
+    telegramStateText = translate('security.telegram-linked-as', { username: security.telegram.username });
+  } else {
+    telegramStateText = translate('security.telegram-linked');
+  }
+  byId('telegramState').textContent = telegramStateText;
+  byId('telegramLink').hidden = security.telegram.linked;
+  byId('telegramUnlink').hidden = !security.telegram.linked;
+
+  byId('backupState').textContent = translate('security.backup-left', { count: security.backupCodesLeft });
+}
+
+// Signed out: off to sign in, then back here. Signed in: the profile, RSVPs,
+// notifications and security are fetched together and drawn; if any of them
+// fails, the profile still shows with the error. Whether this device has
+// push switched on is checked last, after the page is drawn.
 async function load() {
-  const s = await session;
-  if (!s.signedIn) {
+  const currentSession = await session;
+  if (!currentSession.signedIn) {
     location.replace(`/login?next=${encodeURIComponent('/account')}`);
     return;
   }
-  me = s.user;
+  currentUser = currentSession.user;
   try {
-    [security, rsvps, notify] = await Promise.all([api('/api/me/security'), api('/api/me/rsvps'), api('/api/me/notifications')]);
+    [security, rsvps, notifications] = await Promise.all([api('/api/me/security'), api('/api/me/rsvps'), api('/api/me/notifications')]);
   } catch (error) {
     byId('accountLoading').hidden = true;
     byId('accountView').hidden = false;
@@ -143,7 +206,12 @@ async function load() {
   renderNotify();
   renderSecurity();
   // Whether this device is subscribed, after the page is drawn.
-  deviceOn = Boolean(await currentSubscription()) && notify.push.devices > 0;
+  const subscription = await currentSubscription();
+  let subscribedHere = false;
+  if (subscription && notifications.push.devices > 0) {
+    subscribedHere = true;
+  }
+  deviceOn = subscribedHere;
   renderNotify();
 }
 
@@ -151,12 +219,13 @@ async function load() {
 // Notifications
 // ---------------------------------------------------------------------------
 
+// Each switch saves as soon as it changes, and flips back if saving fails.
 for (const [id, key] of [['prefUpdates', 'updates'], ['prefReminders', 'reminders'], ['prefNewEvents', 'newEvents'], ['prefTelegram', 'telegram']]) {
   byId(id).addEventListener('change', () => {
     const box = byId(id);
     withBusy(null, byId('notifyError'), async () => {
       try {
-        notify = await post('/api/me/notifications', { action: 'prefs', [key]: box.checked });
+        notifications = await post('/api/me/notifications', { action: 'prefs', [key]: box.checked });
       } catch (error) {
         box.checked = !box.checked;
         throw error;
@@ -168,8 +237,8 @@ for (const [id, key] of [['prefUpdates', 'updates'], ['prefReminders', 'reminder
 
 byId('pushOn').addEventListener('click', () => {
   withBusy(byId('pushOn'), byId('notifyError'), async () => {
-    const subscription = await subscribeDevice(notify.push.publicKey);
-    notify = await post('/api/me/notifications', { action: 'subscribe', subscription });
+    const subscription = await subscribeDevice(notifications.push.publicKey);
+    notifications = await post('/api/me/notifications', { action: 'subscribe', subscription });
     deviceOn = true;
     renderNotify();
   });
@@ -178,7 +247,9 @@ byId('pushOn').addEventListener('click', () => {
 byId('pushOff').addEventListener('click', () => {
   withBusy(byId('pushOff'), byId('notifyError'), async () => {
     const endpoint = await unsubscribeDevice();
-    if (endpoint) notify = await post('/api/me/notifications', { action: 'unsubscribe', endpoint });
+    if (endpoint) {
+      notifications = await post('/api/me/notifications', { action: 'unsubscribe', endpoint });
+    }
     deviceOn = false;
     renderNotify();
   });
@@ -195,12 +266,23 @@ byId('pushTest').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 
 function askPassword(action) {
-  pending = action;
+  pendingAction = action;
   byId('confirmPassword').value = '';
   byId('passwordModalError').textContent = '';
   byId('passkeyLabelField').hidden = action.kind !== 'passkey-add';
-  byId('passwordModalLede').textContent = translate(action.kind === 'delete-account' ? 'account.delete-confirm' : 'security.password-lede');
-  openModal('passwordModal', { initialFocus: action.kind === 'passkey-add' ? byId('newPasskeyLabel') : byId('confirmPassword') });
+  let ledeKey = 'security.password-lede';
+  if (action.kind === 'delete-account') {
+    ledeKey = 'account.delete-confirm';
+  }
+  byId('passwordModalLede').textContent = translate(ledeKey);
+  // Adding a passkey starts at its name; everything else at the password.
+  let initialFocus;
+  if (action.kind === 'passkey-add') {
+    initialFocus = byId('newPasskeyLabel');
+  } else {
+    initialFocus = byId('confirmPassword');
+  }
+  openModal('passwordModal', { initialFocus });
 }
 
 function showNewCodes(codes) {
@@ -208,11 +290,15 @@ function showNewCodes(codes) {
   byId('newCodes').hidden = false;
 }
 
-byId('passwordModalForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+// The password dialog's submit: sends the password with the action waiting
+// on it (add or remove a passkey, unlink Telegram, new backup codes, add or
+// remove the authenticator, or delete the account), then closes the dialog
+// and redraws the security section.
+byId('passwordModalForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   const password = byId('confirmPassword').value;
   withBusy(byId('passwordModalSubmit'), byId('passwordModalError'), async () => {
-    const action = pending;
+    const action = pendingAction;
     if (action.kind === 'passkey-add') {
       const { options } = await post('/api/me/security', { action: 'passkey-options', password });
       let response;
@@ -221,16 +307,18 @@ byId('passwordModalForm').addEventListener('submit', (e) => {
       } catch (cause) {
         throw Object.assign(new Error('passkey'), { code: passkeyErrorCode(cause) });
       }
-      const { codes, ...rest } = await post('/api/me/security', { action: 'passkey-finish', response, label: byId('newPasskeyLabel').value });
-      security = rest;
+      const { codes, ...updatedSecurity } = await post('/api/me/security', { action: 'passkey-finish', response, label: byId('newPasskeyLabel').value });
+      security = updatedSecurity;
       // A first passkey that turns 2FA on comes with backup codes.
-      if (codes) showNewCodes(codes);
+      if (codes) {
+        showNewCodes(codes);
+      }
       byId('newPasskeyLabel').value = '';
     } else if (action.kind === 'passkey-remove') {
       security = await post('/api/me/security', { action: 'passkey-remove', id: action.id, password });
     } else if (action.kind === 'telegram-unlink') {
       security = await post('/api/me/security', { action: 'telegram-unlink', password });
-      notify = await api('/api/me/notifications');
+      notifications = await api('/api/me/notifications');
       renderNotify();
     } else if (action.kind === 'backup-new') {
       const { codes } = await post('/api/me/security', { action: 'backup-regenerate', password });
@@ -250,28 +338,32 @@ byId('passwordModalForm').addEventListener('submit', (e) => {
     }
     closeModal('passwordModal');
     renderSecurity();
-    if (action.kind === 'totp-add') byId('totpCode').focus();
+    if (action.kind === 'totp-add') {
+      byId('totpCode').focus();
+    }
   });
 });
 
-byId('totpForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+byId('totpForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   withBusy(byId('totpSubmit'), byId('securityError'), async () => {
     const data = await post('/api/me/security', { action: 'totp-finish', setup: totpSetup, code: byId('totpCode').value });
     totpSetup = null;
     byId('totpCode').value = '';
-    const { codes, ...rest } = data;
-    security = rest;
-    if (codes) showNewCodes(codes);
+    const { codes, ...updatedSecurity } = data;
+    security = updatedSecurity;
+    if (codes) {
+      showNewCodes(codes);
+    }
     renderSecurity();
   });
 });
 
-byId('nameForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+byId('nameForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   withBusy(byId('nameSubmit'), byId('nameError'), async () => {
     const { user } = await post('/api/me/profile', { displayName: byId('nameInput').value });
-    me = user;
+    currentUser = user;
     renderProfile();
     byId('accountNotice').textContent = translate('account.name-saved');
   });
@@ -291,9 +383,11 @@ byId('telegramLink').addEventListener('click', () => {
     byId('telegramState').textContent = translate('security.telegram-pending');
     // Linking finishes in Telegram; look again when the person comes back.
     const refresh = async () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
       document.removeEventListener('visibilitychange', refresh);
-      [security, notify] = await Promise.all([api('/api/me/security'), api('/api/me/notifications')]);
+      [security, notifications] = await Promise.all([api('/api/me/security'), api('/api/me/notifications')]);
       renderSecurity();
       renderNotify();
     };
@@ -316,10 +410,18 @@ byId('signOutOthers').addEventListener('click', () => {
 });
 
 onChange(() => {
-  if (me) renderProfile();
-  if (rsvps) renderRsvps();
-  if (notify) renderNotify();
-  if (security) renderSecurity();
+  if (currentUser) {
+    renderProfile();
+  }
+  if (rsvps) {
+    renderRsvps();
+  }
+  if (notifications) {
+    renderNotify();
+  }
+  if (security) {
+    renderSecurity();
+  }
 });
 
 load();

@@ -10,48 +10,88 @@ import { iconNode } from './icons.js';
 
 const byId = (id) => document.getElementById(id);
 let state = null;
-let admin = false;
+let isAdmin = false;
+
+// One venue allowance: its name (marked when it is for this connection), the
+// rate, until when and who set it, and an End button.
+function allowanceRow(allowance) {
+  let name = allowance.label;
+  if (!name) {
+    name = translate('admin.allowance-unnamed');
+  }
+  let thisConnection = '';
+  if (allowance.here) {
+    thisConnection = ` (${translate('admin.allowance-this')})`;
+  }
+  let grantedBy = allowance.by;
+  if (!grantedBy) {
+    grantedBy = '?';
+  }
+  const detail = translate('admin.allowance-detail', { rate: allowance.perHour, until: formatDate(allowance.expiresAt), by: grantedBy });
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('users'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: `${name}${thisConnection}` }),
+      createElement('span', { class: 'muted small', text: detail }),
+    ]),
+    createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('admin.allowance-end'), onclick: () => revoke(allowance.id) }),
+  ]);
+}
 
 function renderAllowances() {
-  byId('allowanceHere').textContent = translate(state.here ? 'admin.allowance-here-on' : 'admin.allowance-here-off');
-  byId('allowanceList').replaceChildren(
-    ...state.allowances.map((a) => createElement('li', { class: 'item-row' }, [
-      iconNode('users'),
-      createElement('span', { class: 'item-main' }, [
-        createElement('span', { text: `${a.label || translate('admin.allowance-unnamed')}${a.here ? ` (${translate('admin.allowance-this')})` : ''}` }),
-        createElement('span', { class: 'muted small', text: translate('admin.allowance-detail', { rate: a.perHour, until: formatDate(a.expiresAt), by: a.by || '?' }) }),
-      ]),
-      createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('admin.allowance-end'), onclick: () => revoke(a.id) }),
-    ]))
-  );
+  let hereKey = 'admin.allowance-here-off';
+  if (state.here) {
+    hereKey = 'admin.allowance-here-on';
+  }
+  byId('allowanceHere').textContent = translate(hereKey);
+  byId('allowanceList').replaceChildren(...state.allowances.map((allowance) => allowanceRow(allowance)));
+}
+
+// One word an admin added to the name filter, with its Remove button.
+function nameFilterRow(nameFilter) {
+  return createElement('li', { class: 'item-row' }, [
+    createElement('span', { class: 'item-main', text: nameFilter.term }),
+    createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('security.remove'), 'aria-label': translate('admin.filter-remove', { term: nameFilter.term }), onclick: () => removeFilter(nameFilter.id) }),
+  ]);
+}
+
+// One existing name that matches the filter: the display name, the username
+// and the word it matched.
+function flaggedRow(flagged) {
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('alert'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: flagged.displayName }),
+      createElement('span', { class: 'muted small', text: translate('admin.flagged-detail', { username: flagged.username, term: flagged.term }) }),
+    ]),
+  ]);
 }
 
 function renderFilters() {
   byId('builtInTerms').textContent = state.builtIn.join(', ');
-  byId('filterList').replaceChildren(
-    ...(state.filters.length === 0
-      ? [createElement('li', { class: 'muted small', text: translate('admin.filter-none') })]
-      : state.filters.map((f) => createElement('li', { class: 'item-row' }, [
-        createElement('span', { class: 'item-main', text: f.term }),
-        createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('security.remove'), 'aria-label': translate('admin.filter-remove', { term: f.term }), onclick: () => removeFilter(f.id) }),
-      ])))
-  );
-  byId('flaggedList').replaceChildren(
-    ...(state.flagged.length === 0
-      ? [createElement('li', { class: 'muted small', text: translate('admin.flagged-none') })]
-      : state.flagged.map((f) => createElement('li', { class: 'item-row' }, [
-        iconNode('alert'),
-        createElement('span', { class: 'item-main' }, [
-          createElement('span', { text: f.displayName }),
-          createElement('span', { class: 'muted small', text: translate('admin.flagged-detail', { username: f.username, term: f.term }) }),
-        ]),
-      ])))
-  );
+
+  let filterRows;
+  if (state.filters.length === 0) {
+    filterRows = [createElement('li', { class: 'muted small', text: translate('admin.filter-none') })];
+  } else {
+    filterRows = state.filters.map((nameFilter) => nameFilterRow(nameFilter));
+  }
+  byId('filterList').replaceChildren(...filterRows);
+
+  let flaggedRows;
+  if (state.flagged.length === 0) {
+    flaggedRows = [createElement('li', { class: 'muted small', text: translate('admin.flagged-none') })];
+  } else {
+    flaggedRows = state.flagged.map((flagged) => flaggedRow(flagged));
+  }
+  byId('flaggedList').replaceChildren(...flaggedRows);
 }
 
 function render() {
   renderAllowances();
-  if (admin) renderFilters();
+  if (isAdmin) {
+    renderFilters();
+  }
 }
 
 async function revoke(id) {
@@ -70,20 +110,24 @@ async function removeFilter(id) {
   });
 }
 
-export async function startTools(me) {
-  admin = me.role === 'admin';
+// Loads the tools' state and shows the sections this role may use: venue
+// allowances for every editor, the name filter and reset codes for admins
+// only. Then wires the three forms: grant an allowance, add a filter word,
+// and make a one-time reset code (shown with a Copy button).
+export async function startTools(currentUser) {
+  isAdmin = currentUser.role === 'admin';
   try {
     state = await api('/api/manage/admin');
   } catch {
     return; // the events still work; the tools stay hidden
   }
   byId('allowanceBox').hidden = false;
-  byId('filterBox').hidden = !admin;
-  byId('resetBox').hidden = !admin;
+  byId('filterBox').hidden = !isAdmin;
+  byId('resetBox').hidden = !isAdmin;
   render();
 
-  byId('allowanceForm').addEventListener('submit', (e) => {
-    e.preventDefault();
+  byId('allowanceForm').addEventListener('submit', (event) => {
+    event.preventDefault();
     withBusy(byId('allowanceSubmit'), byId('allowanceError'), async () => {
       const data = await post('/api/manage/admin', {
         action: 'allowance-grant',
@@ -97,8 +141,8 @@ export async function startTools(me) {
     });
   });
 
-  byId('filterForm').addEventListener('submit', (e) => {
-    e.preventDefault();
+  byId('filterForm').addEventListener('submit', (event) => {
+    event.preventDefault();
     withBusy(byId('filterSubmit'), byId('filterError'), async () => {
       const data = await post('/api/manage/admin', { action: 'filter-add', term: byId('filterTerm').value });
       state = { ...state, ...data };
@@ -107,8 +151,8 @@ export async function startTools(me) {
     });
   });
 
-  byId('resetForm').addEventListener('submit', (e) => {
-    e.preventDefault();
+  byId('resetForm').addEventListener('submit', (event) => {
+    event.preventDefault();
     byId('resetResult').hidden = true;
     withBusy(byId('resetSubmit'), byId('resetError'), async () => {
       const { code, expiresAt } = await post('/api/manage/admin', { action: 'reset-issue', username: byId('resetUsername').value });

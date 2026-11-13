@@ -28,9 +28,17 @@ function toDataUrl(blob) {
 }
 
 // { dataUrl, width, height, bytes } for a File from an <input type=file>.
+// Refuses anything that is not a picture, over 40 MB, or too small once
+// scaled; draws it on a canvas at most MAX_SIDE on its longest side; then
+// tries each quality in QUALITIES, best first, and keeps the first WebP that
+// fits MAX_BYTES.
 export async function coverToWebp(file) {
-  if (!file || !String(file.type).startsWith('image/')) throw fail('cover_invalid');
-  if (file.size > 40 * 1024 * 1024) throw fail('cover_too_large');
+  if (!file || !String(file.type).startsWith('image/')) {
+    throw fail('cover_invalid');
+  }
+  if (file.size > 40 * 1024 * 1024) {
+    throw fail('cover_too_large');
+  }
   let bitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -40,18 +48,28 @@ export async function coverToWebp(file) {
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
   const height = Math.round(bitmap.height * scale);
-  if (width < MIN_WIDTH || height < MIN_HEIGHT) throw fail('cover_too_small');
+  if (width < MIN_WIDTH || height < MIN_HEIGHT) {
+    throw fail('cover_too_small');
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
-  bitmap.close?.();
+  // Free the decoded picture, in browsers that have close().
+  if (bitmap.close !== null && bitmap.close !== undefined) {
+    bitmap.close();
+  }
 
   for (const quality of QUALITIES) {
     const blob = await toBlob(canvas, quality);
-    if (!blob || blob.type !== 'image/webp') throw fail('cover_browser_no_webp');
-    if (blob.size <= MAX_BYTES) return { dataUrl: await toDataUrl(blob), width, height, bytes: blob.size };
+    if (!blob || blob.type !== 'image/webp') {
+      throw fail('cover_browser_no_webp');
+    }
+    if (blob.size <= MAX_BYTES) {
+      const dataUrl = await toDataUrl(blob);
+      return { dataUrl, width, height, bytes: blob.size };
+    }
   }
   throw fail('cover_too_large');
 }
