@@ -19,7 +19,10 @@ let problems = 0;
 // Strip comments, then cut out the message handler and look at what is left.
 const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 const handler = code.match(/self\.addEventListener\(\s*['"]message['"][\s\S]*?\n\}\);/);
-const outside = handler ? code.replace(handler[0], '') : code;
+let outside = code;
+if (handler) {
+  outside = code.replace(handler[0], '');
+}
 for (const call of ['skipWaiting(', 'clients.claim(']) {
   if (outside.includes(call)) {
     console.log(`error  ${call}) appears outside the message handler`);
@@ -31,17 +34,36 @@ if (!handler || !handler[0].includes("'skip-waiting'")) {
   problems += 1;
 }
 
-const list = source.match(/const PRECACHE = \[([\s\S]*?)\];/);
-const paths = list ? [...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+// The precache list: every quoted path inside "const PRECACHE = [ ... ];".
+const listMatch = source.match(/const PRECACHE = \[([\s\S]*?)\];/);
+let paths = [];
+if (listMatch) {
+  paths = [...listMatch[1].matchAll(/'([^']+)'/g)].map((pathMatch) => pathMatch[1]);
+}
 for (const path of paths) {
-  const clean = path === '/' ? '/index.html' : path;
-  const candidates = [clean, `${clean}.html`].map((p) => join(root, p));
+  let cleanPath = path;
+  if (path === '/') {
+    cleanPath = '/index.html';
+  }
+  const candidates = [cleanPath, `${cleanPath}.html`].map((candidate) => join(root, candidate));
   if (!candidates.some((file) => existsSync(file))) {
     console.log(`error  precached but missing: ${path}`);
     problems += 1;
   }
 }
-const version = source.match(/const VERSION = '([^']+)'/);
-console.log(`sw.js VERSION ${version ? version[1] : '(none)'}, ${paths.length} precached paths`);
-console.log(problems ? `${problems} problem(s)` : 'ok');
-process.exit(problems ? 1 : 0);
+
+const versionMatch = source.match(/const VERSION = '([^']+)'/);
+let version = '(none)';
+if (versionMatch) {
+  version = versionMatch[1];
+}
+console.log(`sw.js VERSION ${version}, ${paths.length} precached paths`);
+
+let exitCode = 0;
+if (problems) {
+  console.log(`${problems} problem(s)`);
+  exitCode = 1;
+} else {
+  console.log('ok');
+}
+process.exit(exitCode);
