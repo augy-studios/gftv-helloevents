@@ -21,23 +21,30 @@ const check = humanCheck(byId('humanCheck'));
 
 function pickFactor(name) {
   factor = name;
-  document.querySelectorAll('#resetPicker [data-factor]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.factor === name)));
+  document.querySelectorAll('#resetPicker [data-factor]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.factor === name)));
   byId('factorCodeField').hidden = name === 'passkey';
-  byId('factorCodeLabel').textContent = translate(name === 'backup' ? 'field.backup-code' : 'field.code');
+  let labelKey = 'field.code';
+  if (name === 'backup') {
+    labelKey = 'field.backup-code';
+  }
+  byId('factorCodeLabel').textContent = translate(labelKey);
   byId('factorCode').value = '';
 }
 
 function pickWay(name) {
   way = name;
-  document.querySelectorAll('#wayPicker [data-way]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.way === name)));
+  document.querySelectorAll('#wayPicker [data-way]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.way === name)));
   byId('telegramWay').hidden = name !== 'telegram';
   byId('backupWay').hidden = name !== 'backup';
   byId('staffWay').hidden = name !== 'staff-code';
   byId('finishError').textContent = '';
 }
 
-byId('startForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+// Step one: the name. For an account the server can reset, offers the ways
+// it has (Telegram, a backup code, or only a code from staff), shows the
+// second-factor picker when 2FA is on, and picks the first of each.
+byId('startForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   byId('notFound').hidden = true;
   withBusy(byId('startSubmit'), byId('startError'), async () => {
     let data;
@@ -46,25 +53,52 @@ byId('startForm').addEventListener('submit', (e) => {
     } finally {
       check.reset();
     }
-    if (!data.found) { byId('notFound').hidden = false; return; }
+    if (!data.found) {
+      byId('notFound').hidden = false;
+      return;
+    }
     challenge = data.challenge;
     needsFactor = data.factor.required;
     byId('wayPicker').querySelector('[data-way="telegram"]').hidden = !data.telegram;
     byId('wayPicker').querySelector('[data-way="backup"]').hidden = !data.backup;
     // Neither Telegram nor 2FA: the only way is a code from staff.
-    byId('askStaff').hidden = data.telegram || data.backup;
+    let askStaffHidden = false;
+    if (data.telegram || data.backup) {
+      askStaffHidden = true;
+    }
+    byId('askStaff').hidden = askStaffHidden;
     byId('factorBox').hidden = !needsFactor;
-    const usable = { totp: data.factor.totp, passkey: data.factor.passkey && passkeysSupported(), backup: data.factor.backup };
-    document.querySelectorAll('#resetPicker [data-factor]').forEach((b) => { b.hidden = !usable[b.dataset.factor]; });
-    if (needsFactor) pickFactor(usable.totp ? 'totp' : usable.passkey ? 'passkey' : 'backup');
-    pickWay(data.telegram ? 'telegram' : data.backup ? 'backup' : 'staff-code');
+    let passkeyUsable = data.factor.passkey;
+    if (passkeyUsable) {
+      passkeyUsable = passkeysSupported();
+    }
+    const usable = { totp: data.factor.totp, passkey: passkeyUsable, backup: data.factor.backup };
+    document.querySelectorAll('#resetPicker [data-factor]').forEach((button) => {
+      button.hidden = !usable[button.dataset.factor];
+    });
+    if (needsFactor) {
+      let firstFactor = 'backup';
+      if (usable.totp) {
+        firstFactor = 'totp';
+      } else if (usable.passkey) {
+        firstFactor = 'passkey';
+      }
+      pickFactor(firstFactor);
+    }
+    let firstWay = 'staff-code';
+    if (data.telegram) {
+      firstWay = 'telegram';
+    } else if (data.backup) {
+      firstWay = 'backup';
+    }
+    pickWay(firstWay);
     byId('stepStart').hidden = true;
     byId('stepCode').hidden = false;
   });
 });
 
-document.querySelectorAll('#wayPicker [data-way]').forEach((b) => b.addEventListener('click', () => pickWay(b.dataset.way)));
-document.querySelectorAll('#resetPicker [data-factor]').forEach((b) => b.addEventListener('click', () => pickFactor(b.dataset.factor)));
+document.querySelectorAll('#wayPicker [data-way]').forEach((button) => button.addEventListener('click', () => pickWay(button.dataset.way)));
+document.querySelectorAll('#resetPicker [data-factor]').forEach((button) => button.addEventListener('click', () => pickFactor(button.dataset.factor)));
 
 byId('sendCode').addEventListener('click', () => {
   withBusy(byId('sendCode'), byId('finishError'), async () => {
@@ -74,12 +108,19 @@ byId('sendCode').addEventListener('click', () => {
   });
 });
 
-byId('finishForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+// Step two: the new password with the chosen way's code. The Telegram way on
+// an account with 2FA also needs the second factor: an authenticator or
+// backup code, or a passkey prompt.
+byId('finishForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   withBusy(byId('finishSubmit'), byId('finishError'), async () => {
     const body = { action: 'finish', challenge, method: way, newPassword: byId('newPassword').value };
-    if (way === 'backup') body.code = byId('backupCode').value;
-    if (way === 'staff-code') body.resetCode = byId('resetCode').value;
+    if (way === 'backup') {
+      body.code = byId('backupCode').value;
+    }
+    if (way === 'staff-code') {
+      body.resetCode = byId('resetCode').value;
+    }
     if (way === 'telegram') {
       body.telegramCode = byId('telegramCode').value;
       if (needsFactor) {
@@ -108,4 +149,8 @@ byId('finishForm').addEventListener('submit', (e) => {
   });
 });
 
-onChange(() => { if (factor) pickFactor(factor); });
+onChange(() => {
+  if (factor) {
+    pickFactor(factor);
+  }
+});

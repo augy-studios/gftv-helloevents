@@ -19,15 +19,22 @@ const TEXT_FIELDS = [
 ];
 const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'rsvpOpen'];
 
+// A new event starts in the browser's own time zone, or Singapore's when the
+// browser names none.
+let browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+if (!browserTimeZone) {
+  browserTimeZone = 'Asia/Singapore';
+}
+
 const BLANK = {
   kind: 'furmeet',
   status: 'draft',
   priceType: 'free',
   rsvpOpen: true,
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Singapore',
+  timezone: browserTimeZone,
 };
 
-let me = null;
+let currentUser = null;
 let events = [];
 let editing = null; // { id, slug } of the event in the form, or null for a new one
 let attendees = [];
@@ -36,32 +43,57 @@ let cover = { url: '', has: false };
 function fillTimeZones() {
   const list = byId('tzList');
   let zones = [];
-  try { zones = Intl.supportedValuesOf('timeZone'); } catch { zones = ['Asia/Singapore']; }
-  list.replaceChildren(...zones.map((z) => createElement('option', { value: z })));
+  try {
+    zones = Intl.supportedValuesOf('timeZone');
+  } catch {
+    zones = ['Asia/Singapore'];
+  }
+  list.replaceChildren(...zones.map((zone) => createElement('option', { value: zone })));
 }
 
 function statusLabel(row) {
-  if (row.status === 'published' && !row.released) return translate('status.scheduled');
+  if (row.status === 'published' && !row.released) {
+    return translate('status.scheduled');
+  }
   return translate(`status.${row.status}`);
+}
+
+// One event in the list: its title; its status, kind, date and how many are
+// going; a status chip (marked while it is not yet released); and an Edit
+// button.
+function eventRow(row) {
+  let dateText;
+  if (row.datesHidden || !row.startsAt) {
+    dateText = translate('event.dates-tba');
+  } else {
+    dateText = formatDate(row.startsAt);
+  }
+  let goingText;
+  if (row.capacity) {
+    goingText = translate('event.going-of', { count: row.going, capacity: row.capacity });
+  } else {
+    goingText = translate('event.going', { count: row.going });
+  }
+  const details = [statusLabel(row), translate(`kind.${row.kind}`), dateText, goingText].join(' · ');
+  let chipClass = `chip status-${row.status}`;
+  if (!row.released) {
+    chipClass = `${chipClass} unreleased`;
+  }
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('calendar'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { class: 'item-title', text: row.title }),
+      createElement('span', { class: 'muted small', text: details }),
+    ]),
+    createElement('span', { class: chipClass, text: statusLabel(row) }),
+    createElement('button', { class: 'btn btn-small', type: 'button', text: translate('manage.edit'), 'aria-label': translate('manage.edit-named', { title: row.title }), onclick: () => openEditor(row.id) }),
+  ]);
 }
 
 function renderList() {
   byId('listBox').setAttribute('aria-busy', 'false');
   byId('listEmpty').hidden = events.length > 0;
-  byId('eventList').replaceChildren(...events.map((row) => createElement('li', { class: 'item-row' }, [
-    iconNode('calendar'),
-    createElement('span', { class: 'item-main' }, [
-      createElement('span', { class: 'item-title', text: row.title }),
-      createElement('span', { class: 'muted small', text: [
-        statusLabel(row),
-        translate(`kind.${row.kind}`),
-        row.datesHidden || !row.startsAt ? translate('event.dates-tba') : formatDate(row.startsAt),
-        row.capacity ? translate('event.going-of', { count: row.going, capacity: row.capacity }) : translate('event.going', { count: row.going }),
-      ].join(' · ') }),
-    ]),
-    createElement('span', { class: `chip status-${row.status}${row.released ? '' : ' unreleased'}`, text: statusLabel(row) }),
-    createElement('button', { class: 'btn btn-small', type: 'button', text: translate('manage.edit'), 'aria-label': translate('manage.edit-named', { title: row.title }), onclick: () => openEditor(row.id) }),
-  ])));
+  byId('eventList').replaceChildren(...events.map((row) => eventRow(row)));
 }
 
 async function loadList() {
@@ -71,9 +103,21 @@ async function loadList() {
 }
 
 function setForm(values) {
-  for (const name of TEXT_FIELDS) byId(`f-${name}`).value = values[name] ?? '';
-  for (const name of CHECK_FIELDS) byId(`f-${name}`).checked = values[name] === true;
-  cover = { url: values.coverImageUrl || '', has: values.hasCover === true };
+  for (const name of TEXT_FIELDS) {
+    let value = values[name];
+    if (value === null || value === undefined) {
+      value = '';
+    }
+    byId(`f-${name}`).value = value;
+  }
+  for (const name of CHECK_FIELDS) {
+    byId(`f-${name}`).checked = values[name] === true;
+  }
+  let coverUrl = values.coverImageUrl;
+  if (!coverUrl) {
+    coverUrl = '';
+  }
+  cover = { url: coverUrl, has: values.hasCover === true };
   renderCover();
   syncDependent();
 }
@@ -91,14 +135,24 @@ function renderCover() {
   }
   byId('coverPick').hidden = !editing;
   byId('coverSaveFirst').hidden = Boolean(editing);
-  byId('coverRemove').hidden = !(editing && cover.has);
+  let canRemove = false;
+  if (editing && cover.has) {
+    canRemove = true;
+  }
+  byId('coverRemove').hidden = !canRemove;
   byId('coverError').textContent = '';
 }
 
 byId('coverFile').addEventListener('change', () => {
-  const file = byId('coverFile').files?.[0];
+  const files = byId('coverFile').files;
+  let file;
+  if (files !== null && files !== undefined) {
+    file = files[0];
+  }
   byId('coverFile').value = '';
-  if (!file || !editing) return;
+  if (!file || !editing) {
+    return;
+  }
   withBusy(byId('coverPick'), byId('coverError'), async () => {
     const { dataUrl } = await coverToWebp(file);
     const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl });
@@ -117,54 +171,88 @@ byId('coverRemove').addEventListener('click', () => {
 });
 
 function readForm() {
-  const out = {};
-  for (const name of TEXT_FIELDS) out[name] = byId(`f-${name}`).value;
-  for (const name of CHECK_FIELDS) out[name] = byId(`f-${name}`).checked;
-  return out;
+  const values = {};
+  for (const name of TEXT_FIELDS) {
+    values[name] = byId(`f-${name}`).value;
+  }
+  for (const name of CHECK_FIELDS) {
+    values[name] = byId(`f-${name}`).checked;
+  }
+  return values;
 }
 
 // Fields that only mean something with another one switched on.
 function syncDependent() {
   const paid = byId('f-priceType').value === 'paid';
-  for (const name of ['currency', 'priceMin', 'priceMax']) byId(`f-${name}`).disabled = !paid;
+  for (const name of ['currency', 'priceMin', 'priceMax']) {
+    byId(`f-${name}`).disabled = !paid;
+  }
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
 }
 
-form.addEventListener('change', (e) => {
-  if (e.target.id === 'f-priceType' || e.target.id === 'f-isOnline') syncDependent();
+form.addEventListener('change', (event) => {
+  if (event.target.id === 'f-priceType' || event.target.id === 'f-isOnline') {
+    syncDependent();
+  }
 });
+
+// One attendee: the name (the username when there is no display name), the
+// username, staff or member, when they said they are going, and a Remove
+// button.
+function attendeeRow(attendee) {
+  let name = attendee.displayName;
+  if (!name) {
+    name = attendee.username;
+  }
+  let roleKey = 'role.member';
+  if (attendee.staff) {
+    roleKey = 'role.staff';
+  }
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('user'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: name }),
+      createElement('span', { class: 'muted small', text: `${attendee.username} · ${translate(roleKey)} · ${formatDate(attendee.rsvpAt)}` }),
+    ]),
+    createElement('button', {
+      class: 'btn btn-small btn-quiet',
+      type: 'button',
+      text: translate('security.remove'),
+      'aria-label': translate('manage.attendee-remove', { name }),
+      onclick: () => removeAttendee(attendee.username, attendee.staff),
+    }),
+  ]);
+}
 
 function renderAttendees() {
   const box = byId('attendeesBox');
   box.hidden = !editing;
-  if (!editing) return;
+  if (!editing) {
+    return;
+  }
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
-  byId('attendeeList').replaceChildren(
-    ...(attendees.length === 0
-      ? [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })]
-      : attendees.map((a) => createElement('li', { class: 'item-row' }, [
-        iconNode('user'),
-        createElement('span', { class: 'item-main' }, [
-          createElement('span', { text: a.displayName || a.username }),
-          createElement('span', { class: 'muted small', text: `${a.username} · ${translate(a.staff ? 'role.staff' : 'role.member')} · ${formatDate(a.rsvpAt)}` }),
-        ]),
-        createElement('button', {
-          class: 'btn btn-small btn-quiet',
-          type: 'button',
-          text: translate('security.remove'),
-          'aria-label': translate('manage.attendee-remove', { name: a.displayName || a.username }),
-          onclick: () => removeAttendee(a.username, a.staff),
-        }),
-      ])))
-  );
+  let attendeeRows;
+  if (attendees.length === 0) {
+    attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
+  } else {
+    attendeeRows = attendees.map((attendee) => attendeeRow(attendee));
+  }
+  byId('attendeeList').replaceChildren(...attendeeRows);
 }
 
 function showEditor(title) {
   byId('editorTitle').textContent = title;
   byId('editorError').textContent = '';
-  byId('editorDelete').hidden = !(editing && me.role === 'admin');
+  // Only admins delete, and only an event that has been saved.
+  let canDelete = false;
+  if (editing && currentUser.role === 'admin') {
+    canDelete = true;
+  }
+  byId('editorDelete').hidden = !canDelete;
   byId('editorView').hidden = !editing;
-  if (editing) byId('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
+  if (editing) {
+    byId('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
+  }
   form.hidden = false;
   renderCover();
   renderAttendees();
@@ -193,12 +281,15 @@ function openNew() {
   showEditor(translate('manage.new-title'));
 }
 
-form.addEventListener('submit', (e) => {
-  e.preventDefault();
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
   withBusy(byId('editorSave'), byId('editorError'), async () => {
-    const body = editing
-      ? { action: 'update', id: editing.id, event: readForm() }
-      : { action: 'create', event: readForm() };
+    let body;
+    if (editing) {
+      body = { action: 'update', id: editing.id, event: readForm() };
+    } else {
+      body = { action: 'create', event: readForm() };
+    }
     const data = await post('/api/manage/events', body);
     editing = { id: data.event.id, slug: data.event.slug };
     setForm(data.event);
@@ -236,21 +327,24 @@ byId('editorClose').addEventListener('click', () => {
 });
 byId('newEvent').addEventListener('click', openNew);
 
+// Signed out: off to sign in, then back here. Signed in without the right to
+// manage: a message instead of the list. Otherwise the list and the staff
+// tools load, and /manage?slug=... opens that event in the form.
 async function start() {
-  const s = await session;
-  if (!s.signedIn) {
+  const currentSession = await session;
+  if (!currentSession.signedIn) {
     location.replace(`/login?next=${encodeURIComponent('/manage')}`);
     return;
   }
-  me = s.user;
-  if (!me.canManage) {
+  currentUser = currentSession.user;
+  if (!currentUser.canManage) {
     byId('manageError').textContent = translate('error.manage_only');
     byId('listBox').hidden = true;
     return;
   }
   byId('newEvent').hidden = false;
   fillTimeZones();
-  startTools(me);
+  startTools(currentUser);
   try {
     await loadList();
   } catch (error) {
@@ -259,13 +353,22 @@ async function start() {
   }
   // /manage?slug=... from an event page's "Edit this event".
   const slug = new URLSearchParams(location.search).get('slug');
-  const match = slug && events.find((row) => row.slug === slug);
-  if (match) openEditor(match.id);
+  let match = null;
+  if (slug) {
+    match = events.find((row) => row.slug === slug);
+  }
+  if (match) {
+    openEditor(match.id);
+  }
 }
 
 onChange(() => {
-  if (events.length) renderList();
-  if (!form.hidden) renderAttendees();
+  if (events.length) {
+    renderList();
+  }
+  if (!form.hidden) {
+    renderAttendees();
+  }
 });
 
 start();

@@ -11,81 +11,125 @@ import { t as translate, getLocale } from '../assets/i18n/i18n.js';
 // class flip; the timing lives in CSS.
 // ---------------------------------------------------------------------------
 
-const open = [];
+// The dialogs open now, the top one last.
+const openDialogs = [];
 
 function focusable(root) {
-  return [...root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-    .filter((el) => !el.closest('[hidden]') && el.offsetParent !== null);
+  const candidates = [...root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+  // Only what is showing: nothing inside a hidden section.
+  return candidates.filter((element) => {
+    if (!element.closest('[hidden]') && element.offsetParent !== null) {
+      return true;
+    }
+    return false;
+  });
 }
 
-function setBackgroundInert(on) {
+function setBackgroundInert(makeInert) {
   for (const child of document.body.children) {
-    if (child.classList.contains('modal-backdrop') || child.id === 'toast') continue;
-    if (on) child.setAttribute('inert', '');
-    else child.removeAttribute('inert');
+    if (child.classList.contains('modal-backdrop') || child.id === 'toast') {
+      continue;
+    }
+    if (makeInert) {
+      child.setAttribute('inert', '');
+    } else {
+      child.removeAttribute('inert');
+    }
   }
-  document.documentElement.style.overflow = on ? 'hidden' : '';
+  if (makeInert) {
+    document.documentElement.style.overflow = 'hidden';
+  } else {
+    document.documentElement.style.overflow = '';
+  }
 }
 
 export function openModal(id, { initialFocus = null, onClose = null } = {}) {
   const backdrop = document.getElementById(id);
-  if (!backdrop || !backdrop.classList.contains('hidden')) return;
-  open.forEach((entry) => entry.backdrop.setAttribute('inert', ''));
-  open.push({ id, backdrop, returnTo: document.activeElement, onClose });
+  if (!backdrop || !backdrop.classList.contains('hidden')) {
+    return;
+  }
+  openDialogs.forEach((entry) => entry.backdrop.setAttribute('inert', ''));
+  openDialogs.push({ id, backdrop, returnTo: document.activeElement, onClose });
   // Every backdrop is z-index 50 in style.css, so a dialog opened from inside
   // another one would paint under it whenever it comes earlier in the markup,
   // and sit there unseen while the one on top is inert. Each newly opened
   // dialog goes one above the stack instead (still under the toast, at 60).
   // Not reset on close, so a closing dialog keeps its place while it fades.
-  backdrop.style.zIndex = String(50 + open.length);
+  backdrop.style.zIndex = String(50 + openDialogs.length);
   backdrop.removeAttribute('inert');
   backdrop.classList.remove('hidden');
   setBackgroundInert(true);
-  const target = initialFocus || focusable(backdrop)[0];
-  if (target) target.focus();
+  let target = initialFocus;
+  if (!target) {
+    target = focusable(backdrop)[0];
+  }
+  if (target) {
+    target.focus();
+  }
 }
 
 export function closeModal(id) {
-  const index = open.findIndex((entry) => entry.id === id);
-  if (index < 0) return;
-  const [entry] = open.splice(index, 1);
+  const index = openDialogs.findIndex((entry) => entry.id === id);
+  if (index < 0) {
+    return;
+  }
+  const [entry] = openDialogs.splice(index, 1);
   entry.backdrop.classList.add('hidden');
-  if (open.length === 0) setBackgroundInert(false);
-  else open[open.length - 1].backdrop.removeAttribute('inert');
-  if (entry.onClose) entry.onClose();
-  if (entry.returnTo && typeof entry.returnTo.focus === 'function') entry.returnTo.focus();
+  if (openDialogs.length === 0) {
+    setBackgroundInert(false);
+  } else {
+    openDialogs[openDialogs.length - 1].backdrop.removeAttribute('inert');
+  }
+  if (entry.onClose) {
+    entry.onClose();
+  }
+  if (entry.returnTo && typeof entry.returnTo.focus === 'function') {
+    entry.returnTo.focus();
+  }
 }
 
+// Clicks on a [data-close-modal] button or on a dialog's backdrop close that
+// dialog. On the top dialog, Escape closes it, and Tab and Shift+Tab stay
+// inside it, wrapping from the last item to the first and back.
 export function wireModals() {
-  document.addEventListener('click', (e) => {
-    const closer = e.target.closest('[data-close-modal]');
+  document.addEventListener('click', (event) => {
+    const closer = event.target.closest('[data-close-modal]');
     if (closer) {
       closeModal(closer.getAttribute('data-close-modal'));
       return;
     }
-    if (e.target.classList && e.target.classList.contains('modal-backdrop')) closeModal(e.target.id);
+    if (event.target.classList && event.target.classList.contains('modal-backdrop')) {
+      closeModal(event.target.id);
+    }
   });
-  document.addEventListener('keydown', (e) => {
-    const top = open[open.length - 1];
-    if (!top) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeModal(top.id);
+  // Escape closes the top dialog; Tab and Shift+Tab stay inside it.
+  document.addEventListener('keydown', (event) => {
+    const topDialog = openDialogs[openDialogs.length - 1];
+    if (!topDialog) {
       return;
     }
-    if (e.key !== 'Tab') return;
-    const items = focusable(top.backdrop);
-    if (items.length === 0) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeModal(topDialog.id);
+      return;
+    }
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const items = focusable(topDialog.backdrop);
+    if (items.length === 0) {
+      return;
+    }
     const first = items[0];
     const last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
       first.focus();
-    } else if (!top.backdrop.contains(document.activeElement)) {
-      e.preventDefault();
+    } else if (!topDialog.backdrop.contains(document.activeElement)) {
+      event.preventDefault();
       first.focus();
     }
   });
@@ -97,20 +141,23 @@ export function wireModals() {
 
 let toastTimer = null;
 
-export function toast(message, ms = 2200) {
-  let el = document.getElementById('toast');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'toast';
-    el.className = 'toast hidden';
-    el.setAttribute('role', 'status');
-    document.body.appendChild(el);
+// duration: how long the toast stays, in milliseconds.
+export function toast(message, duration = 2200) {
+  let toastElement = document.getElementById('toast');
+  if (!toastElement) {
+    toastElement = document.createElement('div');
+    toastElement.id = 'toast';
+    toastElement.className = 'toast hidden';
+    toastElement.setAttribute('role', 'status');
+    document.body.appendChild(toastElement);
   }
   clearTimeout(toastTimer);
-  el.textContent = message;
-  void el.offsetHeight;
-  el.classList.remove('hidden');
-  toastTimer = setTimeout(() => el.classList.add('hidden'), ms);
+  toastElement.textContent = message;
+  // Reading offsetHeight makes the browser lay the toast out before the class
+  // changes (the usual way to restart a CSS transition).
+  void toastElement.offsetHeight;
+  toastElement.classList.remove('hidden');
+  toastTimer = setTimeout(() => toastElement.classList.add('hidden'), duration);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,18 +166,20 @@ export function toast(message, ms = 2200) {
 // ---------------------------------------------------------------------------
 
 export function setBusy(button, busy) {
-  if (!button) return;
+  if (!button) {
+    return;
+  }
   button.disabled = busy;
   button.setAttribute('aria-busy', String(busy));
   const existing = button.querySelector('.busy-indicator');
   if (busy && !existing) {
-    const wrap = document.createElement('span');
-    wrap.className = 'delayed busy-indicator';
-    wrap.setAttribute('aria-hidden', 'true');
+    const indicator = document.createElement('span');
+    indicator.className = 'delayed busy-indicator';
+    indicator.setAttribute('aria-hidden', 'true');
     const spinner = document.createElement('span');
     spinner.className = 'spinner';
-    wrap.appendChild(spinner);
-    button.prepend(wrap);
+    indicator.appendChild(spinner);
+    button.prepend(indicator);
   } else if (!busy && existing) {
     existing.remove();
   }
@@ -138,44 +187,73 @@ export function setBusy(button, busy) {
 
 // Run an async action with a button showing busy, and the error, if any,
 // written to a callout as a translated sentence.
-export async function withBusy(button, errorBox, fn) {
+export async function withBusy(button, errorBox, action) {
   setBusy(button, true);
-  if (errorBox) errorBox.textContent = '';
+  if (errorBox) {
+    errorBox.textContent = '';
+  }
   try {
-    return await fn();
+    return await action();
   } catch (error) {
-    if (errorBox) errorBox.textContent = errorText(error);
-    else toast(errorText(error));
+    if (errorBox) {
+      errorBox.textContent = errorText(error);
+    } else {
+      toast(errorText(error));
+    }
     return undefined;
   } finally {
     setBusy(button, false);
   }
 }
 
+// The sentence for an error in the reader's language: the server's code
+// looked up under error.*, or the generic sentence for a code with none.
 export function errorText(error) {
-  const code = error && error.code ? error.code : 'generic';
+  let code = 'generic';
+  if (error && error.code) {
+    code = error.code;
+  }
   // A refused form field is named, in the reader's language.
-  const field = error?.detail?.field;
-  const params = field ? { field: translate(`manage.field.${field}`) } : undefined;
-  const text = translate(`error.${code}`, params);
-  return text === `error.${code}` ? translate('error.generic') : text;
+  let field;
+  if (error !== null && error !== undefined) {
+    const detail = error.detail;
+    if (detail !== null && detail !== undefined) {
+      field = detail.field;
+    }
+  }
+  let placeholders;
+  if (field) {
+    placeholders = { field: translate(`manage.field.${field}`) };
+  }
+  const text = translate(`error.${code}`, placeholders);
+  // A code with no sentence of its own comes back as the key itself.
+  if (text === `error.${code}`) {
+    return translate('error.generic');
+  }
+  return text;
 }
 
 // ---------------------------------------------------------------------------
 // Formatting and escaping
 // ---------------------------------------------------------------------------
 
-export function formatNumber(n) {
-  return new Intl.NumberFormat(getLocale()).format(Number(n) || 0);
+export function formatNumber(value) {
+  let number = Number(value);
+  if (!number) {
+    number = 0;
+  }
+  return new Intl.NumberFormat(getLocale()).format(number);
 }
 
 export function formatDate(value) {
-  if (!value) return '';
+  if (!value) {
+    return '';
+  }
   return new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-export function escapeHtml(s) {
-  return String(s)
+export function escapeHtml(text) {
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -185,22 +263,40 @@ export function escapeHtml(s) {
 
 // Build an element: createElement('p', { class: 'muted', text: 'hello' }, [children]).
 // Text always goes in through textContent, so text typed by an editor can
-// never become markup.
-export function createElement(tag, props = {}, children = []) {
+// never become markup. A property that is undefined, null or false is left
+// out; one named on... with a function becomes an event listener; true
+// becomes an empty attribute. Children that are null, undefined or false
+// are skipped, and anything not a node goes in as text.
+export function createElement(tag, properties = {}, children = []) {
   const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key === 'class') node.className = value;
-    else if (key === 'text') node.textContent = value;
-    else if (key === 'i18n') {
+  for (const [key, value] of Object.entries(properties)) {
+    if (value === undefined || value === null || value === false) {
+      continue;
+    }
+    if (key === 'class') {
+      node.className = value;
+    } else if (key === 'text') {
+      node.textContent = value;
+    } else if (key === 'i18n') {
       node.setAttribute('data-i18n', value);
       node.textContent = translate(value);
-    } else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
-    else node.setAttribute(key, value === true ? '' : String(value));
+    } else if (key.startsWith('on') && typeof value === 'function') {
+      node.addEventListener(key.slice(2), value);
+    } else if (value === true) {
+      node.setAttribute(key, '');
+    } else {
+      node.setAttribute(key, String(value));
+    }
   }
   for (const child of [].concat(children)) {
-    if (child === null || child === undefined || child === false) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    if (child === null || child === undefined || child === false) {
+      continue;
+    }
+    if (child instanceof Node) {
+      node.append(child);
+    } else {
+      node.append(document.createTextNode(String(child)));
+    }
   }
   return node;
 }
