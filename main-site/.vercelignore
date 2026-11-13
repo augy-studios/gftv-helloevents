@@ -2,5 +2,6 @@
 tests/
 scripts/
 playwright.config.js
+eslint.config.js
 README.md
 .env*
