@@ -3,27 +3,39 @@
 // and the server answers step "done" straight after the password.
 
 import { session } from '../app.js';
-import { t, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { post } from '../api.js';
-import { withBusy, toast, errorText } from '../ui.js';
+import { withBusy, toast } from '../ui.js';
 import { passkeysSupported, usePasskey, passkeyErrorCode } from '../passkeys.js';
 import { humanCheck } from '../turnstile.js';
 
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 let challenge = null;
 let method = null;
-const check = humanCheck($('humanCheck'));
+const check = humanCheck(byId('humanCheck'));
 
 // Only a path on this site, so ?next= cannot send anyone elsewhere.
 function nextPath() {
-  const next = new URLSearchParams(location.search).get('next') || '';
-  return /^\/(?!\/)[A-Za-z0-9/_\-.?=&%]*$/.test(next) && !next.startsWith('/login') ? next : '/';
+  let next = new URLSearchParams(location.search).get('next');
+  if (!next) {
+    next = '';
+  }
+  if (/^\/(?!\/)[A-Za-z0-9/_\-.?=&%]*$/.test(next) && !next.startsWith('/login')) {
+    return next;
+  }
+  return '/';
 }
 
-session.then((s) => { if (s.signedIn) location.replace(nextPath()); });
+session.then((currentSession) => {
+  if (currentSession.signedIn) {
+    location.replace(nextPath());
+  }
+});
 
 function show(step) {
-  for (const id of ['stepPassword', 'stepFactor']) $(id).hidden = id !== step;
+  for (const id of ['stepPassword', 'stepFactor']) {
+    byId(id).hidden = id !== step;
+  }
   const heading = document.querySelector(`#${step} h1`);
   if (heading && step !== 'stepPassword') {
     heading.tabIndex = -1;
@@ -34,31 +46,40 @@ function show(step) {
 function startOver(message) {
   challenge = null;
   show('stepPassword');
-  $('passwordError').textContent = message || '';
-  $('password').focus();
+  let errorMessage = message;
+  if (!errorMessage) {
+    errorMessage = '';
+  }
+  byId('passwordError').textContent = errorMessage;
+  byId('password').focus();
 }
 
 function handleExpiry(error) {
-  if (error.code === 'challenge_expired') startOver(t('error.challenge_expired'));
+  if (error.code === 'challenge_expired') {
+    startOver(translate('error.challenge_expired'));
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Step one: the password
 // ---------------------------------------------------------------------------
 
-$('passwordForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  withBusy($('passwordSubmit'), $('passwordError'), async () => {
+byId('passwordForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  withBusy(byId('passwordSubmit'), byId('passwordError'), async () => {
     try {
       const data = await post('/api/auth/login', {
-        identifier: $('identifier').value,
-        password: $('password').value,
+        identifier: byId('identifier').value,
+        password: byId('password').value,
         ...(await check.fields()),
       });
       challenge = data.challenge;
-      $('password').value = '';
-      if (data.step === 'done') signedIn();
-      else showFactors(data.methods);
+      byId('password').value = '';
+      if (data.step === 'done') {
+        signedIn();
+      } else {
+        showFactors(data.methods);
+      }
     } finally {
       check.reset();
     }
@@ -69,55 +90,89 @@ $('passwordForm').addEventListener('submit', (e) => {
 // Step two: the second factor
 // ---------------------------------------------------------------------------
 
-const HELP = { totp: 'login.help-totp', passkey: 'login.help-passkey', telegram: 'login.help-telegram', backup: 'login.help-backup' };
+const HELP_KEYS = { totp: 'login.help-totp', passkey: 'login.help-passkey', telegram: 'login.help-telegram', backup: 'login.help-backup' };
 
+// Shows the second step with a button for each method this account has (a
+// passkey only where the browser supports them), and picks the first of
+// authenticator, passkey, Telegram, backup code.
 function showFactors(methods) {
+  let passkeyUsable = methods.passkey;
+  if (passkeyUsable) {
+    passkeyUsable = passkeysSupported();
+  }
   const usable = {
     totp: methods.totp,
-    passkey: methods.passkey && passkeysSupported(),
+    passkey: passkeyUsable,
     telegram: methods.telegram,
     backup: methods.backup,
   };
-  document.querySelectorAll('#methodPicker [data-method]').forEach((b) => { b.hidden = !usable[b.dataset.method]; });
+  document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
+    button.hidden = !usable[button.dataset.method];
+  });
   show('stepFactor');
   // Picking Telegram sends nothing by itself: the code goes out only when
   // "Send me a code" is pressed.
-  pick(usable.totp ? 'totp' : usable.passkey ? 'passkey' : usable.telegram ? 'telegram' : 'backup');
+  let firstMethod = 'backup';
+  if (usable.totp) {
+    firstMethod = 'totp';
+  } else if (usable.passkey) {
+    firstMethod = 'passkey';
+  } else if (usable.telegram) {
+    firstMethod = 'telegram';
+  }
+  pick(firstMethod);
 }
 
+// Switches the second step to one method: presses its button, sets the help
+// line, and shapes the code field for it (six digits for the authenticator
+// and Telegram, up to 16 characters for a backup code, none for a passkey).
 function pick(name) {
   method = name;
-  document.querySelectorAll('#methodPicker [data-method]').forEach((b) => {
-    b.setAttribute('aria-pressed', String(b.dataset.method === name));
+  document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.method === name));
   });
-  $('codeHelp').textContent = t(HELP[name]);
-  const code = $('code');
-  code.value = '';
-  $('codeError').textContent = '';
-  const numeric = name === 'totp' || name === 'telegram';
-  code.inputMode = numeric ? 'numeric' : 'text';
-  code.maxLength = numeric ? 6 : 16;
-  code.classList.toggle('code-input', numeric);
-  $('codeLabel').textContent = t(name === 'backup' ? 'field.backup-code' : name === 'telegram' ? 'field.telegram-code' : 'field.code');
-  $('codeField').hidden = name === 'passkey';
-  $('codeSubmitRow').hidden = name === 'passkey';
-  $('passkeyRow').hidden = name !== 'passkey';
-  $('telegramSendRow').hidden = name !== 'telegram';
+  byId('codeHelp').textContent = translate(HELP_KEYS[name]);
+  const codeInput = byId('code');
+  codeInput.value = '';
+  byId('codeError').textContent = '';
+  let numeric = false;
+  if (name === 'totp' || name === 'telegram') {
+    numeric = true;
+  }
+  if (numeric) {
+    codeInput.inputMode = 'numeric';
+    codeInput.maxLength = 6;
+  } else {
+    codeInput.inputMode = 'text';
+    codeInput.maxLength = 16;
+  }
+  codeInput.classList.toggle('code-input', numeric);
+  let labelKey = 'field.code';
+  if (name === 'backup') {
+    labelKey = 'field.backup-code';
+  } else if (name === 'telegram') {
+    labelKey = 'field.telegram-code';
+  }
+  byId('codeLabel').textContent = translate(labelKey);
+  byId('codeField').hidden = name === 'passkey';
+  byId('codeSubmitRow').hidden = name === 'passkey';
+  byId('passkeyRow').hidden = name !== 'passkey';
+  byId('telegramSendRow').hidden = name !== 'telegram';
 }
 
-document.querySelectorAll('#methodPicker [data-method]').forEach((b) => {
-  b.addEventListener('click', () => pick(b.dataset.method));
+document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
+  button.addEventListener('click', () => pick(button.dataset.method));
 });
 
 function signedIn() {
   location.replace(nextPath());
 }
 
-$('codeForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  withBusy($('codeSubmit'), $('codeError'), async () => {
+byId('codeForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  withBusy(byId('codeSubmit'), byId('codeError'), async () => {
     try {
-      await post('/api/auth/verify', { challenge, method, code: $('code').value });
+      await post('/api/auth/verify', { challenge, method, code: byId('code').value });
       signedIn();
     } catch (error) {
       handleExpiry(error);
@@ -126,21 +181,21 @@ $('codeForm').addEventListener('submit', (e) => {
   });
 });
 
-$('telegramSend').addEventListener('click', () => {
-  withBusy($('telegramSend'), $('codeError'), async () => {
+byId('telegramSend').addEventListener('click', () => {
+  withBusy(byId('telegramSend'), byId('codeError'), async () => {
     try {
       await post('/api/auth/verify', { challenge, method: 'telegram-send' });
     } catch (error) {
       handleExpiry(error);
       throw error;
     }
-    toast(t('telegram.sent'));
-    $('code').focus();
+    toast(translate('telegram.sent'));
+    byId('code').focus();
   });
 });
 
-$('passkeyUse').addEventListener('click', () => {
-  withBusy($('passkeyUse'), $('codeError'), async () => {
+byId('passkeyUse').addEventListener('click', () => {
+  withBusy(byId('passkeyUse'), byId('codeError'), async () => {
     try {
       const { options } = await post('/api/auth/verify', { challenge, method: 'passkey-options' });
       let response;
@@ -158,8 +213,10 @@ $('passkeyUse').addEventListener('click', () => {
   });
 });
 
-$('startOver').addEventListener('click', () => startOver());
+byId('startOver').addEventListener('click', () => startOver());
 
 onChange(() => {
-  if (method && !$('stepFactor').hidden) pick(method);
+  if (method && !byId('stepFactor').hidden) {
+    pick(method);
+  }
 });

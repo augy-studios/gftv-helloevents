@@ -125,7 +125,8 @@ test('signing up makes a public account with a bcrypt cost 12 password, and sign
   const b = browser();
   const r = await b.call(signup, { method: 'POST', body: join({ username: 'Otter', email: ' Otter@Example.com ' }) });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false });
+  // The answer is only ok (help desk #18); the session says who it is.
+  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false });
   assert.deepEqual(leaks(r.json), []);
   const row = db.table('gftvevents_accounts')[0];
   assert.equal(row.kind, 'public');
@@ -285,9 +286,11 @@ test('reset needs the second factor too when there is one; staff and accounts wi
   assert.equal(none.found, true);
   assert.equal(none.telegram, false);
   assert.equal(none.backup, false, 'no 2FA, so only a staff code can reset it');
-  assert.equal((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'nobody-here' } })).json.found, false);
+  const nobody = (await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'nobody-here' } })).json;
+  assert.deepEqual(nobody, { ok: true, found: false });
   await staff('stafffox');
-  assert.equal((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'stafffox' } })).json.staff, true);
+  // A staff account gets exactly the answer an unknown name gets (help desk #18).
+  assert.deepEqual((await browser().call(recover, { method: 'POST', body: { action: 'start', identifier: 'stafffox' } })).json, nobody);
 });
 
 // ---------------------------------------------------------------------------
@@ -317,7 +320,8 @@ test('push subscriptions are kept in Redis, checked, capped and removable', asyn
   assert.equal(off.json.push.devices, 9);
 
   const test1 = await m.call(notifications, { method: 'POST', body: { action: 'test' } });
-  assert.equal(test1.json.reached, 1);
+  // No count comes back (help desk #18); the nine devices still get it.
+  assert.deepEqual(test1.json, { ok: true });
   assert.equal(pushes.length, 9);
 });
 

@@ -3,59 +3,99 @@
 // and member password reset codes for admins. The server checks the role on
 // every request; hiding sections here is only tidiness.
 
-import { t, onChange } from '../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../assets/i18n/i18n.js';
 import { api, post } from './api.js';
-import { el, withBusy, formatDate, copyText } from './ui.js';
+import { createElement, withBusy, formatDate, copyText } from './ui.js';
 import { iconNode } from './icons.js';
 
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 let state = null;
-let admin = false;
+let isAdmin = false;
+
+// One venue allowance: its name (marked when it is for this connection), the
+// rate, until when and who set it, and an End button.
+function allowanceRow(allowance) {
+  let name = allowance.label;
+  if (!name) {
+    name = translate('admin.allowance-unnamed');
+  }
+  let thisConnection = '';
+  if (allowance.here) {
+    thisConnection = ` (${translate('admin.allowance-this')})`;
+  }
+  let grantedBy = allowance.by;
+  if (!grantedBy) {
+    grantedBy = '?';
+  }
+  const detail = translate('admin.allowance-detail', { rate: allowance.perHour, until: formatDate(allowance.expiresAt), by: grantedBy });
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('users'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: `${name}${thisConnection}` }),
+      createElement('span', { class: 'muted small', text: detail }),
+    ]),
+    createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('admin.allowance-end'), onclick: () => revoke(allowance.id) }),
+  ]);
+}
 
 function renderAllowances() {
-  $('allowanceHere').textContent = t(state.here ? 'admin.allowance-here-on' : 'admin.allowance-here-off');
-  $('allowanceList').replaceChildren(
-    ...state.allowances.map((a) => el('li', { class: 'item-row' }, [
-      iconNode('users'),
-      el('span', { class: 'item-main' }, [
-        el('span', { text: `${a.label || t('admin.allowance-unnamed')}${a.here ? ` (${t('admin.allowance-this')})` : ''}` }),
-        el('span', { class: 'muted small', text: t('admin.allowance-detail', { rate: a.perHour, until: formatDate(a.expiresAt), by: a.by || '?' }) }),
-      ]),
-      el('button', { class: 'btn btn-small btn-quiet', type: 'button', text: t('admin.allowance-end'), onclick: () => revoke(a.id) }),
-    ]))
-  );
+  let hereKey = 'admin.allowance-here-off';
+  if (state.here) {
+    hereKey = 'admin.allowance-here-on';
+  }
+  byId('allowanceHere').textContent = translate(hereKey);
+  byId('allowanceList').replaceChildren(...state.allowances.map((allowance) => allowanceRow(allowance)));
+}
+
+// One word an admin added to the name filter, with its Remove button.
+function nameFilterRow(nameFilter) {
+  return createElement('li', { class: 'item-row' }, [
+    createElement('span', { class: 'item-main', text: nameFilter.term }),
+    createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('security.remove'), 'aria-label': translate('admin.filter-remove', { term: nameFilter.term }), onclick: () => removeFilter(nameFilter.id) }),
+  ]);
+}
+
+// One existing name that matches the filter: the display name, the username
+// and the word it matched.
+function flaggedRow(flagged) {
+  return createElement('li', { class: 'item-row' }, [
+    iconNode('alert'),
+    createElement('span', { class: 'item-main' }, [
+      createElement('span', { text: flagged.displayName }),
+      createElement('span', { class: 'muted small', text: translate('admin.flagged-detail', { username: flagged.username, term: flagged.term }) }),
+    ]),
+  ]);
 }
 
 function renderFilters() {
-  $('builtInTerms').textContent = state.builtIn.join(', ');
-  $('filterList').replaceChildren(
-    ...(state.filters.length === 0
-      ? [el('li', { class: 'muted small', text: t('admin.filter-none') })]
-      : state.filters.map((f) => el('li', { class: 'item-row' }, [
-        el('span', { class: 'item-main', text: f.term }),
-        el('button', { class: 'btn btn-small btn-quiet', type: 'button', text: t('security.remove'), 'aria-label': t('admin.filter-remove', { term: f.term }), onclick: () => removeFilter(f.id) }),
-      ])))
-  );
-  $('flaggedList').replaceChildren(
-    ...(state.flagged.length === 0
-      ? [el('li', { class: 'muted small', text: t('admin.flagged-none') })]
-      : state.flagged.map((f) => el('li', { class: 'item-row' }, [
-        iconNode('alert'),
-        el('span', { class: 'item-main' }, [
-          el('span', { text: f.displayName }),
-          el('span', { class: 'muted small', text: t('admin.flagged-detail', { username: f.username, term: f.term }) }),
-        ]),
-      ])))
-  );
+  byId('builtInTerms').textContent = state.builtIn.join(', ');
+
+  let filterRows;
+  if (state.filters.length === 0) {
+    filterRows = [createElement('li', { class: 'muted small', text: translate('admin.filter-none') })];
+  } else {
+    filterRows = state.filters.map((nameFilter) => nameFilterRow(nameFilter));
+  }
+  byId('filterList').replaceChildren(...filterRows);
+
+  let flaggedRows;
+  if (state.flagged.length === 0) {
+    flaggedRows = [createElement('li', { class: 'muted small', text: translate('admin.flagged-none') })];
+  } else {
+    flaggedRows = state.flagged.map((flagged) => flaggedRow(flagged));
+  }
+  byId('flaggedList').replaceChildren(...flaggedRows);
 }
 
 function render() {
   renderAllowances();
-  if (admin) renderFilters();
+  if (isAdmin) {
+    renderFilters();
+  }
 }
 
 async function revoke(id) {
-  await withBusy(null, $('allowanceError'), async () => {
+  await withBusy(null, byId('allowanceError'), async () => {
     const data = await post('/api/manage/admin', { action: 'allowance-revoke', id });
     state = { ...state, ...data };
     renderAllowances();
@@ -63,59 +103,63 @@ async function revoke(id) {
 }
 
 async function removeFilter(id) {
-  await withBusy(null, $('filterError'), async () => {
+  await withBusy(null, byId('filterError'), async () => {
     const data = await post('/api/manage/admin', { action: 'filter-remove', id });
     state = { ...state, ...data };
     renderFilters();
   });
 }
 
-export async function startTools(me) {
-  admin = me.role === 'admin';
+// Loads the tools' state and shows the sections this role may use: venue
+// allowances for every editor, the name filter and reset codes for admins
+// only. Then wires the three forms: grant an allowance, add a filter word,
+// and make a one-time reset code (shown with a Copy button).
+export async function startTools(currentUser) {
+  isAdmin = currentUser.role === 'admin';
   try {
     state = await api('/api/manage/admin');
   } catch {
     return; // the events still work; the tools stay hidden
   }
-  $('allowanceBox').hidden = false;
-  $('filterBox').hidden = !admin;
-  $('resetBox').hidden = !admin;
+  byId('allowanceBox').hidden = false;
+  byId('filterBox').hidden = !isAdmin;
+  byId('resetBox').hidden = !isAdmin;
   render();
 
-  $('allowanceForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    withBusy($('allowanceSubmit'), $('allowanceError'), async () => {
+  byId('allowanceForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    withBusy(byId('allowanceSubmit'), byId('allowanceError'), async () => {
       const data = await post('/api/manage/admin', {
         action: 'allowance-grant',
-        hours: Number($('allowanceHours').value),
-        perHour: Number($('allowanceRate').value),
-        label: $('allowanceLabel').value,
+        hours: Number(byId('allowanceHours').value),
+        perHour: Number(byId('allowanceRate').value),
+        label: byId('allowanceLabel').value,
       });
       state = { ...state, ...data };
-      $('allowanceLabel').value = '';
+      byId('allowanceLabel').value = '';
       renderAllowances();
     });
   });
 
-  $('filterForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    withBusy($('filterSubmit'), $('filterError'), async () => {
-      const data = await post('/api/manage/admin', { action: 'filter-add', term: $('filterTerm').value });
+  byId('filterForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    withBusy(byId('filterSubmit'), byId('filterError'), async () => {
+      const data = await post('/api/manage/admin', { action: 'filter-add', term: byId('filterTerm').value });
       state = { ...state, ...data };
-      $('filterTerm').value = '';
+      byId('filterTerm').value = '';
       renderFilters();
     });
   });
 
-  $('resetForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    $('resetResult').hidden = true;
-    withBusy($('resetSubmit'), $('resetError'), async () => {
-      const { code, expiresAt } = await post('/api/manage/admin', { action: 'reset-issue', username: $('resetUsername').value });
-      $('resetCodeShown').textContent = code;
-      $('resetExpiry').textContent = t('admin.reset-expires', { until: formatDate(expiresAt) });
-      $('resetCopy').onclick = () => copyText(code);
-      $('resetResult').hidden = false;
+  byId('resetForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    byId('resetResult').hidden = true;
+    withBusy(byId('resetSubmit'), byId('resetError'), async () => {
+      const { code, expiresAt } = await post('/api/manage/admin', { action: 'reset-issue', username: byId('resetUsername').value });
+      byId('resetCodeShown').textContent = code;
+      byId('resetExpiry').textContent = translate('admin.reset-expires', { until: formatDate(expiresAt) });
+      byId('resetCopy').onclick = () => copyText(code);
+      byId('resetResult').hidden = false;
     });
   });
 

@@ -14,14 +14,14 @@ export class ApiError extends Error {
 }
 
 export async function api(path, { method = 'GET', body, keepalive = false } = {}) {
-  const init = { method, credentials: 'same-origin', headers: { Accept: 'application/json' }, keepalive };
+  const fetchOptions = { method, credentials: 'same-origin', headers: { Accept: 'application/json' }, keepalive };
   if (body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
+    fetchOptions.headers['Content-Type'] = 'application/json';
+    fetchOptions.body = JSON.stringify(body);
   }
   let response;
   try {
-    response = await fetch(path, init);
+    response = await fetch(path, fetchOptions);
   } catch {
     throw new ApiError('offline', 0);
   }
@@ -32,7 +32,21 @@ export async function api(path, { method = 'GET', body, keepalive = false } = {}
     /* not JSON: handled below */
   }
   if (!response.ok || !data || data.ok === false) {
-    throw new ApiError((data && data.error) || (response.status === 503 ? 'offline' : 'generic'), response.status, data || {});
+    // The server's own error code when it sent one; otherwise "offline" for
+    // a 503 and "generic" for anything else.
+    let code;
+    if (data && data.error) {
+      code = data.error;
+    } else if (response.status === 503) {
+      code = 'offline';
+    } else {
+      code = 'generic';
+    }
+    let detail = data;
+    if (!detail) {
+      detail = {};
+    }
+    throw new ApiError(code, response.status, detail);
   }
   return data;
 }

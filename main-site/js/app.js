@@ -3,7 +3,7 @@
 // Each page's own module imports this first. Adapted from gftv-linktree.
 
 import '../assets/i18n/boot.js';
-import { t, onChange } from '../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../assets/i18n/i18n.js';
 import {
   COLOR_THEMES,
   initTheme,
@@ -18,39 +18,50 @@ import {
 import { icon, hydrateIcons } from './icons.js';
 import { openModal, wireModals } from './ui.js';
 import { initUpdateBar } from './update-bar.js';
-import { initPasswordToggles } from './password-toggle.js';
+import { initializePasswordToggles } from './password-toggle.js';
 import { api } from './api.js';
 
-function hour(h) {
-  return `${String(h).padStart(2, '0')}:00`;
+// "09:00" for 9.
+function hourLabel(hour) {
+  return `${String(hour).padStart(2, '0')}:00`;
 }
 
 function syncThemeButton() {
-  const btn = document.getElementById('themeBtn');
-  if (!btn) return;
+  const themeButton = document.getElementById('themeBtn');
+  if (!themeButton) {
+    return;
+  }
   const mode = getStoredMode();
-  btn.innerHTML = icon(mode === 'dark' ? 'moon' : 'sun');
-  btn.setAttribute('aria-label', t('theme.button', { mode: t(`theme.mode.${mode}`) }));
+  let iconName = 'sun';
+  if (mode === 'dark') {
+    iconName = 'moon';
+  }
+  themeButton.innerHTML = icon(iconName);
+  const modeName = translate(`theme.mode.${mode}`);
+  themeButton.setAttribute('aria-label', translate('theme.button', { mode: modeName }));
 }
 
+// Brings the theme dialog in line with what is stored: the pressed mode
+// button, the note under "time of day" saying which mode is on now, the
+// chosen colour swatch, and the header's theme button.
 function syncThemeModal() {
   const preference = getModePreference();
   const resolved = getStoredMode();
   const colorTheme = getStoredColorTheme();
 
-  document.querySelectorAll('#modeToggle .mode-btn').forEach((b) => {
-    const active = b.dataset.mode === preference;
-    b.classList.toggle('active', active);
-    b.setAttribute('aria-pressed', String(active));
+  document.querySelectorAll('#modeToggle .mode-btn').forEach((modeButton) => {
+    const active = modeButton.dataset.mode === preference;
+    modeButton.classList.toggle('active', active);
+    modeButton.setAttribute('aria-pressed', String(active));
   });
 
   const note = document.getElementById('modeNote');
   if (note) {
     if (preference === 'time') {
-      note.textContent = t('theme.time-note', {
-        from: hour(LIGHT_FROM_HOUR),
-        until: hour(LIGHT_UNTIL_HOUR),
-        mode: t(`theme.mode.${resolved}`),
+      note.textContent = translate('theme.time-note', {
+        from: hourLabel(LIGHT_FROM_HOUR),
+        until: hourLabel(LIGHT_UNTIL_HOUR),
+        mode: translate(`theme.mode.${resolved}`),
       });
       note.hidden = false;
     } else {
@@ -59,10 +70,10 @@ function syncThemeModal() {
     }
   }
 
-  document.querySelectorAll('#swatchGrid .swatch').forEach((s) => {
-    const active = s.dataset.theme === colorTheme;
-    s.classList.toggle('active', active);
-    s.setAttribute('aria-pressed', String(active));
+  document.querySelectorAll('#swatchGrid .swatch').forEach((swatch) => {
+    const active = swatch.dataset.theme === colorTheme;
+    swatch.classList.toggle('active', active);
+    swatch.setAttribute('aria-pressed', String(active));
   });
 
   syncThemeButton();
@@ -72,7 +83,9 @@ function syncThemeModal() {
 // attribute, which the Content-Security-Policy would refuse.
 function buildSwatches() {
   const grid = document.getElementById('swatchGrid');
-  if (!grid) return;
+  if (!grid) {
+    return;
+  }
   grid.replaceChildren();
   for (const theme of COLOR_THEMES) {
     const button = document.createElement('button');
@@ -86,32 +99,50 @@ function buildSwatches() {
     dot.setAttribute('aria-hidden', 'true');
     const label = document.createElement('span');
     label.setAttribute('data-i18n', `theme.swatch.${theme.id}`);
-    label.textContent = t(`theme.swatch.${theme.id}`);
+    label.textContent = translate(`theme.swatch.${theme.id}`);
     button.append(dot, label);
     grid.appendChild(button);
   }
 }
 
+// The header's theme button opens the theme dialog. The dialog redraws when
+// a mode or swatch is picked, when the mode changes by itself (the time of
+// day), and when the language changes.
 function wireTheme() {
   buildSwatches();
 
-  const btn = document.getElementById('themeBtn');
-  if (btn) btn.addEventListener('click', () => { syncThemeModal(); openModal('themeModal'); });
+  const themeButton = document.getElementById('themeBtn');
+  if (themeButton) {
+    themeButton.addEventListener('click', () => {
+      syncThemeModal();
+      openModal('themeModal');
+    });
+  }
 
   // Picking a mode or a swatch updates the modal in place and leaves it open.
-  document.getElementById('modeToggle')?.addEventListener('click', (e) => {
-    const b = e.target.closest('.mode-btn');
-    if (!b) return;
-    applyMode(b.dataset.mode);
-    syncThemeModal();
-  });
+  const modeToggle = document.getElementById('modeToggle');
+  if (modeToggle) {
+    modeToggle.addEventListener('click', (event) => {
+      const modeButton = event.target.closest('.mode-btn');
+      if (!modeButton) {
+        return;
+      }
+      applyMode(modeButton.dataset.mode);
+      syncThemeModal();
+    });
+  }
 
-  document.getElementById('swatchGrid')?.addEventListener('click', (e) => {
-    const s = e.target.closest('.swatch');
-    if (!s) return;
-    applyColorTheme(s.dataset.theme);
-    syncThemeModal();
-  });
+  const swatchGrid = document.getElementById('swatchGrid');
+  if (swatchGrid) {
+    swatchGrid.addEventListener('click', (event) => {
+      const swatch = event.target.closest('.swatch');
+      if (!swatch) {
+        return;
+      }
+      applyColorTheme(swatch.dataset.theme);
+      syncThemeModal();
+    });
+  }
 
   // A tab left open across 09:00 or 18:00 redraws rather than showing the
   // answer from before dinner.
@@ -120,16 +151,26 @@ function wireTheme() {
   syncThemeModal();
 }
 
+// The header gets the "stuck" class while the page is scrolled down and the
+// header sits at the top, checked at most once a frame.
 function wireStickyHeader() {
   const header = document.querySelector('.site-header');
-  if (!header) return;
+  if (!header) {
+    return;
+  }
   let ticking = false;
   const update = () => {
     ticking = false;
-    header.classList.toggle('stuck', header.getBoundingClientRect().top <= 0 && window.scrollY > 0);
+    let stuck = false;
+    if (header.getBoundingClientRect().top <= 0 && window.scrollY > 0) {
+      stuck = true;
+    }
+    header.classList.toggle('stuck', stuck);
   };
   window.addEventListener('scroll', () => {
-    if (ticking) return;
+    if (ticking) {
+      return;
+    }
     ticking = true;
     requestAnimationFrame(update);
   }, { passive: true });
@@ -137,8 +178,10 @@ function wireStickyHeader() {
 }
 
 function wireFooterYear() {
-  const el = document.getElementById('currentYear');
-  if (el) el.textContent = String(new Date().getFullYear());
+  const yearElement = document.getElementById('currentYear');
+  if (yearElement) {
+    yearElement.textContent = String(new Date().getFullYear());
+  }
 }
 
 // Whether this browser is signed in, asked once per page. Pages await it.
@@ -146,10 +189,23 @@ export const session = api('/api/auth/session').catch(() => ({ signedIn: false }
 
 // The header shows Sign in, or Account (and Manage, for editors).
 function wireHeaderLinks() {
-  session.then((s) => {
-    document.querySelectorAll('[data-when="signed-out"]').forEach((el) => { el.hidden = s.signedIn; });
-    document.querySelectorAll('[data-when="signed-in"]').forEach((el) => { el.hidden = !s.signedIn; });
-    document.querySelectorAll('[data-when="manager"]').forEach((el) => { el.hidden = !(s.signedIn && s.user?.canManage); });
+  session.then((currentSession) => {
+    let isManager = false;
+    if (currentSession.signedIn) {
+      const user = currentSession.user;
+      if (user !== null && user !== undefined && user.canManage) {
+        isManager = true;
+      }
+    }
+    document.querySelectorAll('[data-when="signed-out"]').forEach((element) => {
+      element.hidden = currentSession.signedIn;
+    });
+    document.querySelectorAll('[data-when="signed-in"]').forEach((element) => {
+      element.hidden = !currentSession.signedIn;
+    });
+    document.querySelectorAll('[data-when="manager"]').forEach((element) => {
+      element.hidden = !isManager;
+    });
   });
 }
 
@@ -160,5 +216,5 @@ wireTheme();
 wireStickyHeader();
 wireFooterYear();
 wireHeaderLinks();
-initPasswordToggles();
+initializePasswordToggles();
 initUpdateBar();

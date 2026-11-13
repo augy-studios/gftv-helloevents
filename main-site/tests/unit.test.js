@@ -210,7 +210,8 @@ test('attendees-only address and the online link go only to people going and edi
 
 test('RSVP state and spaces come from the count', () => {
   assert.equal(ser.publicEventCard(row(), now).rsvp, 'open');
-  assert.equal(ser.publicEventCard(row(), now).left, 7);
+  // Spaces left are on the event page only, not on cards (help desk #18).
+  assert.equal(ser.publicEventDetail(row(), {}, now).left, 7);
   assert.equal(ser.publicEventCard(row({ gftvevents_attendees: [{ count: 10 }] }), now).rsvp, 'full');
   assert.equal(ser.publicEventCard(row({ status: 'cancelled' }), now).rsvp, 'cancelled');
   assert.equal(ser.publicEventCard(row({ rsvp_open: false }), now).rsvp, 'closed');
@@ -258,10 +259,10 @@ test('no route sends a database result straight out', () => {
   })(api).filter((f) => f.endsWith('.js') && !f.includes('_lib'));
   for (const file of files) {
     const src = readFileSync(file, 'utf8');
-    // ok(res, data) / ok(res, row) / ok(res, { ...data }) would pass rows through.
+    // ok(response, data) / ok(response, row) / ok(response, { ...data }) would pass rows through.
     assert.doesNotMatch(src, /\bok\(res,\s*(data|row|rows|fresh|event)\s*\)/, file);
     assert.doesNotMatch(src, /\bok\(res,\s*\{\s*\.\.\.(data|row)\b/, file);
-    assert.doesNotMatch(src, /res\.json\(/, file);
+    assert.doesNotMatch(src, /response\.json\(/, file);
   }
 });
 

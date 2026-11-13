@@ -6,16 +6,19 @@
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
-// -> { going, event } with the event as the person now sees it.
+// -> { event } as the person now sees it (event.viewer.going says whether
+// they are going).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
 import { releasedEventBySlug } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
+// What the gftvevents_rsvp database function can answer: null for a place
+// taken (now or before), or the status and error code to refuse with.
 const RESULTS = {
   ok: null,
   already: null,
@@ -25,37 +28,74 @@ const RESULTS = {
   event_over: [409, 'event_over'],
 };
 
-export default route('events/rsvp', async (req, res) => {
-  if (guard(req, res, ['POST'])) return;
-  const session = await requireUser(req, res);
-  if (!session) return;
-  const body = await readJson(req, res);
-  if (!body) return;
-  if (await limited(req, res, 'rsvp', [`u:${session.user.id}`])) return;
-
-  const event = await releasedEventBySlug(String(body.slug ?? '').toLowerCase());
-  if (!event) return fail(res, 404, 'not_found');
-
-  if (body.going === true) {
-    const { data, error } = await db().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
-    if (error) throw error;
-    const result = String(data);
-    if (!(result in RESULTS)) throw new Error(`unexpected rsvp result ${result}`);
-    if (RESULTS[result]) return fail(res, RESULTS[result][0], RESULTS[result][1]);
-    if (result === 'ok') await audit(req, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
-  } else if (body.going === false) {
-    const { error } = await db().from(T.attendees).delete().eq('event_id', event.id).eq('user_id', session.user.id);
-    if (error) throw error;
-    await audit(req, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
-  } else {
-    return fail(res, 400, 'bad_request');
+// Joins (going: true) or leaves (going: false) a released event, then
+// answers with the event as this person now sees it.
+export default route('events/rsvp', async (request, response) => {
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
+  const session = await requireUser(request, response);
+  if (!session) {
+    return;
+  }
+  const body = await readJson(request, response);
+  if (!body) {
+    return;
+  }
+  if (await limited(request, response, 'rsvp', [`u:${session.user.id}`])) {
+    return;
   }
 
-  // Read it again, so the count and spaces left are current.
+  let typedSlug = '';
+  if (body.slug !== null && body.slug !== undefined) {
+    typedSlug = body.slug;
+  }
+  const event = await releasedEventBySlug(String(typedSlug).toLowerCase());
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
+
+  if (body.going === true) {
+    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
+    if (error) {
+      throw error;
+    }
+    const result = String(data);
+    if (!(result in RESULTS)) {
+      throw new Error(`unexpected rsvp result ${result}`);
+    }
+    const refusal = RESULTS[result];
+    if (refusal) {
+      const status = refusal[0];
+      const errorCode = refusal[1];
+      return fail(response, status, errorCode);
+    }
+    if (result === 'ok') {
+      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
+    }
+  } else if (body.going === false) {
+    const { error } = await database()
+      .from(TABLES.attendees)
+      .delete()
+      .eq('event_id', event.id)
+      .eq('user_id', session.user.id);
+    if (error) {
+      throw error;
+    }
+    await audit(request, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
+  } else {
+    return fail(response, 400, 'bad_request');
+  }
+
+  // Read it again, so the count and spaces left are current. If it has gone
+  // in the meantime, the copy read before is shown.
   const fresh = await releasedEventBySlug(event.slug);
-  ok(res, {
-    going: body.going === true,
-    event: publicEventDetail(fresh ?? event, {
+  let shown = event;
+  if (fresh !== null && fresh !== undefined) {
+    shown = fresh;
+  }
+  ok(response, {
+    event: publicEventDetail(shown, {
       signedIn: true,
       going: body.going === true,
       canManage: canManage(session.user),

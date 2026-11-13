@@ -5,8 +5,10 @@
 //
 //   -> { challenge, step: "verify", methods }  a second factor is set up;
 //      /api/auth/verify takes it from here. No session yet.
-//   -> { step: "done", user }                  a public account with no
+//   -> { step: "done" }                        a public account with no
 //      second factor: 2FA is optional for those, so the password is enough.
+//      The page goes on to the next one, which asks /api/auth/session who
+//      is signed in, so no account details come back here.
 //
 // A staff account with no second factor is refused with staff_needs_2fa and
 // told to set an authenticator up on gftv.asia first, as OneLink GFTV does.
@@ -26,47 +28,98 @@ import { refusedForTurnstile } from '../_lib/turnstile.js';
 import { createChallenge, createSession } from '../_lib/session.js';
 import { findForLogin, canSignIn, secondFactorRequired } from '../_lib/users.js';
 import { methodsFor, hasSecondFactor } from '../_lib/factors.js';
-import { selfView } from '../_lib/serialize.js';
 
-export default route('auth/login', async (req, res) => {
-  if (guard(req, res, ['POST'])) return;
-  const body = await readJson(req, res);
-  if (!body) return;
+// The audit log's actor for a sign-in attempt: a public account's own id, or
+// null for a staff account.
+function auditActorId(account) {
+  if (account.kind === 'public') {
+    return account.id;
+  }
+  return null;
+}
 
-  const identifier = String(body.identifier ?? '').trim().toLowerCase();
-  if (await limited(req, res, 'login', [`id:${sha256(identifier)}`])) return;
-  if (await refusedForTurnstile(req, res, body, 'login')) return;
+// Checks the password against both kinds of account, then hands over to the
+// second step, refuses, or signs a public account without 2FA straight in.
+export default route('auth/login', async (request, response) => {
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
+  const body = await readJson(request, response);
+  if (!body) {
+    return;
+  }
+
+  let typedIdentifier = '';
+  if (body.identifier !== null && body.identifier !== undefined) {
+    typedIdentifier = body.identifier;
+  }
+  const identifier = String(typedIdentifier).trim().toLowerCase();
+  if (await limited(request, response, 'login', [`id:${sha256(identifier)}`])) {
+    return;
+  }
+  if (await refusedForTurnstile(request, response, body, 'login')) {
+    return;
+  }
 
   const { staff, member } = await findForLogin(identifier);
-  const [staffOk, memberOk] = await Promise.all([
-    verifyPassword(body.password, staff?.password_hash),
-    verifyPassword(body.password, member?.password_hash),
+  let staffPasswordHash;
+  if (staff !== null && staff !== undefined) {
+    staffPasswordHash = staff.password_hash;
+  }
+  let memberPasswordHash;
+  if (member !== null && member !== undefined) {
+    memberPasswordHash = member.password_hash;
+  }
+  const [staffPasswordMatches, memberPasswordMatches] = await Promise.all([
+    verifyPassword(body.password, staffPasswordHash),
+    verifyPassword(body.password, memberPasswordHash),
   ]);
   // A staff account wins if both somehow match (sign-up refuses staff names
   // and emails, so that would be a public account made before the staff one).
-  const account = staffOk ? staff : memberOk ? member : null;
+  let account = null;
+  if (staffPasswordMatches) {
+    account = staff;
+  } else if (memberPasswordMatches) {
+    account = member;
+  }
   if (!account) {
-    for (const who of [staff, member]) if (who) await audit(req, { action: 'auth.password_failed', actorId: who.kind === 'public' ? who.id : null, details: { kind: who.kind } });
-    return fail(res, 401, 'invalid_credentials');
+    for (const candidate of [staff, member]) {
+      if (candidate) {
+        await audit(request, {
+          action: 'auth.password_failed',
+          actorId: auditActorId(candidate),
+          details: { kind: candidate.kind },
+        });
+      }
+    }
+    return fail(response, 401, 'invalid_credentials');
   }
   if (!canSignIn(account)) {
-    await audit(req, { action: 'auth.denied', actorId: account.kind === 'public' ? account.id : null, details: { kind: account.kind, reason: 'not_allowed' } });
-    return fail(res, 403, account.kind === 'staff' ? 'no_access' : 'account_suspended');
+    await audit(request, {
+      action: 'auth.denied',
+      actorId: auditActorId(account),
+      details: { kind: account.kind, reason: 'not_allowed' },
+    });
+    let refusal = 'account_suspended';
+    if (account.kind === 'staff') {
+      refusal = 'no_access';
+    }
+    return fail(response, 403, refusal);
   }
 
   const methods = await methodsFor(account);
   if (hasSecondFactor(methods, account)) {
     const challenge = await createChallenge({ purpose: 'login', userId: account.id, account });
-    return ok(res, { challenge, step: 'verify', methods });
+    return ok(response, { challenge, step: 'verify', methods });
   }
 
   if (secondFactorRequired(account)) {
-    await audit(req, { action: 'auth.denied', details: { kind: 'staff', reason: 'no_second_factor' } });
-    return fail(res, 403, 'staff_needs_2fa');
+    await audit(request, { action: 'auth.denied', details: { kind: 'staff', reason: 'no_second_factor' } });
+    return fail(response, 403, 'staff_needs_2fa');
   }
 
   // A public account without 2FA: the password is the whole sign-in.
-  await createSession(req, res, account, 'password');
-  await audit(req, { action: 'auth.signed_in', actorId: account.id, details: { method: 'password' } });
-  ok(res, { step: 'done', user: selfView(account) });
+  await createSession(request, response, account, 'password');
+  await audit(request, { action: 'auth.signed_in', actorId: account.id, details: { method: 'password' } });
+  ok(response, { step: 'done' });
 });

@@ -1,55 +1,83 @@
 // An event card, built with the DOM so every piece of event text goes in
 // through textContent and can never become markup.
 
-import { t } from '../assets/i18n/i18n.js';
-import { el } from './ui.js';
+import { t as translate } from '../assets/i18n/i18n.js';
+import { createElement } from './ui.js';
 import { iconNode } from './icons.js';
 import { whenText, dateBadge, placeText, priceText } from './format.js';
 
+// The cover picture with the date badge on it; a calendar tile when there
+// is no picture.
 function cover(event) {
-  const wrap = el('div', { class: 'event-cover' });
+  const wrapper = createElement('div', { class: 'event-cover' });
   if (event.coverImageUrl) {
-    const img = el('img', { alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
+    const image = createElement('img', { alt: '', loading: 'lazy', decoding: 'async', referrerpolicy: 'no-referrer' });
     // A broken picture falls back to the plain tile rather than an empty box.
-    img.addEventListener('error', () => { img.remove(); wrap.classList.add('no-image'); wrap.append(iconNode('calendar')); }, { once: true });
-    img.src = event.coverImageUrl;
-    wrap.append(img);
+    image.addEventListener('error', () => {
+      image.remove();
+      wrapper.classList.add('no-image');
+      wrapper.append(iconNode('calendar'));
+    }, { once: true });
+    image.src = event.coverImageUrl;
+    wrapper.append(image);
   } else {
-    wrap.classList.add('no-image');
-    wrap.append(iconNode('calendar'));
+    wrapper.classList.add('no-image');
+    wrapper.append(iconNode('calendar'));
   }
   const badge = dateBadge(event.when);
   if (badge) {
-    wrap.append(el('span', { class: 'date-badge', 'aria-hidden': 'true' }, [
-      el('span', { class: 'date-badge-day', text: badge.day }),
-      el('span', { class: 'date-badge-month', text: badge.month }),
+    wrapper.append(createElement('span', { class: 'date-badge', 'aria-hidden': 'true' }, [
+      createElement('span', { class: 'date-badge-day', text: badge.day }),
+      createElement('span', { class: 'date-badge-month', text: badge.month }),
     ]));
   }
-  return wrap;
+  return wrapper;
 }
 
-function meta(iconName, text) {
-  return el('li', {}, [iconNode(iconName), el('span', { text })]);
+// One line of the card's details: an icon and its text.
+function metaItem(iconName, text) {
+  return createElement('li', {}, [iconNode(iconName), createElement('span', { text })]);
 }
 
+// The card links to the event page and shows the cover, the kind (and
+// "cancelled" or "full"), the title, the summary when there is one, and the
+// when, where, price and how many are going (when anyone is).
 export function eventCard(event) {
-  const chips = [el('span', { class: `chip kind-${event.kind}`, text: t(`kind.${event.kind}`) })];
-  if (event.cancelled) chips.push(el('span', { class: 'chip chip-danger', text: t('event.state.cancelled') }));
-  else if (event.rsvp === 'full') chips.push(el('span', { class: 'chip', text: t('event.state.full') }));
+  const chips = [createElement('span', { class: `chip kind-${event.kind}`, text: translate(`kind.${event.kind}`) })];
+  if (event.cancelled) {
+    chips.push(createElement('span', { class: 'chip chip-danger', text: translate('event.state.cancelled') }));
+  } else if (event.rsvp === 'full') {
+    chips.push(createElement('span', { class: 'chip', text: translate('event.state.full') }));
+  }
 
-  const going = event.going > 0 ? t('event.going', { count: event.going }) : null;
+  let goingText = null;
+  if (event.going > 0) {
+    goingText = translate('event.going', { count: event.going });
+  }
 
-  return el('a', { class: 'event-card glass-card', href: `/e/${encodeURIComponent(event.slug)}` }, [
-    cover(event),
-    el('div', { class: 'event-card-body' }, [
-      el('div', { class: 'chips' }, chips),
-      el('h3', { class: 'event-card-title', text: event.title }),
-      event.summary ? el('p', { class: 'event-card-summary', text: event.summary }) : null,
-      el('ul', { class: 'event-meta' }, [
-        meta('calendar', whenText(event.when)),
-        meta('map', placeText(event.where)),
-        meta('ticket', priceText(event.price)),
-        going ? meta('users', going) : null,
+  const coverBox = cover(event);
+
+  let summary = null;
+  if (event.summary) {
+    summary = createElement('p', { class: 'event-card-summary', text: event.summary });
+  }
+
+  let goingItem = null;
+  if (goingText) {
+    goingItem = metaItem('users', goingText);
+  }
+
+  return createElement('a', { class: 'event-card glass-card', href: `/e/${encodeURIComponent(event.slug)}` }, [
+    coverBox,
+    createElement('div', { class: 'event-card-body' }, [
+      createElement('div', { class: 'chips' }, chips),
+      createElement('h3', { class: 'event-card-title', text: event.title }),
+      summary,
+      createElement('ul', { class: 'event-meta' }, [
+        metaItem('calendar', whenText(event.when)),
+        metaItem('map', placeText(event.where)),
+        metaItem('ticket', priceText(event.price)),
+        goingItem,
       ]),
     ]),
   ]);

@@ -123,7 +123,8 @@ test('a staff account with an authenticator on gftv.asia signs in with it here',
   assert.equal(bad.json.error, 'code_wrong');
   const good = await b.call(verify, { method: 'POST', body: { challenge: r.json.challenge, method: 'totp', code: totpAt(SHARED_SECRET) } });
   assert.equal(good.status, 200);
-  assert.equal(good.json.user.username, 'staffcat');
+  // The answer is only ok (help desk #18); the session says who it is.
+  assert.equal((await b.call(sessionRoute)).json.user.username, 'staffcat');
   // A used challenge cannot be replayed.
   const replay = await browser().call(verify, { method: 'POST', body: { challenge: r.json.challenge, method: 'totp', code: totpAt(SHARED_SECRET) } });
   assert.equal(replay.json.error, 'challenge_expired');

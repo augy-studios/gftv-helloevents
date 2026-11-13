@@ -8,24 +8,30 @@
 // Codes: the bot sends a six digit code to that chat, which is typed into the
 // sign-in page. Private chats only; a code never goes to a group.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 import { randomToken, sha256 } from './crypto.js';
+import { errorDetail } from './http.js';
 
 export const LINK_TOKEN_MINUTES = 10;
 export const CODE_MINUTES = 5;
 
 export function telegramConfigured() {
-  return (
+  if (
     optionalEnv('TELEGRAM_BOT_TOKEN') !== '' &&
     optionalEnv('TELEGRAM_BOT_USERNAME') !== '' &&
     optionalEnv('TELEGRAM_WEBHOOK_SECRET') !== ''
-  );
+  ) {
+    return true;
+  }
+  return false;
 }
 
 async function callBot(method, payload) {
   const token = optionalEnv('TELEGRAM_BOT_TOKEN');
-  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
+  if (!token) {
+    throw new Error('TELEGRAM_BOT_TOKEN is not set');
+  }
   const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -66,19 +72,30 @@ export function sendTelegram(chatId, text) {
 // an error to the route.
 // ---------------------------------------------------------------------------
 
+// Sends rich, as a rich message, or as its plain fallback when Telegram
+// refuses the rich one. replyMarkup (buttons), when given, goes with either.
 export async function sendRichTelegram(chatId, rich, replyMarkup = null) {
-  if (!rich || !rich.fallback) throw new Error('a rich message needs a plain fallback');
-  const extra = replyMarkup ? { reply_markup: replyMarkup } : {};
+  if (!rich || !rich.fallback) {
+    throw new Error('a rich message needs a plain fallback');
+  }
+  const extra = {};
+  if (replyMarkup) {
+    extra.reply_markup = replyMarkup;
+  }
   try {
+    const richMessage = { markdown: rich.markdown };
+    // skipEntities: a code message, where a six digit number should not
+    // turn into a tappable phone number.
+    if (rich.skipEntities) {
+      richMessage.skip_entity_detection = true;
+    }
     await callBot('sendRichMessage', {
       chat_id: chatId,
-      // skipEntities: a code message, where a six digit number should not
-      // turn into a tappable phone number.
-      rich_message: { markdown: rich.markdown, ...(rich.skipEntities ? { skip_entity_detection: true } : {}) },
+      rich_message: richMessage,
       ...extra,
     });
-  } catch (err) {
-    console.warn(`[helloevents] rich send failed, falling back: ${err?.message ?? err}`);
+  } catch (error) {
+    console.warn(`[helloevents] rich send failed, falling back: ${errorDetail(error)}`);
     await callBot('sendMessage', {
       chat_id: chatId,
       text: rich.fallback,
@@ -92,10 +109,12 @@ export async function sendRichTelegram(chatId, rich, replyMarkup = null) {
 // also accepts HTML tags, so a stray "<" in data could open one) and "$"
 // (a pair of them is a formula in Rich Markdown). Literal markup written in
 // the builders is not escaped.
-const MD_SPECIAL = /([\\*_~`|[\]#>=<$])/g;
+const MARKDOWN_SPECIAL = /([\\*_~`|[\]#>=<$])/g;
 
+// escapeMd: escape Markdown. The short name stays because
+// tests/unit.test.js calls it by that name.
 export function escapeMd(text) {
-  return String(text).replace(MD_SPECIAL, '\\$1');
+  return String(text).replace(MARKDOWN_SPECIAL, '\\$1');
 }
 
 // For a table cell: also flattens newlines so the row stays one line.
@@ -110,7 +129,9 @@ export function richTable(headers, rows) {
     `| ${['', ...headers].join(' | ')} |`,
     `| ${Array(headers.length + 1).fill('---').join(' | ')} |`,
   ];
-  for (const row of rows) lines.push(`| ${row.map(escapeCell).join(' | ')} |`);
+  for (const row of rows) {
+    lines.push(`| ${row.map(escapeCell).join(' | ')} |`);
+  }
   return lines.join('\n');
 }
 
@@ -126,15 +147,17 @@ export function richTable(headers, rows) {
 // ---------------------------------------------------------------------------
 
 export async function createLinkToken(userId, challengeId = null) {
-  await db().from(T.telegramTokens).delete().eq('user_id', userId).is('used_at', null);
+  await database().from(TABLES.telegramTokens).delete().eq('user_id', userId).is('used_at', null);
   const token = randomToken(24);
-  const { error } = await db().from(T.telegramTokens).insert({
+  const { error } = await database().from(TABLES.telegramTokens).insert({
     user_id: userId,
     challenge_id: challengeId,
     token_hash: sha256(token),
     expires_at: new Date(Date.now() + LINK_TOKEN_MINUTES * 60_000).toISOString(),
   });
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return {
     url: `https://t.me/${optionalEnv('TELEGRAM_BOT_USERNAME')}?start=${token}`,
     expiresInMinutes: LINK_TOKEN_MINUTES,
@@ -143,36 +166,53 @@ export async function createLinkToken(userId, challengeId = null) {
 
 // { userId, challengeId } for a live token, spending it, or null.
 export async function spendLinkToken(token) {
-  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
-  const { data, error } = await db()
-    .from(T.telegramTokens)
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) {
+    return null;
+  }
+  const { data, error } = await database()
+    .from(TABLES.telegramTokens)
     .update({ used_at: new Date().toISOString() })
     .eq('token_hash', sha256(token))
     .is('used_at', null)
     .gt('expires_at', new Date().toISOString())
     .select('id, user_id, challenge_id')
     .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
   return { userId: data.user_id, challengeId: data.challenge_id };
 }
 
+// The linked chat: its id (for sending, never sent to a browser) and the
+// Telegram handle the account page shows.
 export async function linkedChat(userId) {
-  const { data, error } = await db()
-    .from(T.telegram)
-    .select('chat_id, telegram_username, linked_at')
+  const { data, error } = await database()
+    .from(TABLES.telegram)
+    .select('chat_id, telegram_username')
     .eq('user_id', userId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return data;
 }
 
 export async function saveLink(userId, chatId, username) {
-  const { error } = await db()
-    .from(T.telegram)
+  // A chat with no Telegram username is stored with null.
+  let telegramUsername = null;
+  if (username) {
+    telegramUsername = username;
+  }
+  const { error } = await database()
+    .from(TABLES.telegram)
     .upsert(
-      { user_id: userId, chat_id: chatId, telegram_username: username || null, linked_at: new Date().toISOString() },
+      { user_id: userId, chat_id: chatId, telegram_username: telegramUsername, linked_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 }
