@@ -1,8 +1,9 @@
-// GET /api/me/rsvps -> { upcoming: [...], past: [...] }
+// GET /api/me/rsvps -> { upcoming: [{ event }], past: [{ event }] }
 //
-// The signed-in person's RSVPs, as event cards. An event that has since been
-// moved back to draft, or had its release time pushed into the future, drops
-// out of this list like it drops out of the feed.
+// The signed-in person's RSVPs, as event cards: upcoming ones by start time,
+// past ones newest RSVP first. An event that has since been moved back to
+// draft, or had its release time pushed into the future, drops out of this
+// list like it drops out of the feed.
 
 import { route, guard, ok } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
@@ -18,7 +19,7 @@ export default route('me/rsvps', async (req, res) => {
 
   const { data, error } = await db()
     .from(T.attendees)
-    .select(`created_at, event:${T.events} ( ${CARD_COLUMNS} )`)
+    .select(`event:${T.events} ( ${CARD_COLUMNS} )`)
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false })
     .limit(200);

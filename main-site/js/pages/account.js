@@ -68,6 +68,15 @@ function renderNotify() {
         : t('notify.push-off-here');
 }
 
+// "Last used 14 Nov 2026, 2:00 pm" under a passkey, or "Never used" for one
+// that has not signed in yet (lastUsedAt is null).
+function passkeyLastUsed(lastUsedAt) {
+  if (!lastUsedAt) {
+    return t('security.passkey-never-used');
+  }
+  return t('security.passkey-last-used', { date: formatDate(lastUsedAt) });
+}
+
 function renderSecurity() {
   const s = security;
   $('securityLede').textContent = t(s.required ? 'security.lede-staff' : 'security.lede-public');
@@ -88,6 +97,7 @@ function renderSecurity() {
         el('span', { class: 'item-main' }, [
           el('span', { text: p.label || t('security.passkey-unnamed') }),
           el('span', { class: 'muted small', text: t('security.passkey-added', { date: formatDate(p.createdAt) }) }),
+          el('span', { class: 'muted small', text: passkeyLastUsed(p.lastUsedAt) }),
         ]),
         el('button', {
           class: 'btn btn-small btn-quiet',

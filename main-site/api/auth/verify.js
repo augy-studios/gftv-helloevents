@@ -11,6 +11,9 @@
 //   method "passkey"          { response }  the browser's assertion
 //
 // Five wrong answers end the challenge, on top of the rate limits.
+//
+// A passed factor answers only ok and sets the session cookie: the sign-in
+// page moves on, and the next page asks /api/auth/session who is signed in.
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { sha256 } from '../_lib/crypto.js';
@@ -20,7 +23,6 @@ import { createSession, findChallenge, failChallengeAttempt, deleteChallenge } f
 import { loadAccount, canSignIn } from '../_lib/users.js';
 import { totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
 import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
-import { selfView } from '../_lib/serialize.js';
 
 export default route('auth/verify', async (req, res) => {
   if (guard(req, res, ['POST'])) return;
@@ -76,5 +78,5 @@ export default route('auth/verify', async (req, res) => {
   await deleteChallenge(challenge);
   await createSession(req, res, user, body.method);
   await audit(req, { action: 'auth.signed_in', actorId: user.id, details: { method: body.method } });
-  ok(res, { user: selfView(user) });
+  ok(res);
 });

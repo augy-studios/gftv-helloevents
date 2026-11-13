@@ -2,7 +2,8 @@
 //
 // A public account, for RSVPs and notifications. Signs the new account in
 // straight away (2FA is optional for public accounts; the account page
-// offers it). -> { user }
+// offers it). Answers only ok: the page moves on to the account page, which
+// asks /api/auth/session who is signed in.
 //
 // Protected by Turnstile (action "signup", turnstile.js) and rate
 // limits on the connection and the email. The connection limit is 5 an hour,
@@ -27,7 +28,6 @@ import { refusedForTurnstile } from '../_lib/turnstile.js';
 import { createSession } from '../_lib/session.js';
 import { identityTaken, loadAccount } from '../_lib/users.js';
 import { validateSignup } from '../_lib/account-rules.js';
-import { selfView } from '../_lib/serialize.js';
 
 export default route('auth/signup', async (req, res) => {
   if (guard(req, res, ['POST'])) return;
@@ -70,5 +70,5 @@ export default route('auth/signup', async (req, res) => {
   const account = await loadAccount(data.id);
   await createSession(req, res, account, 'password');
   await audit(req, { action: 'account.created', actorId: account.id, details: allowance ? { allowance: allowance.id } : {} });
-  ok(res, { user: selfView(account) });
+  ok(res);
 });

@@ -6,7 +6,8 @@
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
-// -> { going, event } with the event as the person now sees it.
+// -> { event } as the person now sees it (event.viewer.going says whether
+// they are going).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
@@ -54,7 +55,6 @@ export default route('events/rsvp', async (req, res) => {
   // Read it again, so the count and spaces left are current.
   const fresh = await releasedEventBySlug(event.slug);
   ok(res, {
-    going: body.going === true,
     event: publicEventDetail(fresh ?? event, {
       signedIn: true,
       going: body.going === true,

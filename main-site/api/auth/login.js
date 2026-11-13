@@ -5,8 +5,10 @@
 //
 //   -> { challenge, step: "verify", methods }  a second factor is set up;
 //      /api/auth/verify takes it from here. No session yet.
-//   -> { step: "done", user }                  a public account with no
+//   -> { step: "done" }                        a public account with no
 //      second factor: 2FA is optional for those, so the password is enough.
+//      The page goes on to the next one, which asks /api/auth/session who
+//      is signed in, so no account details come back here.
 //
 // A staff account with no second factor is refused with staff_needs_2fa and
 // told to set an authenticator up on gftv.asia first, as OneLink GFTV does.
@@ -26,7 +28,6 @@ import { refusedForTurnstile } from '../_lib/turnstile.js';
 import { createChallenge, createSession } from '../_lib/session.js';
 import { findForLogin, canSignIn, secondFactorRequired } from '../_lib/users.js';
 import { methodsFor, hasSecondFactor } from '../_lib/factors.js';
-import { selfView } from '../_lib/serialize.js';
 
 export default route('auth/login', async (req, res) => {
   if (guard(req, res, ['POST'])) return;
@@ -68,5 +69,5 @@ export default route('auth/login', async (req, res) => {
   // A public account without 2FA: the password is the whole sign-in.
   await createSession(req, res, account, 'password');
   await audit(req, { action: 'auth.signed_in', actorId: account.id, details: { method: 'password' } });
-  ok(res, { step: 'done', user: selfView(account) });
+  ok(res, { step: 'done' });
 });

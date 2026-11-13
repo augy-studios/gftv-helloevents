@@ -210,7 +210,8 @@ test('attendees-only address and the online link go only to people going and edi
 
 test('RSVP state and spaces come from the count', () => {
   assert.equal(ser.publicEventCard(row(), now).rsvp, 'open');
-  assert.equal(ser.publicEventCard(row(), now).left, 7);
+  // Spaces left are on the event page only, not on cards (help desk #18).
+  assert.equal(ser.publicEventDetail(row(), {}, now).left, 7);
   assert.equal(ser.publicEventCard(row({ gftvevents_attendees: [{ count: 10 }] }), now).rsvp, 'full');
   assert.equal(ser.publicEventCard(row({ status: 'cancelled' }), now).rsvp, 'cancelled');
   assert.equal(ser.publicEventCard(row({ rsvp_open: false }), now).rsvp, 'closed');

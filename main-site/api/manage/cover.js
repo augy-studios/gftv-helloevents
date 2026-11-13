@@ -4,14 +4,14 @@
 // Editors and admins only. image is a base64 WebP the browser made
 // (js/cover-upload.js); covers.js checks and re-encodes it before it goes to
 // the gftvevents_covers bucket. The old picture is deleted after the event
-// points at the new one. -> { event } (the editor view)
+// points at the new one. -> { event: { coverImageUrl, hasCover } }, all the
+// edit form redraws (serialize.js managedCover).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { db, T } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
-import { MANAGE_COLUMNS } from '../_lib/events.js';
-import { managedEvent } from '../_lib/serialize.js';
+import { managedCover } from '../_lib/serialize.js';
 import { prepareCover, storeCover, deleteCover, MAX_UPLOAD_BYTES } from '../_lib/covers.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,7 +43,7 @@ export default route('manage/cover', async (req, res) => {
     .from(T.events)
     .update({ cover_image_path: path, updated_by: session.user.id })
     .eq('id', event.id)
-    .select(MANAGE_COLUMNS)
+    .select('cover_image_path')
     .single();
   if (saveError) {
     await deleteCover(path);
@@ -51,5 +51,5 @@ export default route('manage/cover', async (req, res) => {
   }
   await deleteCover(previous);
   await audit(req, { action: path ? 'event.cover_set' : 'event.cover_removed', actorId: session.user.id, eventId: event.id, details: { bytes } });
-  ok(res, { event: managedEvent(saved) });
+  ok(res, { event: managedCover(saved) });
 });

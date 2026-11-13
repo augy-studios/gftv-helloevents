@@ -157,10 +157,12 @@ export async function spendLinkToken(token) {
   return { userId: data.user_id, challengeId: data.challenge_id };
 }
 
+// The linked chat: its id (for sending, never sent to a browser) and the
+// Telegram handle the account page shows.
 export async function linkedChat(userId) {
   const { data, error } = await db()
     .from(T.telegram)
-    .select('chat_id, telegram_username, linked_at')
+    .select('chat_id, telegram_username')
     .eq('user_id', userId)
     .maybeSingle();
   if (error) throw error;

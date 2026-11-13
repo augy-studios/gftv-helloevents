@@ -20,6 +20,11 @@
 //   emails, notification choices of other people and IP hashes have no
 //   serializer at all, so they cannot reach a browser. Public accounts are
 //   held to exactly the same lists as staff ones.
+//
+// And each answer carries only what the page that asks for it shows, plus
+// the ids its buttons send back (help desk #18): nothing a page never reads,
+// even about the person themselves. tests/response-keys.test.js pins every
+// answer's exact keys.
 
 import { isOver, datesAnnounced, utcToWall } from './event-rules.js';
 import { roleOf, canManage } from './users.js';
@@ -56,6 +61,9 @@ export function attendeeView(row) {
   };
 }
 
+// A passkey on the account page: its name, when it was added and when it was
+// last used ("Never used" while lastUsedAt is null), and the id the Remove
+// button sends.
 export function passkeyView(row) {
   return { id: row.id, label: row.label || null, createdAt: row.created_at, lastUsedAt: row.last_used_at };
 }
@@ -64,16 +72,25 @@ export function passkeyView(row) {
 // Events
 // ---------------------------------------------------------------------------
 
-function priceView(row) {
+// The price. A card shows only the price itself; the event page also shows
+// the organiser's note under it, so only the page asks for it (withNote).
+function priceView(row, { withNote = false } = {}) {
   if (row.price_hidden || row.price_type === 'tba') return { type: 'tba' };
-  if (row.price_type === 'free') return { type: 'free', note: row.price_note || null };
-  return {
-    type: 'paid',
-    min: row.price_min === null || row.price_min === undefined ? null : Number(row.price_min),
-    max: row.price_max === null || row.price_max === undefined ? null : Number(row.price_max),
-    currency: row.currency || null,
-    note: row.price_note || null,
-  };
+  let view;
+  if (row.price_type === 'free') {
+    view = { type: 'free' };
+  } else {
+    view = {
+      type: 'paid',
+      min: row.price_min === null || row.price_min === undefined ? null : Number(row.price_min),
+      max: row.price_max === null || row.price_max === undefined ? null : Number(row.price_max),
+      currency: row.currency || null,
+    };
+  }
+  if (withNote) {
+    view.note = row.price_note || null;
+  }
+  return view;
 }
 
 function whenView(row) {
@@ -102,7 +119,9 @@ function rsvpState(row, going, now) {
   return 'open';
 }
 
-// A card in the public feed. Only call this for a released event.
+// A card in the public feed (and in "Events you are going to" on the account
+// page). Only call this for a released event. A card shows no spaces left
+// and no price note; the event page adds those.
 export function publicEventCard(row, now = Date.now()) {
   const going = goingCount(row);
   return {
@@ -121,7 +140,6 @@ export function publicEventCard(row, now = Date.now()) {
     },
     price: priceView(row),
     going,
-    ...spaces(row, going),
     rsvp: rsvpState(row, going, now),
   };
 }
@@ -134,6 +152,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   const addressShown = !row.address_attendees_only || insider;
   return {
     ...card,
+    price: priceView(row, { withNote: true }),
+    ...spaces(row, card.going),
     description: row.description || null,
     organiserName: row.organiser_name || null,
     externalUrl: row.external_url || null,
@@ -152,16 +172,20 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   };
 }
 
-// One of my RSVPs, for the account page.
+// One of my RSVPs, for the account page: the event's card. The page shows
+// no RSVP date, so none is sent.
 export function myRsvpView(row, now = Date.now()) {
   const event = row.event;
-  return {
-    rsvpAt: row.created_at,
-    event: event ? publicEventCard(event, now) : null,
-  };
+  let card = null;
+  if (event) {
+    card = publicEventCard(event, now);
+  }
+  return { event: card };
 }
 
-// An editor's list row.
+// An editor's list row: what the list on /manage shows (title, status, kind,
+// date or "to be announced", people going) and the id and slug its Edit
+// button and ?slug= link use.
 export function managedSummary(row, now = Date.now()) {
   return {
     id: row.id,
@@ -170,20 +194,35 @@ export function managedSummary(row, now = Date.now()) {
     kind: row.kind,
     status: row.status,
     released: row.status !== 'draft' && (!row.publish_at || new Date(row.publish_at).getTime() <= now),
-    publishAt: row.publish_at || null,
     startsAt: row.starts_at || null,
     datesHidden: row.dates_hidden === true,
-    timezone: row.timezone,
     going: goingCount(row),
     capacity: row.capacity ?? null,
-    updatedAt: row.updated_at,
   };
 }
 
-// Everything an editor can change, in the shape the edit form sends back.
-export function managedEvent(row, now = Date.now()) {
+// The cover picture alone, for the answer to an upload or removal
+// (api/manage/cover.js): the edit form redraws only its cover preview.
+export function managedCover(row) {
   return {
-    ...managedSummary(row, now),
+    coverImageUrl: coverUrl(row.cover_image_path) || '',
+    hasCover: Boolean(row.cover_image_path),
+  };
+}
+
+// Everything an editor can change, in the shape the edit form sends back,
+// plus the id and slug the form's buttons use. Nothing the form does not
+// fill in: no counts, no "released" flag, no stored timestamps.
+export function managedEvent(row) {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    kind: row.kind,
+    status: row.status,
+    datesHidden: row.dates_hidden === true,
+    timezone: row.timezone,
+    capacity: row.capacity ?? null,
     summary: row.summary || '',
     description: row.description || '',
     startsLocal: utcToWall(row.starts_at, row.timezone),
@@ -196,8 +235,7 @@ export function managedEvent(row, now = Date.now()) {
     addressAttendeesOnly: row.address_attendees_only === true,
     city: row.city || '',
     country: row.country || '',
-    coverImageUrl: coverUrl(row.cover_image_path) || '',
-    hasCover: Boolean(row.cover_image_path),
+    ...managedCover(row),
     externalUrl: row.external_url || '',
     organiserName: row.organiser_name || '',
     priceType: row.price_type,
@@ -208,6 +246,5 @@ export function managedEvent(row, now = Date.now()) {
     priceNote: row.price_note || '',
     rsvpOpen: row.rsvp_open !== false,
     staffNotes: row.staff_notes || '',
-    createdAt: row.created_at,
   };
 }

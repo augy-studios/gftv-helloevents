@@ -8,7 +8,7 @@
 // POST { action: "passkey-options", password }  -> { options }
 // POST { action: "passkey-finish", response, label? }
 // POST { action: "passkey-remove", id, password }
-// POST { action: "telegram-link" }              -> { url, expiresInMinutes }
+// POST { action: "telegram-link" }              -> { url }
 // POST { action: "telegram-unlink", password }
 // POST { action: "backup-regenerate", password } -> { codes }
 // POST { action: "delete-account", password }   public accounts only
@@ -36,6 +36,8 @@ import { LIMITS } from '../_lib/event-rules.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// What the Security section of the account page shows, and the passkey ids
+// its Remove buttons send.
 async function summary(userId) {
   const user = await loadAccount(userId, { auth: true });
   const [passkeys, chat, backupLeft, localTotp] = await Promise.all([
@@ -45,7 +47,6 @@ async function summary(userId) {
     hasLocalTotp(userId),
   ]);
   return {
-    kind: user.kind,
     required: secondFactorRequired(user),
     totp: { shared: Boolean(user.totp_secret), local: localTotp },
     passkeys: passkeys.map(passkeyView),
@@ -143,7 +144,9 @@ export default route('me/security', async (req, res) => {
     }
     case 'telegram-link': {
       if (!telegramConfigured()) return fail(res, 400, 'telegram_off');
-      return ok(res, await createLinkToken(userId, null));
+      // Only the link: the page opens it and shows no expiry.
+      const { url } = await createLinkToken(userId, null);
+      return ok(res, { url });
     }
     case 'telegram-unlink': {
       if (!(await passwordOk())) return;
