@@ -2,7 +2,7 @@
 // or an event whose release time has not come never leaves the database for
 // a public request; the serializers then pick the fields each caller may see.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { releasedFilter, isSlug } from './event-rules.js';
 
 // The feed needs no description, address, online link, price note or staff
@@ -25,7 +25,7 @@ export const FEED_PAGE = 24;
 // "tba" (dates not announced yet). kind: a KINDS value or "" for all.
 export async function releasedFeed({ when = 'upcoming', kind = '', offset = 0 } = {}) {
   const now = new Date().toISOString();
-  let q = releasedFilter(db().from(T.events).select(CARD_COLUMNS), now);
+  let q = releasedFilter(database().from(TABLES.events).select(CARD_COLUMNS), now);
   if (kind) q = q.eq('kind', kind);
   if (when === 'tba') {
     // A table check makes starts_at required unless dates_hidden is set, so
@@ -45,7 +45,7 @@ export async function releasedFeed({ when = 'upcoming', kind = '', offset = 0 } 
 
 export async function releasedEventBySlug(slug) {
   if (!isSlug(slug)) return null;
-  const q = releasedFilter(db().from(T.events).select(DETAIL_COLUMNS).eq('slug', slug));
+  const q = releasedFilter(database().from(TABLES.events).select(DETAIL_COLUMNS).eq('slug', slug));
   const { data, error } = await q.maybeSingle();
   if (error) throw error;
   return data;
@@ -54,14 +54,14 @@ export async function releasedEventBySlug(slug) {
 // For editors: any event, released or not.
 export async function anyEventBySlug(slug, columns = MANAGE_COLUMNS) {
   if (!isSlug(slug)) return null;
-  const { data, error } = await db().from(T.events).select(columns).eq('slug', slug).maybeSingle();
+  const { data, error } = await database().from(TABLES.events).select(columns).eq('slug', slug).maybeSingle();
   if (error) throw error;
   return data;
 }
 
 export async function isGoing(eventId, userId) {
-  const { data, error } = await db()
-    .from(T.attendees)
+  const { data, error } = await database()
+    .from(TABLES.attendees)
     .select('event_id')
     .eq('event_id', eventId)
     .eq('user_id', userId)

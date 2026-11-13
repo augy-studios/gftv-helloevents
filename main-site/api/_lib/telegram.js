@@ -8,7 +8,7 @@
 // Codes: the bot sends a six digit code to that chat, which is typed into the
 // sign-in page. Private chats only; a code never goes to a group.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 import { randomToken, sha256 } from './crypto.js';
 
@@ -126,9 +126,9 @@ export function richTable(headers, rows) {
 // ---------------------------------------------------------------------------
 
 export async function createLinkToken(userId, challengeId = null) {
-  await db().from(T.telegramTokens).delete().eq('user_id', userId).is('used_at', null);
+  await database().from(TABLES.telegramTokens).delete().eq('user_id', userId).is('used_at', null);
   const token = randomToken(24);
-  const { error } = await db().from(T.telegramTokens).insert({
+  const { error } = await database().from(TABLES.telegramTokens).insert({
     user_id: userId,
     challenge_id: challengeId,
     token_hash: sha256(token),
@@ -144,8 +144,8 @@ export async function createLinkToken(userId, challengeId = null) {
 // { userId, challengeId } for a live token, spending it, or null.
 export async function spendLinkToken(token) {
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
-  const { data, error } = await db()
-    .from(T.telegramTokens)
+  const { data, error } = await database()
+    .from(TABLES.telegramTokens)
     .update({ used_at: new Date().toISOString() })
     .eq('token_hash', sha256(token))
     .is('used_at', null)
@@ -160,8 +160,8 @@ export async function spendLinkToken(token) {
 // The linked chat: its id (for sending, never sent to a browser) and the
 // Telegram handle the account page shows.
 export async function linkedChat(userId) {
-  const { data, error } = await db()
-    .from(T.telegram)
+  const { data, error } = await database()
+    .from(TABLES.telegram)
     .select('chat_id, telegram_username')
     .eq('user_id', userId)
     .maybeSingle();
@@ -170,8 +170,8 @@ export async function linkedChat(userId) {
 }
 
 export async function saveLink(userId, chatId, username) {
-  const { error } = await db()
-    .from(T.telegram)
+  const { error } = await database()
+    .from(TABLES.telegram)
     .upsert(
       { user_id: userId, chat_id: chatId, telegram_username: username || null, linked_at: new Date().toISOString() },
       { onConflict: 'user_id' }

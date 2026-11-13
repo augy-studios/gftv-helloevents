@@ -6,20 +6,20 @@
 // list like it drops out of the feed.
 
 import { route, guard, ok } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { requireUser } from '../_lib/session.js';
 import { isReleased, isOver } from '../_lib/event-rules.js';
 import { CARD_COLUMNS } from '../_lib/events.js';
 import { myRsvpView } from '../_lib/serialize.js';
 
-export default route('me/rsvps', async (req, res) => {
-  if (guard(req, res, ['GET'])) return;
-  const session = await requireUser(req, res);
+export default route('me/rsvps', async (request, response) => {
+  if (guard(request, response, ['GET'])) return;
+  const session = await requireUser(request, response);
   if (!session) return;
 
-  const { data, error } = await db()
-    .from(T.attendees)
-    .select(`event:${T.events} ( ${CARD_COLUMNS} )`)
+  const { data, error } = await database()
+    .from(TABLES.attendees)
+    .select(`event:${TABLES.events} ( ${CARD_COLUMNS} )`)
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false })
     .limit(200);
@@ -30,5 +30,5 @@ export default route('me/rsvps', async (req, res) => {
   const startOf = (row) => (row.event.starts_at ? new Date(row.event.starts_at).getTime() : Infinity);
   const upcoming = rows.filter((row) => !isOver(row.event, now)).sort((a, b) => startOf(a) - startOf(b));
   const past = rows.filter((row) => isOver(row.event, now));
-  ok(res, { upcoming: upcoming.map((r) => myRsvpView(r, now)), past: past.map((r) => myRsvpView(r, now)) });
+  ok(response, { upcoming: upcoming.map((r) => myRsvpView(r, now)), past: past.map((r) => myRsvpView(r, now)) });
 });

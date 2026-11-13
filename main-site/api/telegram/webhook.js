@@ -16,7 +16,7 @@
 // update that was understood and refused.
 
 import { route, readJson, send } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { optionalEnv, siteHost } from '../_lib/env.js';
 import { safeEqual } from '../_lib/crypto.js';
 import { audit } from '../_lib/guards.js';
@@ -24,25 +24,25 @@ import { sendTelegram, sendRichTelegram, spendLinkToken, saveLink } from '../_li
 import { helpMessage } from '../_lib/telegram-messages.js';
 import { loadAccount, canSignIn } from '../_lib/users.js';
 
-export default route('telegram/webhook', async (req, res) => {
-  if (req.method !== 'POST') return send(res, 405, { ok: false });
+export default route('telegram/webhook', async (request, response) => {
+  if (request.method !== 'POST') return send(response, 405, { ok: false });
   const secret = optionalEnv('TELEGRAM_WEBHOOK_SECRET');
-  const given = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+  const given = String(request.headers['x-telegram-bot-api-secret-token'] || '');
   if (!secret) {
     console.warn('[helloevents] telegram webhook: TELEGRAM_WEBHOOK_SECRET is not set; refusing the update');
-    return send(res, 401, { ok: false });
+    return send(response, 401, { ok: false });
   }
   if (!safeEqual(given, secret)) {
     console.warn(`[helloevents] telegram webhook: secret token ${given ? 'does not match' : 'missing'}; check setWebhook's secret_token`);
-    return send(res, 401, { ok: false });
+    return send(response, 401, { ok: false });
   }
 
-  const update = await readJson(req, res);
+  const update = await readJson(request, response);
   if (!update) return;
   const message = update.message;
   const chat = message?.chat;
   const text = typeof message?.text === 'string' ? message.text.trim() : '';
-  if (!chat || chat.type !== 'private' || !text) return send(res, 200, { ok: true });
+  if (!chat || chat.type !== 'private' || !text) return send(response, 200, { ok: true });
 
   const reply = (body) =>
     sendTelegram(chat.id, body).catch((cause) => console.warn('[helloevents] telegram reply:', cause?.message ?? cause));
@@ -56,28 +56,28 @@ export default route('telegram/webhook', async (req, res) => {
     // longer issued and are refused like an expired one.
     if (!token || token.challengeId || !user || !canSignIn(user)) {
       await reply('That link has expired or was already used. Make a new one from your account page.');
-      return send(res, 200, { ok: true });
+      return send(response, 200, { ok: true });
     }
 
     // From the account page, by someone already signed in.
     await saveLink(user.id, chat.id, username);
     await audit(null, { action: 'security.telegram_linked', actorId: user.id });
     await reply(`Linked to the account ${user.username} on ${siteHost()}. Sign-in codes will arrive here, and event notices if you switch them on in your account.`);
-    return send(res, 200, { ok: true });
+    return send(response, 200, { ok: true });
   }
 
   if (/^\/unlink(?:@\w+)?$/.test(text)) {
-    const { data, error } = await db().from(T.telegram).delete().eq('chat_id', chat.id).select('user_id');
+    const { data, error } = await database().from(TABLES.telegram).delete().eq('chat_id', chat.id).select('user_id');
     if (error) throw error;
     for (const row of data ?? []) {
       await audit(null, { action: 'security.telegram_unlinked', actorId: row.user_id, details: { via: 'bot' } });
     }
     await reply((data ?? []).length > 0 ? 'Unlinked. This chat will not receive codes any more.' : 'This chat is not linked to any account.');
-    return send(res, 200, { ok: true });
+    return send(response, 200, { ok: true });
   }
 
   await sendRichTelegram(chat.id, helpMessage()).catch((cause) =>
     console.warn('[helloevents] telegram help:', cause?.message ?? cause)
   );
-  send(res, 200, { ok: true });
+  send(response, 200, { ok: true });
 });

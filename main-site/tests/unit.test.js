@@ -259,10 +259,10 @@ test('no route sends a database result straight out', () => {
   })(api).filter((f) => f.endsWith('.js') && !f.includes('_lib'));
   for (const file of files) {
     const src = readFileSync(file, 'utf8');
-    // ok(res, data) / ok(res, row) / ok(res, { ...data }) would pass rows through.
+    // ok(response, data) / ok(response, row) / ok(response, { ...data }) would pass rows through.
     assert.doesNotMatch(src, /\bok\(res,\s*(data|row|rows|fresh|event)\s*\)/, file);
     assert.doesNotMatch(src, /\bok\(res,\s*\{\s*\.\.\.(data|row)\b/, file);
-    assert.doesNotMatch(src, /res\.json\(/, file);
+    assert.doesNotMatch(src, /response\.json\(/, file);
   }
 });
 

@@ -5,7 +5,7 @@
 // A name is "folded" before it is compared: lowercased, accents dropped,
 // common look-alike letters from Cyrillic and Greek mapped to Latin, digits
 // and symbols used as letters (leetspeak) mapped back, and everything that
-// is not a letter or a digit removed, so "S.T.A.F.F", "5taff", "Ѕtaff" (with
+// is not a letter or a digit removed, so "S.TABLES.A.F.F", "5taff", "Ѕtaff" (with
 // a Cyrillic S) and "s t a f f" all fold to "staff". "1" and "|" can stand
 // for i or l, so both readings are tried.
 //
@@ -17,7 +17,7 @@
 //
 // Pure functions first, so tests/unit.test.js runs them directly.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 
 const LOOKALIKE = {
   // Cyrillic
@@ -94,7 +94,7 @@ export function forgetNameFilters() {
 
 export async function customTerms() {
   if (Date.now() - cache.at < 60_000) return cache.terms;
-  const { data, error } = await db().from(T.nameFilters).select('term').limit(2000);
+  const { data, error } = await database().from(TABLES.nameFilters).select('term').limit(2000);
   if (error) {
     // A missing table (003 not run yet) or a hiccup: the built-in list still
     // applies.

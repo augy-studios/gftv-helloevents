@@ -3,47 +3,47 @@
 // and member password reset codes for admins. The server checks the role on
 // every request; hiding sections here is only tidiness.
 
-import { t, onChange } from '../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../assets/i18n/i18n.js';
 import { api, post } from './api.js';
-import { el, withBusy, formatDate, copyText } from './ui.js';
+import { createElement, withBusy, formatDate, copyText } from './ui.js';
 import { iconNode } from './icons.js';
 
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 let state = null;
 let admin = false;
 
 function renderAllowances() {
-  $('allowanceHere').textContent = t(state.here ? 'admin.allowance-here-on' : 'admin.allowance-here-off');
-  $('allowanceList').replaceChildren(
-    ...state.allowances.map((a) => el('li', { class: 'item-row' }, [
+  byId('allowanceHere').textContent = translate(state.here ? 'admin.allowance-here-on' : 'admin.allowance-here-off');
+  byId('allowanceList').replaceChildren(
+    ...state.allowances.map((a) => createElement('li', { class: 'item-row' }, [
       iconNode('users'),
-      el('span', { class: 'item-main' }, [
-        el('span', { text: `${a.label || t('admin.allowance-unnamed')}${a.here ? ` (${t('admin.allowance-this')})` : ''}` }),
-        el('span', { class: 'muted small', text: t('admin.allowance-detail', { rate: a.perHour, until: formatDate(a.expiresAt), by: a.by || '?' }) }),
+      createElement('span', { class: 'item-main' }, [
+        createElement('span', { text: `${a.label || translate('admin.allowance-unnamed')}${a.here ? ` (${translate('admin.allowance-this')})` : ''}` }),
+        createElement('span', { class: 'muted small', text: translate('admin.allowance-detail', { rate: a.perHour, until: formatDate(a.expiresAt), by: a.by || '?' }) }),
       ]),
-      el('button', { class: 'btn btn-small btn-quiet', type: 'button', text: t('admin.allowance-end'), onclick: () => revoke(a.id) }),
+      createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('admin.allowance-end'), onclick: () => revoke(a.id) }),
     ]))
   );
 }
 
 function renderFilters() {
-  $('builtInTerms').textContent = state.builtIn.join(', ');
-  $('filterList').replaceChildren(
+  byId('builtInTerms').textContent = state.builtIn.join(', ');
+  byId('filterList').replaceChildren(
     ...(state.filters.length === 0
-      ? [el('li', { class: 'muted small', text: t('admin.filter-none') })]
-      : state.filters.map((f) => el('li', { class: 'item-row' }, [
-        el('span', { class: 'item-main', text: f.term }),
-        el('button', { class: 'btn btn-small btn-quiet', type: 'button', text: t('security.remove'), 'aria-label': t('admin.filter-remove', { term: f.term }), onclick: () => removeFilter(f.id) }),
+      ? [createElement('li', { class: 'muted small', text: translate('admin.filter-none') })]
+      : state.filters.map((f) => createElement('li', { class: 'item-row' }, [
+        createElement('span', { class: 'item-main', text: f.term }),
+        createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('security.remove'), 'aria-label': translate('admin.filter-remove', { term: f.term }), onclick: () => removeFilter(f.id) }),
       ])))
   );
-  $('flaggedList').replaceChildren(
+  byId('flaggedList').replaceChildren(
     ...(state.flagged.length === 0
-      ? [el('li', { class: 'muted small', text: t('admin.flagged-none') })]
-      : state.flagged.map((f) => el('li', { class: 'item-row' }, [
+      ? [createElement('li', { class: 'muted small', text: translate('admin.flagged-none') })]
+      : state.flagged.map((f) => createElement('li', { class: 'item-row' }, [
         iconNode('alert'),
-        el('span', { class: 'item-main' }, [
-          el('span', { text: f.displayName }),
-          el('span', { class: 'muted small', text: t('admin.flagged-detail', { username: f.username, term: f.term }) }),
+        createElement('span', { class: 'item-main' }, [
+          createElement('span', { text: f.displayName }),
+          createElement('span', { class: 'muted small', text: translate('admin.flagged-detail', { username: f.username, term: f.term }) }),
         ]),
       ])))
   );
@@ -55,7 +55,7 @@ function render() {
 }
 
 async function revoke(id) {
-  await withBusy(null, $('allowanceError'), async () => {
+  await withBusy(null, byId('allowanceError'), async () => {
     const data = await post('/api/manage/admin', { action: 'allowance-revoke', id });
     state = { ...state, ...data };
     renderAllowances();
@@ -63,7 +63,7 @@ async function revoke(id) {
 }
 
 async function removeFilter(id) {
-  await withBusy(null, $('filterError'), async () => {
+  await withBusy(null, byId('filterError'), async () => {
     const data = await post('/api/manage/admin', { action: 'filter-remove', id });
     state = { ...state, ...data };
     renderFilters();
@@ -77,45 +77,45 @@ export async function startTools(me) {
   } catch {
     return; // the events still work; the tools stay hidden
   }
-  $('allowanceBox').hidden = false;
-  $('filterBox').hidden = !admin;
-  $('resetBox').hidden = !admin;
+  byId('allowanceBox').hidden = false;
+  byId('filterBox').hidden = !admin;
+  byId('resetBox').hidden = !admin;
   render();
 
-  $('allowanceForm').addEventListener('submit', (e) => {
+  byId('allowanceForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    withBusy($('allowanceSubmit'), $('allowanceError'), async () => {
+    withBusy(byId('allowanceSubmit'), byId('allowanceError'), async () => {
       const data = await post('/api/manage/admin', {
         action: 'allowance-grant',
-        hours: Number($('allowanceHours').value),
-        perHour: Number($('allowanceRate').value),
-        label: $('allowanceLabel').value,
+        hours: Number(byId('allowanceHours').value),
+        perHour: Number(byId('allowanceRate').value),
+        label: byId('allowanceLabel').value,
       });
       state = { ...state, ...data };
-      $('allowanceLabel').value = '';
+      byId('allowanceLabel').value = '';
       renderAllowances();
     });
   });
 
-  $('filterForm').addEventListener('submit', (e) => {
+  byId('filterForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    withBusy($('filterSubmit'), $('filterError'), async () => {
-      const data = await post('/api/manage/admin', { action: 'filter-add', term: $('filterTerm').value });
+    withBusy(byId('filterSubmit'), byId('filterError'), async () => {
+      const data = await post('/api/manage/admin', { action: 'filter-add', term: byId('filterTerm').value });
       state = { ...state, ...data };
-      $('filterTerm').value = '';
+      byId('filterTerm').value = '';
       renderFilters();
     });
   });
 
-  $('resetForm').addEventListener('submit', (e) => {
+  byId('resetForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    $('resetResult').hidden = true;
-    withBusy($('resetSubmit'), $('resetError'), async () => {
-      const { code, expiresAt } = await post('/api/manage/admin', { action: 'reset-issue', username: $('resetUsername').value });
-      $('resetCodeShown').textContent = code;
-      $('resetExpiry').textContent = t('admin.reset-expires', { until: formatDate(expiresAt) });
-      $('resetCopy').onclick = () => copyText(code);
-      $('resetResult').hidden = false;
+    byId('resetResult').hidden = true;
+    withBusy(byId('resetSubmit'), byId('resetError'), async () => {
+      const { code, expiresAt } = await post('/api/manage/admin', { action: 'reset-issue', username: byId('resetUsername').value });
+      byId('resetCodeShown').textContent = code;
+      byId('resetExpiry').textContent = translate('admin.reset-expires', { until: formatDate(expiresAt) });
+      byId('resetCopy').onclick = () => copyText(code);
+      byId('resetResult').hidden = false;
     });
   });
 

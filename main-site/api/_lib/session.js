@@ -13,7 +13,7 @@
 // "password" is only ever written for a public account with no second
 // factor set up, since 2FA is optional for those (login.js decides).
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { randomToken, sha256, hashIp } from './crypto.js';
 import { readCookie, setCookie, clearCookie, fail, clientIp } from './http.js';
 import { SESSION_ACCOUNT_SELECT, normaliseAccount, ensureStaffAccount, canSignIn, canManage, isAdmin } from './users.js';
@@ -23,32 +23,32 @@ const SESSION_DAYS = 7;
 const FACTORS = new Set(['password', 'totp', 'passkey', 'telegram', 'backup']);
 
 // account: a normalised account (users.js).
-export async function createSession(req, res, account, factor) {
+export async function createSession(request, response, account, factor) {
   const userId = account.id;
   if (account.kind === 'staff') await ensureStaffAccount(userId);
   const token = randomToken(32);
   const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
-  const { error } = await db().from(T.sessions).insert({
+  const { error } = await database().from(TABLES.sessions).insert({
     user_id: userId,
     token_hash: sha256(token),
     factor: FACTORS.has(factor) ? factor : 'totp',
-    ip_hash: hashIp(clientIp(req)),
+    ip_hash: hashIp(clientIp(request)),
     expires_at: expires.toISOString(),
   });
   if (error) throw error;
-  await db().from(T.accounts).update({ last_sign_in_at: new Date().toISOString() }).eq('id', userId);
-  setCookie(res, SESSION_COOKIE, token, SESSION_DAYS * 86400);
+  await database().from(TABLES.accounts).update({ last_sign_in_at: new Date().toISOString() }).eq('id', userId);
+  setCookie(response, SESSION_COOKIE, token, SESSION_DAYS * 86400);
 }
 
 // { sessionId, user } for a live session of an account that may still sign
 // in, or null. user is the normalised account.
-export async function currentSession(req) {
-  const token = readCookie(req, SESSION_COOKIE);
+export async function currentSession(request) {
+  const token = readCookie(request, SESSION_COOKIE);
   if (!token || token.length > 100) return null;
 
-  const { data, error } = await db()
-    .from(T.sessions)
-    .select(`id, expires_at, last_seen_at, account:${T.accounts} ( ${SESSION_ACCOUNT_SELECT} )`)
+  const { data, error } = await database()
+    .from(TABLES.sessions)
+    .select(`id, expires_at, last_seen_at, account:${TABLES.accounts} ( ${SESSION_ACCOUNT_SELECT} )`)
     .eq('token_hash', sha256(token))
     .maybeSingle();
 
@@ -56,7 +56,7 @@ export async function currentSession(req) {
   const user = normaliseAccount(data?.account);
   if (!data || !user) return null;
   if (new Date(data.expires_at).getTime() <= Date.now()) {
-    await db().from(T.sessions).delete().eq('id', data.id);
+    await database().from(TABLES.sessions).delete().eq('id', data.id);
     return null;
   }
   // Approval (staff) and status (public) are re-checked on every request, so
@@ -64,38 +64,38 @@ export async function currentSession(req) {
   if (!canSignIn(user)) return null;
   // Touch at most every ten minutes, to keep writes off the hot path.
   if (Date.now() - new Date(data.last_seen_at).getTime() > 600_000) {
-    await db().from(T.sessions).update({ last_seen_at: new Date().toISOString() }).eq('id', data.id);
+    await database().from(TABLES.sessions).update({ last_seen_at: new Date().toISOString() }).eq('id', data.id);
   }
   return { sessionId: data.id, user };
 }
 
 // The signed-in user, or null after answering 401/403.
 //   manage: editors and admins only.   admin: admins only.
-export async function requireUser(req, res, { manage = false, admin = false } = {}) {
-  const session = await currentSession(req);
+export async function requireUser(request, response, { manage = false, admin = false } = {}) {
+  const session = await currentSession(request);
   if (!session) {
-    fail(res, 401, 'signed_out');
+    fail(response, 401, 'signed_out');
     return null;
   }
   if (admin && !isAdmin(session.user)) {
-    fail(res, 403, 'admin_only');
+    fail(response, 403, 'admin_only');
     return null;
   }
   if (manage && !canManage(session.user)) {
-    fail(res, 403, 'manage_only');
+    fail(response, 403, 'manage_only');
     return null;
   }
   return session;
 }
 
-export async function endSession(req, res) {
-  const token = readCookie(req, SESSION_COOKIE);
-  if (token) await db().from(T.sessions).delete().eq('token_hash', sha256(token));
-  clearCookie(res, SESSION_COOKIE);
+export async function endSession(request, response) {
+  const token = readCookie(request, SESSION_COOKIE);
+  if (token) await database().from(TABLES.sessions).delete().eq('token_hash', sha256(token));
+  clearCookie(response, SESSION_COOKIE);
 }
 
 export async function endOtherSessions(userId, exceptSessionId) {
-  let q = db().from(T.sessions).delete().eq('user_id', userId);
+  let q = database().from(TABLES.sessions).delete().eq('user_id', userId);
   if (exceptSessionId) q = q.neq('id', exceptSessionId);
   const { error } = await q;
   if (error) throw error;
@@ -125,10 +125,10 @@ const CHALLENGE_COLUMNS =
 export async function createChallenge({ purpose, userId, account = null }) {
   if (account?.kind === 'staff') await ensureStaffAccount(userId);
   // One open challenge per account and purpose: starting again replaces it.
-  await db().from(T.challenges).delete().eq('purpose', purpose).eq('user_id', userId);
+  await database().from(TABLES.challenges).delete().eq('purpose', purpose).eq('user_id', userId);
 
   const token = randomToken(32);
-  const { error } = await db().from(T.challenges).insert({
+  const { error } = await database().from(TABLES.challenges).insert({
     purpose,
     user_id: userId,
     token_hash: sha256(token),
@@ -142,8 +142,8 @@ export async function createChallenge({ purpose, userId, account = null }) {
 // attempts are deleted on sight.
 export async function findChallenge(token, purpose) {
   if (typeof token !== 'string' || token.length < 20 || token.length > 100) return null;
-  const { data, error } = await db()
-    .from(T.challenges)
+  const { data, error } = await database()
+    .from(TABLES.challenges)
     .select(CHALLENGE_COLUMNS)
     .eq('token_hash', sha256(token))
     .eq('purpose', purpose)
@@ -151,28 +151,28 @@ export async function findChallenge(token, purpose) {
   if (error) throw error;
   if (!data) return null;
   if (new Date(data.expires_at).getTime() <= Date.now() || data.attempts >= CHALLENGE_ATTEMPTS) {
-    await db().from(T.challenges).delete().eq('id', data.id);
+    await database().from(TABLES.challenges).delete().eq('id', data.id);
     return null;
   }
   return data;
 }
 
 export async function findChallengeById(id) {
-  const { data, error } = await db().from(T.challenges).select(CHALLENGE_COLUMNS).eq('id', id).maybeSingle();
+  const { data, error } = await database().from(TABLES.challenges).select(CHALLENGE_COLUMNS).eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data || new Date(data.expires_at).getTime() <= Date.now()) return null;
   return data;
 }
 
 export async function failChallengeAttempt(challenge) {
-  await db().from(T.challenges).update({ attempts: challenge.attempts + 1 }).eq('id', challenge.id);
+  await database().from(TABLES.challenges).update({ attempts: challenge.attempts + 1 }).eq('id', challenge.id);
 }
 
 export async function updateChallenge(challenge, fields) {
-  const { error } = await db().from(T.challenges).update(fields).eq('id', challenge.id);
+  const { error } = await database().from(TABLES.challenges).update(fields).eq('id', challenge.id);
   if (error) throw error;
 }
 
 export async function deleteChallenge(challenge) {
-  await db().from(T.challenges).delete().eq('id', challenge.id);
+  await database().from(TABLES.challenges).delete().eq('id', challenge.id);
 }

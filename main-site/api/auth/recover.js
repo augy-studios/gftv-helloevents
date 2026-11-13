@@ -35,7 +35,7 @@
 // page goes on to /account or to "sign in now".
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { hashPassword, sha256, normaliseCode } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
 import { refusedForTurnstile } from '../_lib/turnstile.js';
@@ -57,8 +57,8 @@ import {
 async function spendStaffCode(accountId, typed) {
   const code = normaliseCode(typed);
   if (code.length < 10) return false;
-  const { data, error } = await db()
-    .from(T.passwordResets)
+  const { data, error } = await database()
+    .from(TABLES.passwordResets)
     .update({ used_at: new Date().toISOString() })
     .eq('code_hash', sha256(code))
     .eq('account_id', accountId)
@@ -69,25 +69,25 @@ async function spendStaffCode(accountId, typed) {
   return (data ?? []).length === 1;
 }
 
-export default route('auth/recover', async (req, res) => {
-  if (guard(req, res, ['POST'])) return;
-  const body = await readJson(req, res);
+export default route('auth/recover', async (request, response) => {
+  if (guard(request, response, ['POST'])) return;
+  const body = await readJson(request, response);
   if (!body) return;
 
   if (body.action === 'start') {
     const identifier = String(body.identifier ?? '').trim().toLowerCase().slice(0, 254);
-    if (await limited(req, res, 'recover', [`id:${sha256(identifier)}`])) return;
-    if (await refusedForTurnstile(req, res, body, 'reset')) return;
+    if (await limited(request, response, 'recover', [`id:${sha256(identifier)}`])) return;
+    if (await refusedForTurnstile(request, response, body, 'reset')) return;
     // Only a public account is looked at. A staff-only name gets the same
     // answer as a name nobody has: staff reset their password on gftv.asia,
     // and the reset page says so to everyone it cannot help.
     const { member } = await findForLogin(identifier);
-    if (!member || !canSignIn(member)) return ok(res, { found: false });
+    if (!member || !canSignIn(member)) return ok(response, { found: false });
     const methods = await methodsFor(member);
     const twoFactor = hasSecondFactor(methods, member);
     const telegram = telegramConfigured() && Boolean(await linkedChat(member.id));
     const challenge = await createChallenge({ purpose: 'recover', userId: member.id });
-    return ok(res, {
+    return ok(response, {
       found: true,
       challenge,
       telegram,
@@ -97,37 +97,37 @@ export default route('auth/recover', async (req, res) => {
   }
 
   const challenge = await findChallenge(body.challenge, 'recover');
-  if (!challenge) return fail(res, 401, 'challenge_expired');
+  if (!challenge) return fail(response, 401, 'challenge_expired');
   const account = await loadAccount(challenge.user_id, { auth: true });
   if (!account || account.kind !== 'public' || !canSignIn(account)) {
     await deleteChallenge(challenge);
-    return fail(res, 401, 'challenge_expired');
+    return fail(response, 401, 'challenge_expired');
   }
   const chat = telegramConfigured() ? await linkedChat(account.id) : null;
 
   if (body.action === 'send') {
-    if (!chat) return fail(res, 400, 'telegram_not_linked');
-    if (await limited(req, res, 'telegramSend', [`u:${account.id}`])) return;
+    if (!chat) return fail(response, 400, 'telegram_not_linked');
+    if (await limited(request, response, 'telegramSend', [`u:${account.id}`])) return;
     await sendTelegramCode(challenge, chat.chat_id, { purpose: 'reset', username: account.username });
-    return ok(res, { sent: true });
+    return ok(response, { sent: true });
   }
 
   if (body.action === 'passkey-options') {
-    if (await limited(req, res, 'secondFactor', [`c:${challenge.id}`])) return;
+    if (await limited(request, response, 'secondFactor', [`c:${challenge.id}`])) return;
     if (!chat || !(await telegramCodeOk(challenge, body.telegramCode))) {
       await failChallengeAttempt(challenge);
-      return fail(res, 401, 'code_wrong');
+      return fail(response, 401, 'code_wrong');
     }
     const options = await authenticationOptions(account.id);
-    if (!options) return fail(res, 400, 'no_passkeys');
-    return ok(res, { options });
+    if (!options) return fail(response, 400, 'no_passkeys');
+    return ok(response, { options });
   }
 
-  if (body.action !== 'finish') return fail(res, 400, 'bad_request');
-  if (await limited(req, res, 'secondFactor', [`c:${challenge.id}`])) return;
+  if (body.action !== 'finish') return fail(response, 400, 'bad_request');
+  if (await limited(request, response, 'secondFactor', [`c:${challenge.id}`])) return;
 
   const password = checkPassword(body.newPassword, { username: account.username });
-  if (!password.ok) return fail(res, 400, password.error);
+  if (!password.ok) return fail(response, 400, password.error);
 
   const methods = await methodsFor(account);
   const twoFactor = hasSecondFactor(methods, account);
@@ -149,12 +149,12 @@ export default route('auth/recover', async (req, res) => {
   }
   if (!passed) {
     await failChallengeAttempt(challenge);
-    await audit(req, { action: 'recover.failed', actorId: account.id, details: { method } });
-    return fail(res, 401, 'code_wrong');
+    await audit(request, { action: 'recover.failed', actorId: account.id, details: { method } });
+    return fail(response, 401, 'code_wrong');
   }
 
-  const { error } = await db()
-    .from(T.accounts)
+  const { error } = await database()
+    .from(TABLES.accounts)
     .update({ password_hash: await hashPassword(body.newPassword), password_changed_at: new Date().toISOString() })
     .eq('id', account.id)
     .eq('kind', 'public');
@@ -162,19 +162,19 @@ export default route('auth/recover', async (req, res) => {
 
   await deleteChallenge(challenge);
   await endOtherSessions(account.id, null);
-  await audit(req, { action: 'recover.password_reset', actorId: account.id, details: { method } });
+  await audit(request, { action: 'recover.password_reset', actorId: account.id, details: { method } });
   // A staff code proves who someone is, not that they hold their second
   // factor: with 2FA on, it only sets the password, and the sign-in that
   // follows still asks for the second step.
   const signIn = !(method === 'staff-code' && twoFactor);
   if (signIn) {
     const factor = method === 'telegram' ? (twoFactor ? body.factor : 'telegram') : method === 'backup' ? 'backup' : 'password';
-    await createSession(req, res, account, factor);
+    await createSession(request, response, account, factor);
   }
   if (chat) {
     sendTelegram(chat.chat_id, `The password for your GFTV HelloEvents account ${account.username} was just reset, and every other device was signed out.`).catch(
       (cause) => console.warn('[helloevents] reset notice not sent:', cause?.message ?? cause)
     );
   }
-  ok(res, { signedIn: signIn });
+  ok(response, { signedIn: signIn });
 });

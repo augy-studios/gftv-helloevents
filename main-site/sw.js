@@ -75,13 +75,13 @@ const EVENT_PATH = /^\/e\/[a-z0-9-]{3,60}$/;
 
 // A redirected response cannot be served to a navigation, so store a clean copy.
 async function fetchForCache(url) {
-  const res = await fetch(url, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`precache ${url}: ${res.status}`);
-  if (!res.redirected) return res;
-  const headers = new Headers(res.headers);
+  const response = await fetch(url, { cache: 'no-cache' });
+  if (!response.ok) throw new Error(`precache ${url}: ${response.status}`);
+  if (!response.redirected) return response;
+  const headers = new Headers(response.headers);
   headers.delete('content-encoding');
   headers.delete('content-length');
-  return new Response(await res.blob(), { status: 200, headers });
+  return new Response(await response.blob(), { status: 200, headers });
 }
 
 self.addEventListener('install', (event) => {
@@ -158,14 +158,14 @@ function pageKey(url) {
 }
 
 self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
+  const request = event.request;
+  if (request.method !== 'GET') return;
 
-  const url = new URL(req.url);
+  const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
 
-  if (req.mode === 'navigate') {
+  if (request.mode === 'navigate') {
     const key = pageKey(url);
 
     // Shell pages, and every event page (one shell for all of them): from the
@@ -174,13 +174,13 @@ self.addEventListener('fetch', (event) => {
     if (SHELL_PAGES.has(key) || EVENT_PATH.test(key)) {
       const shell = EVENT_PATH.test(key) ? '/event' : key;
       event.respondWith(
-        caches.open(CACHE).then(async (cache) => (await cache.match(shell)) || fetch(req))
+        caches.open(CACHE).then(async (cache) => (await cache.match(shell)) || fetch(request))
       );
       return;
     }
 
     event.respondWith(
-      fetch(req).catch(async () => {
+      fetch(request).catch(async () => {
         const cache = await caches.open(CACHE);
         return (await cache.match('/404.html')) || Response.error();
       })
@@ -192,11 +192,11 @@ self.addEventListener('fetch', (event) => {
   // copy of anything new so it is there next time.
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(req, { ignoreSearch: true });
+      const cached = await cache.match(request, { ignoreSearch: true });
       if (cached) return cached;
-      const res = await fetch(req);
-      if (res.ok && !res.redirected) cache.put(req, res.clone());
-      return res;
+      const response = await fetch(request);
+      if (response.ok && !response.redirected) cache.put(request, response.clone());
+      return response;
     })
   );
 });

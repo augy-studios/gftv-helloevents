@@ -2,7 +2,7 @@
 // Same mechanism as gftv-linktree: one atomic counter per bucket in
 // Postgres, shared by every function instance.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { fail, clientIp } from './http.js';
 import { hashIp } from './crypto.js';
 
@@ -27,21 +27,21 @@ export const LIMITS = Object.freeze({
 // the request through, so a database hiccup does not lock everybody out.
 // { max } raises the limit on the connection's bucket only (a staff member's
 // sign-up allowance); subject buckets keep the normal limit.
-export async function limited(req, res, name, subjects = [], { max: connectionMax = null } = {}) {
+export async function limited(request, response, name, subjects = [], { max: connectionMax = null } = {}) {
   const [max, windowSeconds] = LIMITS[name];
-  const ipBucket = `${name}:ip:${hashIp(clientIp(req))}`;
+  const ipBucket = `${name}:ip:${hashIp(clientIp(request))}`;
   const keys = [ipBucket, ...subjects.map((s) => `${name}:${s}`)];
   try {
     for (const bucket of keys) {
-      const { data, error } = await db().rpc('gftvevents_rate_hit', {
+      const { data, error } = await database().rpc('gftvevents_rate_hit', {
         p_bucket: bucket,
         p_window_seconds: windowSeconds,
       });
       if (error) throw error;
       const limit = bucket === ipBucket && connectionMax ? connectionMax : max;
       if (Number(data) > limit) {
-        res.setHeader('Retry-After', String(windowSeconds));
-        fail(res, 429, 'rate_limited');
+        response.setHeader('Retry-After', String(windowSeconds));
+        fail(response, 429, 'rate_limited');
         return true;
       }
     }
@@ -54,15 +54,15 @@ export async function limited(req, res, name, subjects = [], { max: connectionMa
 // One row per security-relevant event. Details never carry a secret, a code,
 // a password or a full address. A failed insert is logged, never thrown, so
 // the audit log cannot take a sign-in down with it.
-export async function audit(req, { action, actorId = null, eventId = null, details = {} }) {
+export async function audit(request, { action, actorId = null, eventId = null, details = {} }) {
   const row = {
     action,
     actor_id: actorId,
     event_id: eventId,
     details,
-    ip_hash: req ? hashIp(clientIp(req)) : null,
+    ip_hash: request ? hashIp(clientIp(request)) : null,
   };
-  const { error } = await db().from(T.audit).insert(row);
+  const { error } = await database().from(TABLES.audit).insert(row);
   if (error) console.error('[helloevents] audit insert:', action, error.message);
 }
 
@@ -70,11 +70,11 @@ export async function audit(req, { action, actorId = null, eventId = null, detai
 // grant one from /manage for the connection they are on ("venue mode",
 // migrations/003); it raises the sign-up limit for that connection only,
 // until it expires or is revoked.
-export async function signupAllowance(req) {
-  const { data, error } = await db()
-    .from(T.signupAllowances)
+export async function signupAllowance(request) {
+  const { data, error } = await database()
+    .from(TABLES.signupAllowances)
     .select('id, max_per_hour, expires_at')
-    .eq('ip_hash', hashIp(clientIp(req)))
+    .eq('ip_hash', hashIp(clientIp(request)))
     .is('revoked_at', null)
     .gt('expires_at', new Date().toISOString())
     .order('max_per_hour', { ascending: false })

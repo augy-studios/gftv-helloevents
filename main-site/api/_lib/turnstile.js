@@ -80,7 +80,7 @@ export function allowedHostnames() {
 // The check by itself, for the tests and for routes that answer their own
 // way: { ok: true } or { ok: false, status, error, reason }. reason is for
 // the logs and tests only; the browser gets error alone.
-export async function verifyTurnstile(req, token, action) {
+export async function verifyTurnstile(request, token, action) {
   const key = secret();
   if (!key) {
     if (production()) {
@@ -105,7 +105,7 @@ export async function verifyTurnstile(req, token, action) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      body: new URLSearchParams({ secret: key, response: token, remoteip: clientIp(req) }),
+      body: new URLSearchParams({ secret: key, response: token, remoteip: clientIp(request) }),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     data = await response.json();
@@ -141,9 +141,9 @@ export async function verifyTurnstile(req, token, action) {
 // For a route: reads the token from the parsed JSON body, and answers (and
 // returns true) when the request has to stop here. The handler carries on
 // unchanged when it returns false.
-export async function refusedForTurnstile(req, res, body, action) {
-  const result = await verifyTurnstile(req, body?.[TOKEN_FIELD], action);
+export async function refusedForTurnstile(request, response, body, action) {
+  const result = await verifyTurnstile(request, body?.[TOKEN_FIELD], action);
   if (result.ok) return false;
-  fail(res, result.status, result.error);
+  fail(response, result.status, result.error);
   return true;
 }
