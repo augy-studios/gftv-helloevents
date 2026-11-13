@@ -109,6 +109,7 @@ npm install
 npm test             # unit and route tests, no network, database or Redis
 npm run check-sw     # no skipWaiting() outside the update bar's message handler
 npm run check-i18n   # en.json against every data-i18n key and t() call (see below)
+npm run lint         # ESLint: the readability rules (no ternaries, ?. or ??)
 ```
 
 Bump `VERSION` in `sw.js` on every deploy that changes a served file, or nobody sees the update bar.
