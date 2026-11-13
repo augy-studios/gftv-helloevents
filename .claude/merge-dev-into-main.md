@@ -2,16 +2,16 @@
 
 Context for whoever merges this repo's `dev` branch into `main`. Augy, give this file to Claude: "Read `.claude/merge-dev-into-main.md` and help me merge `dev` into `main`."
 
-- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. 2 of 9 jobs have landed so far.
+- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. 3 of 9 jobs have landed so far.
 - **What merging does:** Merging into `main` deploys `main-site/` (pages and API) on Vercel.
-- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 15:37 SGT.
+- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 15:58 SGT.
 
 ## Claude: how to run the merge
 
 Work through these in order, and stop to ask Augy wherever a step says so.
 
 1. **Read first:** this file, then `README.md`. Never read, print or copy a `.env` or `token.env` file; use the `.example` files.
-2. **Check `dev` matches this file:** `git fetch origin`, then `git log --oneline origin/main..origin/dev`. Every commit in the Jobs table below should be there. Read the message of any commit the table doesn't list (`git show <sha>`) and tell Augy what it is.
+2. **Check `dev` matches this file:** `git fetch origin`, then `git log --oneline origin/main..origin/dev`. Every commit in the Jobs table below should be there. Commits titled "Merge context" only update this file. Read the message of any other commit the table doesn't list (`git show <sha>`) and tell Augy what it is.
 3. **Run the tests** on a checkout of `dev` (commands below). All must pass. If one fails, stop and tell Augy; don't fix it on `main`.
 4. **Go through "Before merging"** with Augy. Steps marked as his (Vercel settings, the database) are his to do by hand; ask him to confirm each one.
 5. **The pull request:** `gh pr list --base main --head dev`. Thomas's side opens it once the last job lands. If Augy wants to ship before that, open it yourself: `gh pr create --base main --head dev`, titled "Help desk #18: readable refactor", with the Jobs table as its body.
@@ -25,7 +25,7 @@ Work through these in order, and stop to ask Augy wherever a step says so.
 |---|---|---|
 | 01 | Data minimisation and account recovery | `08f8e97` |
 | 02 | Playwright harness | `f8eadfb` |
-| 03 | Rename the shared short helpers | to come |
+| 03 | Rename the shared short helpers | `1eabdef` |
 | 04 | Readability: api/_lib, part 1 | to come |
 | 05 | Readability: api/_lib, part 2 | to come |
 | 06 | Readability: API routes | to come |
