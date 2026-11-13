@@ -113,6 +113,24 @@ npm run check-i18n   # en.json against every data-i18n and t() key
 
 Bump `VERSION` in `sw.js` on every deploy that changes a served file, or nobody sees the update bar.
 
+**End-to-end tests:** `npm ci`, then `npm run test:e2e` (7 tests, about 5 seconds).
+
+- Playwright starts `tests/e2e/server.js`. It serves this folder the way Vercel does (`vercel.json`'s
+  clean URLs, the `/e/<slug>` rewrite and the security headers, so the real Content-Security-Policy
+  applies). It runs the real API handlers in `api/` against the in-memory database and Redis that
+  `npm test` uses.
+- It's seeded from `tests/e2e/seed.js` before every test, and picks a free port.
+- No `.env`, network, database or Redis is needed. Turnstile runs on Cloudflare's test keys with a
+  local stub, every request to another site is answered by the test, Telegram is off, and pushes are
+  recorded rather than sent.
+- A test fails on any console error, uncaught exception, server error, or API answer carrying a
+  field from `tests/harness.js`'s `SECRET_FIELDS`.
+- It needs Chromium revision 1254 (`@playwright/test` 1.65.0). On another machine, run
+  `npx playwright install chromium` once.
+- A failed test leaves a trace in `tests/e2e/output/`: open it with
+  `npx playwright show-trace tests/e2e/output/<test>/trace.zip`.
+- The seed's upcoming events are dated 2032; move them on before then.
+
 ## Icons
 
 `../tools/make-icons.mjs` draws the icon (`../tools/GHE-icon.svg`) and renders `GHE-main.png`,
