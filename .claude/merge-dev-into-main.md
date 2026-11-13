@@ -40,6 +40,7 @@ Each job's commit message lists what changed and how it was reviewed. The full b
 ```bash
 cd main-site
 npm ci
+npm run lint         # ESLint: the readability rules
 npm test             # unit and route tests, no network
 npm run test:e2e     # Playwright; run `npx playwright install chromium` once on a new machine
 npm run check-i18n
@@ -52,6 +53,7 @@ They need no `.env`, network or real database.
 
 - **Service worker:** `main-site/sw.js`'s `VERSION` must differ from `main`'s (job 09 bumps it). If it doesn't, bump it in a commit on `dev` first.
 - No new environment variables or database migrations come with this chain. If `git diff main dev -- migrations/` shows a new file, it must be run in Supabase before the merge.
+- Vercel also installs the new devDependencies (ESLint, Playwright without browsers): more install time, no runtime change.
 
 ## After merging
 
@@ -62,14 +64,15 @@ They need no `.env`, network or real database.
 The tests can't reach the real database, logins or messaging, so check these by hand after the deploy:
 
 - The feed and an event page load, signed out.
-- Sign in by email and by passkey; RSVP and cancel.
+- Sign in by email and by passkey; RSVP and cancel; the account page shows each passkey's "Last used" or "Never used".
 - Staff sign-in with 2FA; create and edit an event.
 - Telegram linking and a push notification, if they're in use.
-- Account recovery for an unknown name shows the single "if it exists" message.
+- Account recovery for an unknown name shows: "We could not start a reset for that account. If you are GFTV staff, reset your password on gftv.asia."
 
 ## What users may notice
 
 - API replies carry fewer fields (only what each page shows). Sign-in, sign-up and recovery no longer return `user`; those pages redirect and ask the session endpoint.
-- Account recovery gives every name the same reply.
+- Account recovery gives unknown, suspended and staff-only names the same reply. A public account that can sign in still gets its ways back in.
+- Users see the update bar once, because the service worker version changed.
 
 Open questions and anything left for later are on help desk #18's review page, not here.
