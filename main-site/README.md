@@ -36,7 +36,11 @@ the functions with the service role key. No Supabase Auth, no request signing.
   Drafts and events with a future release time never reach the public; hidden prices and dates
   "to be announced" go out without the stored values; attendees-only addresses and online links go
   only to people going and to editors; staff notes and attendee lists go only to editors, and an
-  attendee is a name, a username and staff or not, never an email. `npm test` checks this.
+  attendee is a name, a username and staff or not, never an email. Each answer carries only what
+  its page shows, plus the ids its buttons need (help desk #18); `tests/response-keys.test.js`
+  pins every answer's exact fields, so one can't creep back in. `npm test` checks this.
+- **Password reset** gives the same answer for an unknown, suspended or staff-only name, so it
+  doesn't reveal which accounts exist; staff are pointed to gftv.asia.
 - **Venue sign-ups.** New accounts are limited to 5 an hour per connection. At a meet or con where
   everyone shares the venue's Wi-Fi, a staff member opens `/manage` on that Wi-Fi and raises the
   limit for that connection (its salted IP hash) for 2 to 12 hours, to 50 to 500 an hour. It ends
