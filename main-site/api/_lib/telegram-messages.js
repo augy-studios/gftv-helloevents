@@ -6,19 +6,28 @@ import { escapeMd, richTable } from './telegram.js';
 import { siteHost } from './env.js';
 
 // A six digit code. purpose: "sign-in" (a sign in with Telegram as the second
-// factor) or "reset" (resetting a forgotten password).
+// factor) or "reset" (resetting a forgotten password). The code is set on a
+// line of its own as inline code, so Telegram offers to copy it in one tap,
+// with a table of the site, account and expiry under it.
 export function codeMessage({ purpose, username, code, minutes }) {
   const site = siteHost();
-  const why = purpose === 'reset'
-    ? `Someone asked to reset the password of the account ${username} on ${site}.`
-    : `Someone is signing in to ${site} as ${username}.`;
-  const heading = purpose === 'reset' ? 'Password reset code' : 'Sign-in code';
-  const action = purpose === 'reset' ? 'Type this code on the reset page.' : 'Type this code on the sign-in page.';
+  let reason;
+  let heading;
+  let action;
+  if (purpose === 'reset') {
+    reason = `Someone asked to reset the password of the account ${username} on ${site}.`;
+    heading = 'Password reset code';
+    action = 'Type this code on the reset page.';
+  } else {
+    reason = `Someone is signing in to ${site} as ${username}.`;
+    heading = 'Sign-in code';
+    action = 'Type this code on the sign-in page.';
+  }
 
   const markdown = [
     `## ${heading}`,
     '',
-    escapeMd(why),
+    escapeMd(reason),
     '',
     // Inline code, so the client offers to copy it in one tap.
     `# \`${code}\``,
@@ -35,11 +44,13 @@ export function codeMessage({ purpose, username, code, minutes }) {
   ].join('\n');
 
   const fallback =
-    `${why}\n\nCode: ${code}\n\n${action} It expires in ${minutes} minutes.\n\n` +
+    `${reason}\n\nCode: ${code}\n\n${action} It expires in ${minutes} minutes.\n\n` +
     'If this was not you, do not share the code, and change your password.';
   return { markdown, fallback, skipEntities: true };
 }
 
+// The bot's help: what it is for, its two commands, and how to link an
+// account from the site.
 export function helpMessage() {
   const site = siteHost();
   const markdown = [

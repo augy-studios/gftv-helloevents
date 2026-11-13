@@ -25,26 +25,38 @@ const FACTORS = new Set(['password', 'totp', 'passkey', 'telegram', 'backup']);
 // account: a normalised account (users.js).
 export async function createSession(request, response, account, factor) {
   const userId = account.id;
-  if (account.kind === 'staff') await ensureStaffAccount(userId);
+  if (account.kind === 'staff') {
+    await ensureStaffAccount(userId);
+  }
   const token = randomToken(32);
-  const expires = new Date(Date.now() + SESSION_DAYS * 86400_000);
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400_000);
+  // A factor name not in FACTORS is stored as "totp".
+  let storedFactor = 'totp';
+  if (FACTORS.has(factor)) {
+    storedFactor = factor;
+  }
   const { error } = await database().from(TABLES.sessions).insert({
     user_id: userId,
     token_hash: sha256(token),
-    factor: FACTORS.has(factor) ? factor : 'totp',
+    factor: storedFactor,
     ip_hash: hashIp(clientIp(request)),
-    expires_at: expires.toISOString(),
+    expires_at: expiresAt.toISOString(),
   });
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   await database().from(TABLES.accounts).update({ last_sign_in_at: new Date().toISOString() }).eq('id', userId);
   setCookie(response, SESSION_COOKIE, token, SESSION_DAYS * 86400);
 }
 
 // { sessionId, user } for a live session of an account that may still sign
-// in, or null. user is the normalised account.
+// in, or null. user is the normalised account. An expired session is
+// deleted on sight, and last_seen_at is refreshed at most every ten minutes.
 export async function currentSession(request) {
   const token = readCookie(request, SESSION_COOKIE);
-  if (!token || token.length > 100) return null;
+  if (!token || token.length > 100) {
+    return null;
+  }
 
   const { data, error } = await database()
     .from(TABLES.sessions)
@@ -52,16 +64,25 @@ export async function currentSession(request) {
     .eq('token_hash', sha256(token))
     .maybeSingle();
 
-  if (error) throw error;
-  const user = normaliseAccount(data?.account);
-  if (!data || !user) return null;
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+  const user = normaliseAccount(data.account);
+  if (!user) {
+    return null;
+  }
   if (new Date(data.expires_at).getTime() <= Date.now()) {
     await database().from(TABLES.sessions).delete().eq('id', data.id);
     return null;
   }
   // Approval (staff) and status (public) are re-checked on every request, so
   // revoking either takes effect on the next click, not at the next sign in.
-  if (!canSignIn(user)) return null;
+  if (!canSignIn(user)) {
+    return null;
+  }
   // Touch at most every ten minutes, to keep writes off the hot path.
   if (Date.now() - new Date(data.last_seen_at).getTime() > 600_000) {
     await database().from(TABLES.sessions).update({ last_seen_at: new Date().toISOString() }).eq('id', data.id);
@@ -90,15 +111,23 @@ export async function requireUser(request, response, { manage = false, admin = f
 
 export async function endSession(request, response) {
   const token = readCookie(request, SESSION_COOKIE);
-  if (token) await database().from(TABLES.sessions).delete().eq('token_hash', sha256(token));
+  if (token) {
+    await database().from(TABLES.sessions).delete().eq('token_hash', sha256(token));
+  }
   clearCookie(response, SESSION_COOKIE);
 }
 
+// Signs the account out everywhere, except the session given (when there
+// is one).
 export async function endOtherSessions(userId, exceptSessionId) {
-  let q = database().from(TABLES.sessions).delete().eq('user_id', userId);
-  if (exceptSessionId) q = q.neq('id', exceptSessionId);
-  const { error } = await q;
-  if (error) throw error;
+  let query = database().from(TABLES.sessions).delete().eq('user_id', userId);
+  if (exceptSessionId) {
+    query = query.neq('id', exceptSessionId);
+  }
+  const { error } = await query;
+  if (error) {
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +152,9 @@ const CHALLENGE_COLUMNS =
 // account, when given, makes sure a staff member's accounts row exists
 // first, since challenges reference gftvevents_accounts.
 export async function createChallenge({ purpose, userId, account = null }) {
-  if (account?.kind === 'staff') await ensureStaffAccount(userId);
+  if (account !== null && account !== undefined && account.kind === 'staff') {
+    await ensureStaffAccount(userId);
+  }
   // One open challenge per account and purpose: starting again replaces it.
   await database().from(TABLES.challenges).delete().eq('purpose', purpose).eq('user_id', userId);
 
@@ -134,22 +165,30 @@ export async function createChallenge({ purpose, userId, account = null }) {
     token_hash: sha256(token),
     expires_at: new Date(Date.now() + CHALLENGE_MINUTES[purpose] * 60_000).toISOString(),
   });
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return token;
 }
 
 // The live challenge row for a token, or null. Expired rows and rows out of
 // attempts are deleted on sight.
 export async function findChallenge(token, purpose) {
-  if (typeof token !== 'string' || token.length < 20 || token.length > 100) return null;
+  if (typeof token !== 'string' || token.length < 20 || token.length > 100) {
+    return null;
+  }
   const { data, error } = await database()
     .from(TABLES.challenges)
     .select(CHALLENGE_COLUMNS)
     .eq('token_hash', sha256(token))
     .eq('purpose', purpose)
     .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
   if (new Date(data.expires_at).getTime() <= Date.now() || data.attempts >= CHALLENGE_ATTEMPTS) {
     await database().from(TABLES.challenges).delete().eq('id', data.id);
     return null;
@@ -157,10 +196,14 @@ export async function findChallenge(token, purpose) {
   return data;
 }
 
-export async function findChallengeById(id) {
-  const { data, error } = await database().from(TABLES.challenges).select(CHALLENGE_COLUMNS).eq('id', id).maybeSingle();
-  if (error) throw error;
-  if (!data || new Date(data.expires_at).getTime() <= Date.now()) return null;
+export async function findChallengeById(challengeId) {
+  const { data, error } = await database().from(TABLES.challenges).select(CHALLENGE_COLUMNS).eq('id', challengeId).maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data || new Date(data.expires_at).getTime() <= Date.now()) {
+    return null;
+  }
   return data;
 }
 
@@ -170,7 +213,9 @@ export async function failChallengeAttempt(challenge) {
 
 export async function updateChallenge(challenge, fields) {
   const { error } = await database().from(TABLES.challenges).update(fields).eq('id', challenge.id);
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 }
 
 export async function deleteChallenge(challenge) {

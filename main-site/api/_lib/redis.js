@@ -17,22 +17,38 @@ export function useTestRedis(fake) {
   client = fake;
 }
 
+// The REST URL and token, each from the Upstash name or else the older
+// Vercel KV name, or null when either one is missing.
 function credentials() {
-  const url = optionalEnv('UPSTASH_REDIS_REST_URL') || optionalEnv('KV_REST_API_URL');
-  const token = optionalEnv('UPSTASH_REDIS_REST_TOKEN') || optionalEnv('KV_REST_API_TOKEN');
-  return url && token ? { url, token } : null;
+  let url = optionalEnv('UPSTASH_REDIS_REST_URL');
+  if (!url) {
+    url = optionalEnv('KV_REST_API_URL');
+  }
+  let token = optionalEnv('UPSTASH_REDIS_REST_TOKEN');
+  if (!token) {
+    token = optionalEnv('KV_REST_API_TOKEN');
+  }
+  if (url && token) {
+    return { url, token };
+  }
+  return null;
 }
 
 export function redisConfigured() {
-  return client !== null || credentials() !== null;
+  if (client !== null || credentials() !== null) {
+    return true;
+  }
+  return false;
 }
 
 export function redis() {
   if (!client) {
-    const creds = credentials();
-    if (!creds) throw new Error('Redis is not configured (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)');
+    const found = credentials();
+    if (!found) {
+      throw new Error('Redis is not configured (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)');
+    }
     // Values are stored as JSON strings and parsed here, not by the client.
-    client = new Redis({ ...creds, automaticDeserialization: false });
+    client = new Redis({ ...found, automaticDeserialization: false });
   }
   return client;
 }

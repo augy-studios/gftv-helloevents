@@ -31,22 +31,34 @@ export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${TABLES.users}
 // The one shape every route sees. password_hash and totp_secret are only
 // present when the account was loaded with { auth: true }.
 function fromStaff(staff, account = null) {
-  return {
+  let avatarUrl = staff.avatar_url;
+  if (avatarUrl === undefined) {
+    avatarUrl = null;
+  }
+  const normalised = {
     id: staff.id,
     kind: 'staff',
     username: staff.username,
     display_name: staff.display_name,
-    avatar_url: staff.avatar_url ?? null,
+    avatar_url: avatarUrl,
     is_admin: staff.is_admin === true,
     is_editor: staff.is_editor === true,
     is_approved: staff.is_approved === true,
-    prefs: prefsOf(account),
-    ...('password_hash' in staff ? { password_hash: staff.password_hash, totp_secret: staff.totp_secret ?? null } : {}),
+    prefs: notificationPreferences(account),
   };
+  if ('password_hash' in staff) {
+    let totpSecret = staff.totp_secret;
+    if (totpSecret === undefined) {
+      totpSecret = null;
+    }
+    normalised.password_hash = staff.password_hash;
+    normalised.totp_secret = totpSecret;
+  }
+  return normalised;
 }
 
 function fromPublic(account) {
-  return {
+  const normalised = {
     id: account.id,
     kind: 'public',
     username: account.username,
@@ -55,50 +67,88 @@ function fromPublic(account) {
     is_admin: false,
     is_editor: false,
     is_approved: account.status === 'active',
-    prefs: prefsOf(account),
-    ...('password_hash' in account ? { password_hash: account.password_hash, totp_secret: null } : {}),
+    prefs: notificationPreferences(account),
   };
+  if ('password_hash' in account) {
+    normalised.password_hash = account.password_hash;
+    normalised.totp_secret = null;
+  }
+  return normalised;
 }
 
-function prefsOf(account) {
+// The account's notification choices. Updates and reminders are on unless
+// switched off; new events and Telegram are off unless switched on. A staff
+// member with no accounts row yet (account null) has the defaults.
+function notificationPreferences(account) {
+  let row = account;
+  if (row === null || row === undefined) {
+    row = {};
+  }
   return {
-    updates: account?.notify_updates !== false,
-    reminders: account?.notify_reminders !== false,
-    newEvents: account?.notify_new_events === true,
-    telegram: account?.notify_telegram === true,
+    updates: row.notify_updates !== false,
+    reminders: row.notify_reminders !== false,
+    newEvents: row.notify_new_events === true,
+    telegram: row.notify_telegram === true,
   };
 }
 
 // An account row from SESSION_ACCOUNT_SELECT, normalised, or null.
 export function normaliseAccount(row) {
-  if (!row) return null;
-  if (row.kind === 'staff') return row.staff ? fromStaff(row.staff, row) : null;
-  if (row.kind === 'public') return fromPublic(row);
+  if (!row) {
+    return null;
+  }
+  if (row.kind === 'staff') {
+    if (row.staff) {
+      return fromStaff(row.staff, row);
+    }
+    return null;
+  }
+  if (row.kind === 'public') {
+    return fromPublic(row);
+  }
   return null;
 }
 
 export function canSignIn(account) {
-  return Boolean(account && account.is_approved === true);
+  if (account && account.is_approved === true) {
+    return true;
+  }
+  return false;
 }
 
 export function canManage(account) {
-  return canSignIn(account) && account.kind === 'staff' && (account.is_admin === true || account.is_editor === true);
+  if (canSignIn(account) && account.kind === 'staff' && (account.is_admin === true || account.is_editor === true)) {
+    return true;
+  }
+  return false;
 }
 
 export function isAdmin(account) {
-  return canManage(account) && account.is_admin === true;
+  if (canManage(account) && account.is_admin === true) {
+    return true;
+  }
+  return false;
 }
 
 export function roleOf(account) {
-  if (isAdmin(account)) return 'admin';
-  if (canManage(account)) return 'editor';
-  if (account?.kind === 'staff') return 'staff';
+  if (isAdmin(account)) {
+    return 'admin';
+  }
+  if (canManage(account)) {
+    return 'editor';
+  }
+  if (account && account.kind === 'staff') {
+    return 'staff';
+  }
   return 'member';
 }
 
 // Staff must have a second factor; public accounts choose.
 export function secondFactorRequired(account) {
-  return account?.kind === 'staff';
+  if (account && account.kind === 'staff') {
+    return true;
+  }
+  return false;
 }
 
 // The staff record's row in gftvevents_accounts, made the first time it is
@@ -107,7 +157,9 @@ export async function ensureStaffAccount(staffUserId) {
   const { error } = await database()
     .from(TABLES.accounts)
     .upsert({ id: staffUserId, kind: 'staff', staff_user_id: staffUserId }, { onConflict: 'id', ignoreDuplicates: true });
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 }
 
 // A username or an email. Staff are looked up the way gftv-linktree does (two
@@ -116,48 +168,83 @@ export async function ensureStaffAccount(staffUserId) {
 // null, both with their password hashes, so the caller can check the
 // password against each.
 export async function findForLogin(identifier) {
-  const value = String(identifier ?? '').trim().toLowerCase();
-  if (!value || value.length > 254 || /\s/.test(value)) return { staff: null, member: null };
-  const column = value.includes('@') ? 'email' : 'username';
-  const [staff, member] = await Promise.all([
-    database().from(TABLES.users).select(STAFF_AUTH_COLUMNS).eq(column, value).maybeSingle(),
-    database().from(TABLES.accounts).select(ACCOUNT_AUTH_COLUMNS).eq('kind', 'public').eq(column, value).maybeSingle(),
+  let typed = identifier;
+  if (typed === null || typed === undefined) {
+    typed = '';
+  }
+  const lookup = String(typed).trim().toLowerCase();
+  if (!lookup || lookup.length > 254 || /\s/.test(lookup)) {
+    return { staff: null, member: null };
+  }
+  let column = 'username';
+  if (lookup.includes('@')) {
+    column = 'email';
+  }
+  const [staffResult, memberResult] = await Promise.all([
+    database().from(TABLES.users).select(STAFF_AUTH_COLUMNS).eq(column, lookup).maybeSingle(),
+    database().from(TABLES.accounts).select(ACCOUNT_AUTH_COLUMNS).eq('kind', 'public').eq(column, lookup).maybeSingle(),
   ]);
-  if (staff.error) throw staff.error;
-  if (member.error) throw member.error;
-  return {
-    staff: staff.data ? fromStaff(staff.data) : null,
-    member: member.data ? fromPublic(member.data) : null,
-  };
+  if (staffResult.error) {
+    throw staffResult.error;
+  }
+  if (memberResult.error) {
+    throw memberResult.error;
+  }
+  let staff = null;
+  if (staffResult.data) {
+    staff = fromStaff(staffResult.data);
+  }
+  let member = null;
+  if (memberResult.data) {
+    member = fromPublic(memberResult.data);
+  }
+  return { staff, member };
 }
 
-// An account by id, normalised. { auth: true } adds the password hash and the
-// shared TOTP secret, for the routes that check them.
-export async function loadAccount(id, { auth = false } = {}) {
+// One gftvhello_users row by id, normalised, or null. account is the staff
+// member's gftvevents_accounts row, when there is one.
+async function loadStaff(staffUserId, columns, account) {
+  const { data: staff, error } = await database()
+    .from(TABLES.users)
+    .select(columns)
+    .eq('id', staffUserId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (staff) {
+    return fromStaff(staff, account);
+  }
+  return null;
+}
+
+// An account by id, normalised. { auth: true } (withSecrets here) adds the
+// password hash and the shared TOTP secret, for the routes that check them.
+// A staff member is read from gftvhello_users, through their accounts row
+// when it exists, or directly by the same id when it does not exist yet.
+export async function loadAccount(accountId, { auth: withSecrets = false } = {}) {
+  let accountColumns = ACCOUNT_COLUMNS;
+  let staffColumns = STAFF_COLUMNS;
+  if (withSecrets) {
+    accountColumns = ACCOUNT_AUTH_COLUMNS;
+    staffColumns = STAFF_AUTH_COLUMNS;
+  }
   const { data, error } = await database()
     .from(TABLES.accounts)
-    .select(auth ? ACCOUNT_AUTH_COLUMNS + ', staff_user_id' : ACCOUNT_COLUMNS + ', staff_user_id')
-    .eq('id', id)
+    .select(accountColumns + ', staff_user_id')
+    .eq('id', accountId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   if (!data) {
     // A staff member whose accounts row does not exist yet.
-    const { data: staff, error: staffError } = await database()
-      .from(TABLES.users)
-      .select(auth ? STAFF_AUTH_COLUMNS : STAFF_COLUMNS)
-      .eq('id', id)
-      .maybeSingle();
-    if (staffError) throw staffError;
-    return staff ? fromStaff(staff) : null;
+    return loadStaff(accountId, staffColumns, null);
   }
-  if (data.kind === 'public') return fromPublic(data);
-  const { data: staff, error: staffError } = await database()
-    .from(TABLES.users)
-    .select(auth ? STAFF_AUTH_COLUMNS : STAFF_COLUMNS)
-    .eq('id', data.staff_user_id)
-    .maybeSingle();
-  if (staffError) throw staffError;
-  return staff ? fromStaff(staff, data) : null;
+  if (data.kind === 'public') {
+    return fromPublic(data);
+  }
+  return loadStaff(data.staff_user_id, staffColumns, data);
 }
 
 // Is this username or email free for a new public account? Checks staff
@@ -169,8 +256,17 @@ export async function identityTaken({ username, email }) {
     database().from(TABLES.accounts).select('id').eq('email', email).maybeSingle(),
     database().from(TABLES.users).select('id').eq('email', email).maybeSingle(),
   ]);
-  for (const c of checks) if (c.error) throw c.error;
-  if (checks[0].data || checks[1].data) return 'username_taken';
-  if (checks[2].data || checks[3].data) return 'email_taken';
+  for (const check of checks) {
+    if (check.error) {
+      throw check.error;
+    }
+  }
+  const [accountByUsername, staffByUsername, accountByEmail, staffByEmail] = checks;
+  if (accountByUsername.data || staffByUsername.data) {
+    return 'username_taken';
+  }
+  if (accountByEmail.data || staffByEmail.data) {
+    return 'email_taken';
+  }
   return null;
 }

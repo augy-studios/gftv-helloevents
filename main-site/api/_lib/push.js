@@ -18,7 +18,7 @@ import { sha256 } from './crypto.js';
 import { redis, redisConfigured } from './redis.js';
 
 export const MAX_DEVICES = 10;
-const PREFIX = 'ghe:push:';
+const KEY_PREFIX = 'ghe:push:';
 
 // The push services of Chrome and Edge (FCM), Firefox, Safari and Windows.
 const PUSH_HOSTS = [/(^|\.)fcm\.googleapis\.com$/, /(^|\.)android\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)notify\.windows\.com$/];
@@ -26,42 +26,87 @@ const PUSH_HOSTS = [/(^|\.)fcm\.googleapis\.com$/, /(^|\.)android\.googleapis\.c
 let sender = null;
 
 // Tests replace the network call.
-export function useTestPushSender(fn) {
-  sender = fn;
+export function useTestPushSender(testSender) {
+  sender = testSender;
+}
+
+// The test's stand-in when there is one, otherwise web-push itself.
+function pushSender() {
+  if (sender !== null && sender !== undefined) {
+    return sender;
+  }
+  return webpush.sendNotification;
 }
 
 export function vapidPublicKey() {
-  return optionalEnv('VAPID_PUBLIC_KEY') || null;
+  const publicKey = optionalEnv('VAPID_PUBLIC_KEY');
+  if (publicKey) {
+    return publicKey;
+  }
+  return null;
 }
 
 export function pushConfigured() {
-  return Boolean(vapidPublicKey() && optionalEnv('VAPID_PRIVATE_KEY') && redisConfigured());
+  if (vapidPublicKey() && optionalEnv('VAPID_PRIVATE_KEY') && redisConfigured()) {
+    return true;
+  }
+  return false;
 }
 
-// { ok: true, subscription } with only the fields web-push needs, or
-// { ok: false, error }.
+// Checks a subscription the browser sent, and keeps only the fields web-push
+// needs: { ok: true, subscription }, or { ok: false, error }. The endpoint
+// must be plain https on one of PUSH_HOSTS, and the keys must have the
+// shape and length browsers make.
 export function checkSubscription(input) {
-  const endpoint = typeof input?.endpoint === 'string' ? input.endpoint : '';
-  const p256dh = typeof input?.keys?.p256dh === 'string' ? input.keys.p256dh : '';
-  const auth = typeof input?.keys?.auth === 'string' ? input.keys.auth : '';
-  if (endpoint.length === 0 || endpoint.length > 1000) return { ok: false, error: 'push_invalid' };
+  // input is whatever the browser sent, so any level of it may be missing.
+  let endpoint = '';
+  let p256dh = '';
+  let authSecret = '';
+  if (input !== null && input !== undefined) {
+    if (typeof input.endpoint === 'string') {
+      endpoint = input.endpoint;
+    }
+    const keys = input.keys;
+    if (keys !== null && keys !== undefined) {
+      if (typeof keys.p256dh === 'string') {
+        p256dh = keys.p256dh;
+      }
+      if (typeof keys.auth === 'string') {
+        authSecret = keys.auth;
+      }
+    }
+  }
+  if (endpoint.length === 0 || endpoint.length > 1000) {
+    return { ok: false, error: 'push_invalid' };
+  }
   let url;
   try {
     url = new URL(endpoint);
   } catch {
     return { ok: false, error: 'push_invalid' };
   }
-  if (url.protocol !== 'https:' || url.username || url.password || url.port) return { ok: false, error: 'push_invalid' };
-  if (!PUSH_HOSTS.some((re) => re.test(url.hostname))) return { ok: false, error: 'push_service_unknown' };
-  if (!/^[A-Za-z0-9_-]{80,100}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,32}$/.test(auth)) return { ok: false, error: 'push_invalid' };
-  return { ok: true, subscription: { endpoint: url.href, keys: { p256dh, auth } } };
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
+    return { ok: false, error: 'push_invalid' };
+  }
+  if (!PUSH_HOSTS.some((pattern) => pattern.test(url.hostname))) {
+    return { ok: false, error: 'push_service_unknown' };
+  }
+  if (!/^[A-Za-z0-9_-]{80,100}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,32}$/.test(authSecret)) {
+    return { ok: false, error: 'push_invalid' };
+  }
+  return { ok: true, subscription: { endpoint: url.href, keys: { p256dh, auth: authSecret } } };
 }
 
 const fieldOf = (endpoint) => sha256(endpoint).slice(0, 32);
 
-function parse(value) {
-  if (!value) return null;
-  if (typeof value === 'object') return value;
+// A stored subscription, parsed, or null when it is missing or unreadable.
+function parseStoredValue(value) {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === 'object') {
+    return value;
+  }
   try {
     return JSON.parse(value);
   } catch {
@@ -70,41 +115,73 @@ function parse(value) {
 }
 
 export async function deviceCount(accountId) {
-  if (!redisConfigured()) return 0;
-  return Number(await redis().hlen(PREFIX + accountId)) || 0;
+  if (!redisConfigured()) {
+    return 0;
+  }
+  const count = Number(await redis().hlen(KEY_PREFIX + accountId));
+  if (count) {
+    return count;
+  }
+  return 0;
 }
 
-// { ok: true } or { ok: false, error: "push_too_many" }.
+// { ok: true } or { ok: false, error: "push_too_many" }. A device already
+// subscribed is updated in place, and never counts against the limit.
 export async function saveSubscription(accountId, subscription) {
-  const key = PREFIX + accountId;
+  const key = KEY_PREFIX + accountId;
   const field = fieldOf(subscription.endpoint);
-  const existing = parse(await redis().hget(key, field));
-  if (!existing && (await deviceCount(accountId)) >= MAX_DEVICES) return { ok: false, error: 'push_too_many' };
-  await redis().hset(key, { [field]: JSON.stringify({ ...subscription, at: new Date().toISOString() }) });
+  const existing = parseStoredValue(await redis().hget(key, field));
+  if (!existing) {
+    const count = await deviceCount(accountId);
+    if (count >= MAX_DEVICES) {
+      return { ok: false, error: 'push_too_many' };
+    }
+  }
+  const stored = JSON.stringify({ ...subscription, at: new Date().toISOString() });
+  await redis().hset(key, { [field]: stored });
   return { ok: true };
 }
 
 export async function removeSubscription(accountId, endpoint) {
-  if (typeof endpoint !== 'string' || !endpoint) return;
-  await redis().hdel(PREFIX + accountId, fieldOf(endpoint));
+  if (typeof endpoint !== 'string' || !endpoint) {
+    return;
+  }
+  await redis().hdel(KEY_PREFIX + accountId, fieldOf(endpoint));
 }
 
 export async function forgetAllSubscriptions(accountId) {
-  if (!redisConfigured()) return;
-  await redis().del(PREFIX + accountId);
+  if (!redisConfigured()) {
+    return;
+  }
+  await redis().del(KEY_PREFIX + accountId);
 }
 
+// Every usable subscription of one account, as [{ field, subscription }].
+// Anything unreadable, or that would not pass checkSubscription today, is
+// left out.
 async function subscriptionsOf(accountId) {
-  const all = (await redis().hgetall(PREFIX + accountId)) ?? {};
-  return Object.entries(all)
-    .map(([field, value]) => ({ field, sub: parse(value) }))
-    .filter((entry) => entry.sub && checkSubscription(entry.sub).ok);
+  let stored = await redis().hgetall(KEY_PREFIX + accountId);
+  if (stored === null || stored === undefined) {
+    stored = {};
+  }
+  const entries = [];
+  for (const [field, value] of Object.entries(stored)) {
+    const subscription = parseStoredValue(value);
+    if (subscription && checkSubscription(subscription).ok) {
+      entries.push({ field, subscription });
+    }
+  }
+  return entries;
 }
 
 // Send one notification to every device of one account. payload:
-// { title, body, url, tag }. Returns how many devices took it.
+// { title, body, url, tag }. Returns how many devices took it. A device the
+// push service says is gone (404 or 410) is forgotten; any other failure is
+// logged and the rest still go out.
 export async function pushToAccount(accountId, payload) {
-  if (!pushConfigured()) return 0;
+  if (!pushConfigured()) {
+    return 0;
+  }
   const entries = await subscriptionsOf(accountId);
   const body = JSON.stringify(payload);
   const options = {
@@ -117,14 +194,32 @@ export async function pushToAccount(accountId, payload) {
     },
   };
   let delivered = 0;
-  for (const { field, sub } of entries) {
+  for (const { field, subscription } of entries) {
     try {
-      await (sender ?? webpush.sendNotification)(sub, body, options);
+      const send = pushSender();
+      await send(subscription, body, options);
       delivered += 1;
     } catch (cause) {
-      const status = cause?.statusCode;
-      if (status === 404 || status === 410) await redis().hdel(PREFIX + accountId, field);
-      else console.warn('[helloevents] push failed:', status ?? cause?.message ?? cause);
+      let status;
+      if (cause !== null && cause !== undefined) {
+        status = cause.statusCode;
+      }
+      if (status === 404 || status === 410) {
+        await redis().hdel(KEY_PREFIX + accountId, field);
+      } else {
+        // The status when there is one, else the error's message, else the
+        // error itself.
+        let detail = status;
+        if (detail === null || detail === undefined) {
+          if (cause !== null && cause !== undefined) {
+            detail = cause.message;
+          }
+        }
+        if (detail === null || detail === undefined) {
+          detail = cause;
+        }
+        console.warn('[helloevents] push failed:', detail);
+      }
     }
   }
   return delivered;
