@@ -2,9 +2,9 @@
 
 Context for whoever merges this repo's `dev` branch into `main`. Augy, give this file to Claude: "Read `.claude/merge-dev-into-main.md` and help me merge `dev` into `main`."
 
-- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. 8 of 9 jobs have landed so far.
+- **What's on `dev`:** the readable-refactor chain for help desk #18, one squash commit per job. All 9 jobs have landed.
 - **What merging does:** Merging into `main` deploys `main-site/` (pages and API) on Vercel.
-- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 18:06 SGT.
+- **Kept up to date:** the coordinator (Thomas's workspace) updates this file each time a job lands, and once more just before opening the pull request. Last updated 13 Nov, 20:07 SGT.
 
 ## Claude: how to run the merge
 
@@ -31,7 +31,7 @@ Work through these in order, and stop to ask Augy wherever a step says so.
 | 06 | Readability: API routes | `b74050c` |
 | 07 | Readability: pages (js/) | `4cbc658` |
 | 08 | Readability: service worker, scripts and tools | `32f9a2b` |
-| 09 | Lint config and final check | to come |
+| 09 | Lint config and final check | `7f1e2fb` |
 
 Each job's commit message lists what changed and how it was reviewed. The full branch is kept at `refs/archive/<job-id>`: `git fetch origin 'refs/archive/*:refs/archive/*'` to see them.
 
