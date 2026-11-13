@@ -18,7 +18,7 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { siteUrl, optionalEnv } from './env.js';
 
 const CHALLENGE_MINUTES = 5;
@@ -33,8 +33,8 @@ export function relyingParty() {
 }
 
 export async function listPasskeys(userId) {
-  const { data, error } = await db()
-    .from(T.passkeys)
+  const { data, error } = await database()
+    .from(TABLES.passkeys)
     .select('id, credential_id, transports, label, created_at, last_used_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
@@ -43,14 +43,14 @@ export async function listPasskeys(userId) {
 }
 
 export async function countPasskeys(userId) {
-  const { count, error } = await db().from(T.passkeys).select('id', { count: 'exact', head: true }).eq('user_id', userId);
+  const { count, error } = await database().from(TABLES.passkeys).select('id', { count: 'exact', head: true }).eq('user_id', userId);
   if (error) throw error;
   return count ?? 0;
 }
 
 async function storeChallenge(purpose, userId, challenge) {
-  await db().from(T.webauthn).delete().eq('purpose', purpose).eq('user_id', userId);
-  const { error } = await db().from(T.webauthn).insert({
+  await database().from(TABLES.webauthn).delete().eq('purpose', purpose).eq('user_id', userId);
+  const { error } = await database().from(TABLES.webauthn).insert({
     purpose,
     user_id: userId,
     challenge,
@@ -61,15 +61,15 @@ async function storeChallenge(purpose, userId, challenge) {
 
 // Single use: the row is deleted whether or not it is still valid.
 async function takeChallenge(purpose, userId) {
-  const { data, error } = await db()
-    .from(T.webauthn)
+  const { data, error } = await database()
+    .from(TABLES.webauthn)
     .select('id, challenge, expires_at')
     .eq('purpose', purpose)
     .eq('user_id', userId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  await db().from(T.webauthn).delete().eq('id', data.id);
+  await database().from(TABLES.webauthn).delete().eq('id', data.id);
   return new Date(data.expires_at).getTime() > Date.now() ? data.challenge : null;
 }
 
@@ -112,8 +112,8 @@ export async function finishRegistration(userId, response, label) {
   if (!verification.verified) return { ok: false, error: 'passkey_failed' };
 
   const { credential } = verification.registrationInfo;
-  const { data, error } = await db()
-    .from(T.passkeys)
+  const { data, error } = await database()
+    .from(TABLES.passkeys)
     .insert({
       user_id: userId,
       credential_id: credential.id,
@@ -152,8 +152,8 @@ export async function finishAuthentication(userId, response) {
 
   const credentialId = typeof response?.id === 'string' ? response.id : '';
   if (!credentialId || credentialId.length > 1024) return false;
-  const { data: row, error } = await db()
-    .from(T.passkeys)
+  const { data: row, error } = await database()
+    .from(TABLES.passkeys)
     .select('id, credential_id, public_key, counter, transports')
     .eq('user_id', userId)
     .eq('credential_id', credentialId)
@@ -183,15 +183,15 @@ export async function finishAuthentication(userId, response) {
   }
   if (!verification.verified) return false;
 
-  await db()
-    .from(T.passkeys)
+  await database()
+    .from(TABLES.passkeys)
     .update({ counter: verification.authenticationInfo.newCounter, last_used_at: new Date().toISOString() })
     .eq('id', row.id);
   return true;
 }
 
 export async function removePasskey(userId, passkeyId) {
-  const { data, error } = await db().from(T.passkeys).delete().eq('user_id', userId).eq('id', passkeyId).select('id');
+  const { data, error } = await database().from(TABLES.passkeys).delete().eq('user_id', userId).eq('id', passkeyId).select('id');
   if (error) throw error;
   return (data ?? []).length > 0;
 }

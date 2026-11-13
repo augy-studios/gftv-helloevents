@@ -1,7 +1,7 @@
 // What leaves the server, decided field by field (server-side data
 // minimisation, help desk #7).
 //
-// No route sends a database row as it came back: every res body is built
+// No route sends a database row as it came back: every response body is built
 // here from an explicit list of fields for that caller, so a column added to
 // a table later is never published by accident. In particular:
 //

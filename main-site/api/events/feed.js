@@ -11,17 +11,17 @@ import { KINDS } from '../_lib/event-rules.js';
 
 const WHEN = ['upcoming', 'past', 'tba'];
 
-export default route('events/feed', async (req, res) => {
-  if (guard(req, res, ['GET'])) return;
-  const when = WHEN.includes(query(req, 'when')) ? query(req, 'when') : 'upcoming';
-  const kind = KINDS.includes(query(req, 'kind')) ? query(req, 'kind') : '';
-  const n = Number.parseInt(query(req, 'offset'), 10);
+export default route('events/feed', async (request, response) => {
+  if (guard(request, response, ['GET'])) return;
+  const when = WHEN.includes(query(request, 'when')) ? query(request, 'when') : 'upcoming';
+  const kind = KINDS.includes(query(request, 'kind')) ? query(request, 'kind') : '';
+  const n = Number.parseInt(query(request, 'offset'), 10);
   const offset = Number.isFinite(n) && n >= 0 ? Math.min(n, 10_000) : 0;
 
   const rows = await releasedFeed({ when, kind, offset });
   const now = Date.now();
-  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
-  ok(res, {
+  response.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
+  ok(response, {
     events: rows.map((row) => publicEventCard(row, now)),
     nextOffset: rows.length === FEED_PAGE ? offset + FEED_PAGE : null,
   });

@@ -12,7 +12,7 @@ export function useTestClient(fake) {
   client = fake;
 }
 
-export function db() {
+export function database() {
   if (!client) {
     client = createClient(requiredEnv('SUPABASE_URL'), requiredEnv('SUPABASE_SERVICE_KEY'), {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -23,7 +23,7 @@ export function db() {
 
 // Table names, written once. Everything this app owns carries the
 // gftvevents_ prefix (migrations/001_helloevents_schema.sql).
-export const T = Object.freeze({
+export const TABLES = Object.freeze({
   // Every account this site knows: staff (a pointer to gftvhello_users) or
   // public (its own username, email and password). migrations/002.
   accounts: 'gftvevents_accounts',

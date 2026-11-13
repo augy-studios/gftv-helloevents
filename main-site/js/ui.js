@@ -1,6 +1,6 @@
 // Shared UI helpers: dialogs, the toast, busy buttons, formatting.
 
-import { t, getLocale } from '../assets/i18n/i18n.js';
+import { t as translate, getLocale } from '../assets/i18n/i18n.js';
 
 // ---------------------------------------------------------------------------
 // Dialogs
@@ -156,9 +156,9 @@ export function errorText(error) {
   const code = error && error.code ? error.code : 'generic';
   // A refused form field is named, in the reader's language.
   const field = error?.detail?.field;
-  const params = field ? { field: t(`manage.field.${field}`) } : undefined;
-  const text = t(`error.${code}`, params);
-  return text === `error.${code}` ? t('error.generic') : text;
+  const params = field ? { field: translate(`manage.field.${field}`) } : undefined;
+  const text = translate(`error.${code}`, params);
+  return text === `error.${code}` ? translate('error.generic') : text;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,10 +183,10 @@ export function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-// Build an element: el('p', { class: 'muted', text: 'hello' }, [children]).
+// Build an element: createElement('p', { class: 'muted', text: 'hello' }, [children]).
 // Text always goes in through textContent, so text typed by an editor can
 // never become markup.
-export function el(tag, props = {}, children = []) {
+export function createElement(tag, props = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined || value === null || value === false) continue;
@@ -194,7 +194,7 @@ export function el(tag, props = {}, children = []) {
     else if (key === 'text') node.textContent = value;
     else if (key === 'i18n') {
       node.setAttribute('data-i18n', value);
-      node.textContent = t(value);
+      node.textContent = translate(value);
     } else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value === true ? '' : String(value));
   }
@@ -208,8 +208,8 @@ export function el(tag, props = {}, children = []) {
 export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(t('common.copied'));
+    toast(translate('common.copied'));
   } catch {
-    toast(t('error.copy'));
+    toast(translate('error.copy'));
   }
 }

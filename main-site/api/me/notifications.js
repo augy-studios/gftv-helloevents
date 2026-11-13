@@ -11,7 +11,7 @@
 // What each choice sends is described in api/_lib/notify.js.
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { loadAccount } from '../_lib/users.js';
@@ -35,45 +35,45 @@ async function summary(user) {
 
 const COLUMNS = { updates: 'notify_updates', reminders: 'notify_reminders', newEvents: 'notify_new_events', telegram: 'notify_telegram' };
 
-export default route('me/notifications', async (req, res) => {
-  if (guard(req, res, ['GET', 'POST'])) return;
-  const session = await requireUser(req, res);
+export default route('me/notifications', async (request, response) => {
+  if (guard(request, response, ['GET', 'POST'])) return;
+  const session = await requireUser(request, response);
   if (!session) return;
   const user = session.user;
 
-  if (req.method === 'GET') return ok(res, await summary(user));
+  if (request.method === 'GET') return ok(response, await summary(user));
 
-  const body = await readJson(req, res);
+  const body = await readJson(request, response);
   if (!body) return;
-  if (await limited(req, res, 'notifyWrite', [`u:${user.id}`])) return;
+  if (await limited(request, response, 'notifyWrite', [`u:${user.id}`])) return;
 
   if (body.action === 'prefs') {
     const fields = {};
     for (const [key, column] of Object.entries(COLUMNS)) {
       if (key in body) {
-        if (typeof body[key] !== 'boolean') return fail(res, 400, 'bad_request');
+        if (typeof body[key] !== 'boolean') return fail(response, 400, 'bad_request');
         fields[column] = body[key];
       }
     }
-    if (Object.keys(fields).length === 0) return fail(res, 400, 'bad_request');
-    const { error } = await db().from(T.accounts).update(fields).eq('id', user.id);
+    if (Object.keys(fields).length === 0) return fail(response, 400, 'bad_request');
+    const { error } = await database().from(TABLES.accounts).update(fields).eq('id', user.id);
     if (error) throw error;
-    return ok(res, await summary(user));
+    return ok(response, await summary(user));
   }
 
   if (body.action === 'subscribe') {
-    if (!pushConfigured()) return fail(res, 400, 'push_off');
+    if (!pushConfigured()) return fail(response, 400, 'push_off');
     const check = checkSubscription(body.subscription);
-    if (!check.ok) return fail(res, 400, check.error);
+    if (!check.ok) return fail(response, 400, check.error);
     const saved = await saveSubscription(user.id, check.subscription);
-    if (!saved.ok) return fail(res, 409, saved.error);
-    await audit(req, { action: 'notify.device_added', actorId: user.id });
-    return ok(res, await summary(user));
+    if (!saved.ok) return fail(response, 409, saved.error);
+    await audit(request, { action: 'notify.device_added', actorId: user.id });
+    return ok(response, await summary(user));
   }
 
   if (body.action === 'unsubscribe') {
     if (pushConfigured()) await removeSubscription(user.id, body.endpoint);
-    return ok(res, await summary(user));
+    return ok(response, await summary(user));
   }
 
   if (body.action === 'test') {
@@ -86,8 +86,8 @@ export default route('me/notifications', async (req, res) => {
       url: `${siteUrl()}/account`,
       tag: 'test',
     });
-    return ok(res);
+    return ok(response);
   }
 
-  fail(res, 400, 'bad_request');
+  fail(response, 400, 'bad_request');
 });

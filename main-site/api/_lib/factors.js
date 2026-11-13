@@ -20,7 +20,7 @@
 // from the account page; for them 2FA is optional.
 
 import bcrypt from 'bcryptjs';
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import {
   decryptSecret,
   encryptSecret,
@@ -39,20 +39,20 @@ import { codeMessage } from './telegram-messages.js';
 import { updateChallenge } from './session.js';
 
 async function eventsTotpSecret(userId) {
-  const { data, error } = await db().from(T.totp).select('secret_enc').eq('user_id', userId).maybeSingle();
+  const { data, error } = await database().from(TABLES.totp).select('secret_enc').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return data ? decryptSecret(data.secret_enc) : null;
 }
 
 export async function hasLocalTotp(userId) {
-  const { data, error } = await db().from(T.totp).select('user_id').eq('user_id', userId).maybeSingle();
+  const { data, error } = await database().from(TABLES.totp).select('user_id').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return Boolean(data);
 }
 
 export async function saveEventsTotp(userId, plainSecret) {
-  const { error } = await db()
-    .from(T.totp)
+  const { error } = await database()
+    .from(TABLES.totp)
     .upsert({ user_id: userId, secret_enc: encryptSecret(plainSecret), created_at: new Date().toISOString() }, { onConflict: 'user_id' });
   if (error) throw error;
 }
@@ -66,8 +66,8 @@ export async function totpOk(user, code) {
 async function sharedBackupCount(account) {
   if (account.kind !== 'staff') return 0;
   const userId = account.id;
-  const { count, error } = await db()
-    .from(T.sharedBackupCodes)
+  const { count, error } = await database()
+    .from(TABLES.sharedBackupCodes)
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId);
   if (error) throw error;
@@ -75,8 +75,8 @@ async function sharedBackupCount(account) {
 }
 
 export async function localBackupCount(userId) {
-  const { count, error } = await db()
-    .from(T.backupCodes)
+  const { count, error } = await database()
+    .from(TABLES.backupCodes)
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .eq('used', false);
@@ -123,8 +123,8 @@ export async function spendBackupCode(account, typed) {
   const userId = account.id;
   if (normaliseCode(typed).length < 6) return false;
 
-  const { data: own, error } = await db()
-    .from(T.backupCodes)
+  const { data: own, error } = await database()
+    .from(TABLES.backupCodes)
     .select('id, code_hash')
     .eq('user_id', userId)
     .eq('used', false);
@@ -133,8 +133,8 @@ export async function spendBackupCode(account, typed) {
   if (match) {
     // Conditional on used = false, so two requests racing the same code
     // cannot both succeed.
-    const { data: spent, error: spendError } = await db()
-      .from(T.backupCodes)
+    const { data: spent, error: spendError } = await database()
+      .from(TABLES.backupCodes)
       .update({ used: true, used_at: new Date().toISOString() })
       .eq('id', match.id)
       .eq('used', false)
@@ -144,8 +144,8 @@ export async function spendBackupCode(account, typed) {
   }
 
   if (account.kind !== 'staff') return false;
-  const { data: shared, error: sharedError } = await db()
-    .from(T.sharedBackupCodes)
+  const { data: shared, error: sharedError } = await database()
+    .from(TABLES.sharedBackupCodes)
     .select('id, code_hash')
     .eq('user_id', userId);
   if (sharedError) throw sharedError;
@@ -158,7 +158,7 @@ export async function spendBackupCode(account, typed) {
     if (isMatch && !matched) matched = row;
   }
   if (!matched) return false;
-  const { data: gone, error: deleteError } = await db().from(T.sharedBackupCodes).delete().eq('id', matched.id).select('id');
+  const { data: gone, error: deleteError } = await database().from(TABLES.sharedBackupCodes).delete().eq('id', matched.id).select('id');
   if (deleteError) throw deleteError;
   return (gone ?? []).length === 1;
 }
@@ -169,9 +169,9 @@ export async function spendBackupCode(account, typed) {
 export async function issueBackupCodes(userId) {
   const codes = generateBackupCodes(10);
   const rows = await Promise.all(codes.map(async (code) => ({ user_id: userId, code_hash: await hashCode(code) })));
-  const { error: deleteError } = await db().from(T.backupCodes).delete().eq('user_id', userId);
+  const { error: deleteError } = await database().from(TABLES.backupCodes).delete().eq('user_id', userId);
   if (deleteError) throw deleteError;
-  const { error } = await db().from(T.backupCodes).insert(rows);
+  const { error } = await database().from(TABLES.backupCodes).insert(rows);
   if (error) throw error;
   return codes;
 }

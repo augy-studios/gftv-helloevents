@@ -29,14 +29,14 @@ import { createChallenge, createSession } from '../_lib/session.js';
 import { findForLogin, canSignIn, secondFactorRequired } from '../_lib/users.js';
 import { methodsFor, hasSecondFactor } from '../_lib/factors.js';
 
-export default route('auth/login', async (req, res) => {
-  if (guard(req, res, ['POST'])) return;
-  const body = await readJson(req, res);
+export default route('auth/login', async (request, response) => {
+  if (guard(request, response, ['POST'])) return;
+  const body = await readJson(request, response);
   if (!body) return;
 
   const identifier = String(body.identifier ?? '').trim().toLowerCase();
-  if (await limited(req, res, 'login', [`id:${sha256(identifier)}`])) return;
-  if (await refusedForTurnstile(req, res, body, 'login')) return;
+  if (await limited(request, response, 'login', [`id:${sha256(identifier)}`])) return;
+  if (await refusedForTurnstile(request, response, body, 'login')) return;
 
   const { staff, member } = await findForLogin(identifier);
   const [staffOk, memberOk] = await Promise.all([
@@ -47,27 +47,27 @@ export default route('auth/login', async (req, res) => {
   // and emails, so that would be a public account made before the staff one).
   const account = staffOk ? staff : memberOk ? member : null;
   if (!account) {
-    for (const who of [staff, member]) if (who) await audit(req, { action: 'auth.password_failed', actorId: who.kind === 'public' ? who.id : null, details: { kind: who.kind } });
-    return fail(res, 401, 'invalid_credentials');
+    for (const who of [staff, member]) if (who) await audit(request, { action: 'auth.password_failed', actorId: who.kind === 'public' ? who.id : null, details: { kind: who.kind } });
+    return fail(response, 401, 'invalid_credentials');
   }
   if (!canSignIn(account)) {
-    await audit(req, { action: 'auth.denied', actorId: account.kind === 'public' ? account.id : null, details: { kind: account.kind, reason: 'not_allowed' } });
-    return fail(res, 403, account.kind === 'staff' ? 'no_access' : 'account_suspended');
+    await audit(request, { action: 'auth.denied', actorId: account.kind === 'public' ? account.id : null, details: { kind: account.kind, reason: 'not_allowed' } });
+    return fail(response, 403, account.kind === 'staff' ? 'no_access' : 'account_suspended');
   }
 
   const methods = await methodsFor(account);
   if (hasSecondFactor(methods, account)) {
     const challenge = await createChallenge({ purpose: 'login', userId: account.id, account });
-    return ok(res, { challenge, step: 'verify', methods });
+    return ok(response, { challenge, step: 'verify', methods });
   }
 
   if (secondFactorRequired(account)) {
-    await audit(req, { action: 'auth.denied', details: { kind: 'staff', reason: 'no_second_factor' } });
-    return fail(res, 403, 'staff_needs_2fa');
+    await audit(request, { action: 'auth.denied', details: { kind: 'staff', reason: 'no_second_factor' } });
+    return fail(response, 403, 'staff_needs_2fa');
   }
 
   // A public account without 2FA: the password is the whole sign-in.
-  await createSession(req, res, account, 'password');
-  await audit(req, { action: 'auth.signed_in', actorId: account.id, details: { method: 'password' } });
-  ok(res, { step: 'done' });
+  await createSession(request, response, account, 'password');
+  await audit(request, { action: 'auth.signed_in', actorId: account.id, details: { method: 'password' } });
+  ok(response, { step: 'done' });
 });

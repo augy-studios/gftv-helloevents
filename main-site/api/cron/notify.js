@@ -9,12 +9,12 @@ import { optionalEnv } from '../_lib/env.js';
 import { safeEqual } from '../_lib/crypto.js';
 import { sendReminders, announceNewEvents } from '../_lib/notify.js';
 
-export default route('cron/notify', async (req, res) => {
+export default route('cron/notify', async (request, response) => {
   const secret = optionalEnv('CRON_SECRET');
-  const given = String(req.headers.authorization || '');
-  if (!secret || !safeEqual(given, `Bearer ${secret}`)) return send(res, 401, { ok: false });
+  const given = String(request.headers.authorization || '');
+  if (!secret || !safeEqual(given, `Bearer ${secret}`)) return send(response, 401, { ok: false });
 
   const reminded = await sendReminders();
   const announced = await announceNewEvents();
-  send(res, 200, { ok: true, reminded, announced });
+  send(response, 200, { ok: true, reminded, announced });
 });

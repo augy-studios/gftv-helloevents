@@ -10,7 +10,7 @@
 // they are going).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
@@ -26,35 +26,35 @@ const RESULTS = {
   event_over: [409, 'event_over'],
 };
 
-export default route('events/rsvp', async (req, res) => {
-  if (guard(req, res, ['POST'])) return;
-  const session = await requireUser(req, res);
+export default route('events/rsvp', async (request, response) => {
+  if (guard(request, response, ['POST'])) return;
+  const session = await requireUser(request, response);
   if (!session) return;
-  const body = await readJson(req, res);
+  const body = await readJson(request, response);
   if (!body) return;
-  if (await limited(req, res, 'rsvp', [`u:${session.user.id}`])) return;
+  if (await limited(request, response, 'rsvp', [`u:${session.user.id}`])) return;
 
   const event = await releasedEventBySlug(String(body.slug ?? '').toLowerCase());
-  if (!event) return fail(res, 404, 'not_found');
+  if (!event) return fail(response, 404, 'not_found');
 
   if (body.going === true) {
-    const { data, error } = await db().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
+    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
     if (error) throw error;
     const result = String(data);
     if (!(result in RESULTS)) throw new Error(`unexpected rsvp result ${result}`);
-    if (RESULTS[result]) return fail(res, RESULTS[result][0], RESULTS[result][1]);
-    if (result === 'ok') await audit(req, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
+    if (RESULTS[result]) return fail(response, RESULTS[result][0], RESULTS[result][1]);
+    if (result === 'ok') await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
   } else if (body.going === false) {
-    const { error } = await db().from(T.attendees).delete().eq('event_id', event.id).eq('user_id', session.user.id);
+    const { error } = await database().from(TABLES.attendees).delete().eq('event_id', event.id).eq('user_id', session.user.id);
     if (error) throw error;
-    await audit(req, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
+    await audit(request, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
   } else {
-    return fail(res, 400, 'bad_request');
+    return fail(response, 400, 'bad_request');
   }
 
   // Read it again, so the count and spaces left are current.
   const fresh = await releasedEventBySlug(event.slug);
-  ok(res, {
+  ok(response, {
     event: publicEventDetail(fresh ?? event, {
       signedIn: true,
       going: body.going === true,

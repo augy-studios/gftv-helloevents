@@ -17,7 +17,7 @@
 // The column lists are the only things that ever select from either table.
 // Emails are read for sign-in lookups only and never leave this module.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
@@ -26,7 +26,7 @@ const ACCOUNT_COLUMNS =
 const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash`;
 
 // For a session lookup: the account row with its staff record embedded.
-export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${T.users} ( ${STAFF_COLUMNS} )`;
+export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${TABLES.users} ( ${STAFF_COLUMNS} )`;
 
 // The one shape every route sees. password_hash and totp_secret are only
 // present when the account was loaded with { auth: true }.
@@ -104,8 +104,8 @@ export function secondFactorRequired(account) {
 // The staff record's row in gftvevents_accounts, made the first time it is
 // needed. Same id, so nothing else has to be rewritten.
 export async function ensureStaffAccount(staffUserId) {
-  const { error } = await db()
-    .from(T.accounts)
+  const { error } = await database()
+    .from(TABLES.accounts)
     .upsert({ id: staffUserId, kind: 'staff', staff_user_id: staffUserId }, { onConflict: 'id', ignoreDuplicates: true });
   if (error) throw error;
 }
@@ -120,8 +120,8 @@ export async function findForLogin(identifier) {
   if (!value || value.length > 254 || /\s/.test(value)) return { staff: null, member: null };
   const column = value.includes('@') ? 'email' : 'username';
   const [staff, member] = await Promise.all([
-    db().from(T.users).select(STAFF_AUTH_COLUMNS).eq(column, value).maybeSingle(),
-    db().from(T.accounts).select(ACCOUNT_AUTH_COLUMNS).eq('kind', 'public').eq(column, value).maybeSingle(),
+    database().from(TABLES.users).select(STAFF_AUTH_COLUMNS).eq(column, value).maybeSingle(),
+    database().from(TABLES.accounts).select(ACCOUNT_AUTH_COLUMNS).eq('kind', 'public').eq(column, value).maybeSingle(),
   ]);
   if (staff.error) throw staff.error;
   if (member.error) throw member.error;
@@ -134,16 +134,16 @@ export async function findForLogin(identifier) {
 // An account by id, normalised. { auth: true } adds the password hash and the
 // shared TOTP secret, for the routes that check them.
 export async function loadAccount(id, { auth = false } = {}) {
-  const { data, error } = await db()
-    .from(T.accounts)
+  const { data, error } = await database()
+    .from(TABLES.accounts)
     .select(auth ? ACCOUNT_AUTH_COLUMNS + ', staff_user_id' : ACCOUNT_COLUMNS + ', staff_user_id')
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
   if (!data) {
     // A staff member whose accounts row does not exist yet.
-    const { data: staff, error: staffError } = await db()
-      .from(T.users)
+    const { data: staff, error: staffError } = await database()
+      .from(TABLES.users)
       .select(auth ? STAFF_AUTH_COLUMNS : STAFF_COLUMNS)
       .eq('id', id)
       .maybeSingle();
@@ -151,8 +151,8 @@ export async function loadAccount(id, { auth = false } = {}) {
     return staff ? fromStaff(staff) : null;
   }
   if (data.kind === 'public') return fromPublic(data);
-  const { data: staff, error: staffError } = await db()
-    .from(T.users)
+  const { data: staff, error: staffError } = await database()
+    .from(TABLES.users)
     .select(auth ? STAFF_AUTH_COLUMNS : STAFF_COLUMNS)
     .eq('id', data.staff_user_id)
     .maybeSingle();
@@ -164,10 +164,10 @@ export async function loadAccount(id, { auth = false } = {}) {
 // accounts too, so nobody can sign up as a staff member's username or email.
 export async function identityTaken({ username, email }) {
   const checks = await Promise.all([
-    db().from(T.accounts).select('id').eq('username', username).maybeSingle(),
-    db().from(T.users).select('id').eq('username', username).maybeSingle(),
-    db().from(T.accounts).select('id').eq('email', email).maybeSingle(),
-    db().from(T.users).select('id').eq('email', email).maybeSingle(),
+    database().from(TABLES.accounts).select('id').eq('username', username).maybeSingle(),
+    database().from(TABLES.users).select('id').eq('username', username).maybeSingle(),
+    database().from(TABLES.accounts).select('id').eq('email', email).maybeSingle(),
+    database().from(TABLES.users).select('id').eq('email', email).maybeSingle(),
   ]);
   for (const c of checks) if (c.error) throw c.error;
   if (checks[0].data || checks[1].data) return 'username_taken';

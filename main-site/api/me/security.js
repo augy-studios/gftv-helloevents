@@ -23,7 +23,7 @@
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { verifyPassword, encryptSecret, decryptSecret } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { requireUser, createChallenge, findChallenge, updateChallenge, failChallengeAttempt, deleteChallenge, endSession } from '../_lib/session.js';
 import { loadAccount, secondFactorRequired } from '../_lib/users.js';
 import { listPasskeys, registrationOptions, finishRegistration, removePasskey } from '../_lib/webauthn.js';
@@ -69,111 +69,111 @@ async function wouldKeepAFactor(user, without) {
   return hasSecondFactor(methods, user);
 }
 
-export default route('me/security', async (req, res) => {
-  if (guard(req, res, ['GET', 'POST'])) return;
-  const session = await requireUser(req, res);
+export default route('me/security', async (request, response) => {
+  if (guard(request, response, ['GET', 'POST'])) return;
+  const session = await requireUser(request, response);
   if (!session) return;
   const userId = session.user.id;
 
-  if (req.method === 'GET') return ok(res, await summary(userId));
+  if (request.method === 'GET') return ok(response, await summary(userId));
 
-  const body = await readJson(req, res);
+  const body = await readJson(request, response);
   if (!body) return;
-  if (await limited(req, res, 'securityWrite', [`u:${userId}`])) return;
+  if (await limited(request, response, 'securityWrite', [`u:${userId}`])) return;
 
   const user = await loadAccount(userId, { auth: true });
   const passwordOk = async () => {
-    if (await limited(req, res, 'reauth', [`u:${userId}`])) return null;
+    if (await limited(request, response, 'reauth', [`u:${userId}`])) return null;
     const right = await verifyPassword(body.password, user.password_hash);
-    if (!right) fail(res, 401, 'password_wrong');
+    if (!right) fail(response, 401, 'password_wrong');
     return right;
   };
   const mayRemove = async (what) => !secondFactorRequired(user) || (await wouldKeepAFactor(user, what));
 
   switch (body.action) {
     case 'totp-start': {
-      if (user.totp_secret || (await hasLocalTotp(userId))) return fail(res, 409, 'totp_exists');
+      if (user.totp_secret || (await hasLocalTotp(userId))) return fail(response, 409, 'totp_exists');
       if (!(await passwordOk())) return;
       const secret = generateTotpSecret();
       const setup = await createChallenge({ purpose: 'totp-setup', userId });
       // The pending secret waits, encrypted, on the challenge row.
       await updateChallenge(await findChallenge(setup, 'totp-setup'), { pending_totp_secret: encryptSecret(secret) });
-      return ok(res, { setup, secret, uri: otpauthUri({ account: user.username, secret }) });
+      return ok(response, { setup, secret, uri: otpauthUri({ account: user.username, secret }) });
     }
     case 'totp-finish': {
       const challenge = await findChallenge(body.setup, 'totp-setup');
       const secret = challenge && challenge.user_id === userId ? decryptSecret(challenge.pending_totp_secret) : null;
-      if (!secret) return fail(res, 400, 'setup_not_started');
+      if (!secret) return fail(response, 400, 'setup_not_started');
       if (!verifyTotp(body.code, secret)) {
         await failChallengeAttempt(challenge);
-        return fail(res, 401, 'code_wrong');
+        return fail(response, 401, 'code_wrong');
       }
       await saveEventsTotp(userId, secret);
       await deleteChallenge(challenge);
       const codes = await backupCodesForNewFactor(user);
-      await audit(req, { action: 'security.totp_added', actorId: userId });
-      return ok(res, { ...(await summary(userId)), codes });
+      await audit(request, { action: 'security.totp_added', actorId: userId });
+      return ok(response, { ...(await summary(userId)), codes });
     }
     case 'totp-remove': {
       if (!(await passwordOk())) return;
-      if (!(await mayRemove('totp'))) return fail(res, 409, 'last_factor');
-      const { error } = await db().from(T.totp).delete().eq('user_id', userId);
+      if (!(await mayRemove('totp'))) return fail(response, 409, 'last_factor');
+      const { error } = await database().from(TABLES.totp).delete().eq('user_id', userId);
       if (error) throw error;
-      await audit(req, { action: 'security.totp_removed', actorId: userId });
-      return ok(res, await summary(userId));
+      await audit(request, { action: 'security.totp_removed', actorId: userId });
+      return ok(response, await summary(userId));
     }
     case 'passkey-options': {
       if (!(await passwordOk())) return;
-      return ok(res, { options: await registrationOptions(user) });
+      return ok(response, { options: await registrationOptions(user) });
     }
     case 'passkey-finish': {
       const name = String(body.label ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, LIMITS.label) || null;
       const result = await finishRegistration(userId, body.response, name);
-      if (!result.ok) return fail(res, 400, result.error);
-      await audit(req, { action: 'security.passkey_added', actorId: userId });
+      if (!result.ok) return fail(response, 400, result.error);
+      await audit(request, { action: 'security.passkey_added', actorId: userId });
       const codes = await backupCodesForNewFactor(user);
-      return ok(res, { ...(await summary(userId)), codes });
+      return ok(response, { ...(await summary(userId)), codes });
     }
     case 'passkey-remove': {
-      if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
+      if (!UUID.test(String(body.id ?? ''))) return fail(response, 400, 'bad_request');
       if (!(await passwordOk())) return;
-      if (!(await mayRemove('passkey'))) return fail(res, 409, 'last_factor');
+      if (!(await mayRemove('passkey'))) return fail(response, 409, 'last_factor');
       await removePasskey(userId, body.id);
-      await audit(req, { action: 'security.passkey_removed', actorId: userId });
-      return ok(res, await summary(userId));
+      await audit(request, { action: 'security.passkey_removed', actorId: userId });
+      return ok(response, await summary(userId));
     }
     case 'telegram-link': {
-      if (!telegramConfigured()) return fail(res, 400, 'telegram_off');
+      if (!telegramConfigured()) return fail(response, 400, 'telegram_off');
       // Only the link: the page opens it and shows no expiry.
       const { url } = await createLinkToken(userId, null);
-      return ok(res, { url });
+      return ok(response, { url });
     }
     case 'telegram-unlink': {
       if (!(await passwordOk())) return;
-      if (!(await mayRemove('telegram'))) return fail(res, 409, 'last_factor');
-      const { error } = await db().from(T.telegram).delete().eq('user_id', userId);
+      if (!(await mayRemove('telegram'))) return fail(response, 409, 'last_factor');
+      const { error } = await database().from(TABLES.telegram).delete().eq('user_id', userId);
       if (error) throw error;
-      await audit(req, { action: 'security.telegram_unlinked', actorId: userId, details: { via: 'site' } });
-      return ok(res, await summary(userId));
+      await audit(request, { action: 'security.telegram_unlinked', actorId: userId, details: { via: 'site' } });
+      return ok(response, await summary(userId));
     }
     case 'backup-regenerate': {
       if (!(await passwordOk())) return;
       const codes = await issueBackupCodes(userId);
-      await audit(req, { action: 'security.backup_codes_issued', actorId: userId });
-      return ok(res, { codes });
+      await audit(request, { action: 'security.backup_codes_issued', actorId: userId });
+      return ok(response, { codes });
     }
     case 'delete-account': {
-      if (user.kind !== 'public') return fail(res, 403, 'staff_account');
+      if (user.kind !== 'public') return fail(response, 403, 'staff_account');
       if (!(await passwordOk())) return;
       // Cascades to sessions, factors, Telegram link and RSVPs; the audit
       // log keeps its rows with the actor set to null.
       await forgetAllSubscriptions(userId);
-      const { error } = await db().from(T.accounts).delete().eq('id', userId).eq('kind', 'public');
+      const { error } = await database().from(TABLES.accounts).delete().eq('id', userId).eq('kind', 'public');
       if (error) throw error;
-      await endSession(req, res);
-      return ok(res, { deleted: true });
+      await endSession(request, response);
+      return ok(response, { deleted: true });
     }
     default:
-      return fail(res, 400, 'bad_request');
+      return fail(response, 400, 'bad_request');
   }
 });

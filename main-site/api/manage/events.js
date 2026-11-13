@@ -15,7 +15,7 @@
 // knows and ignores the rest). Answers are built by serialize.js, never rows.
 
 import { route, guard, readJson, ok, fail, query } from '../_lib/http.js';
-import { db, T } from '../_lib/supabase.js';
+import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
@@ -28,15 +28,15 @@ import { background, notifyEventChange } from '../_lib/notify.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function loadEvent(id) {
-  const { data, error } = await db().from(T.events).select(MANAGE_COLUMNS).eq('id', id).maybeSingle();
+  const { data, error } = await database().from(TABLES.events).select(MANAGE_COLUMNS).eq('id', id).maybeSingle();
   if (error) throw error;
   return data;
 }
 
 async function loadAttendees(eventId) {
-  const { data, error } = await db()
-    .from(T.attendees)
-    .select(`created_at, account:${T.accounts} ( kind, username, display_name, staff:${T.users} ( username, display_name ) )`)
+  const { data, error } = await database()
+    .from(TABLES.attendees)
+    .select(`created_at, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`)
     .eq('event_id', eventId)
     .order('created_at', { ascending: true })
     .limit(2000);
@@ -44,93 +44,93 @@ async function loadAttendees(eventId) {
   return (data ?? []).map(attendeeView);
 }
 
-function saveError(res, error) {
-  if (error.code === '23505') return fail(res, 409, 'slug_taken');
-  if (error.code === '23514') return fail(res, 400, 'invalid_field', { field: 'event' });
+function saveError(response, error) {
+  if (error.code === '23505') return fail(response, 409, 'slug_taken');
+  if (error.code === '23514') return fail(response, 400, 'invalid_field', { field: 'event' });
   throw error;
 }
 
-export default route('manage/events', async (req, res) => {
-  if (guard(req, res, ['GET', 'POST'])) return;
-  const session = await requireUser(req, res, { manage: true });
+export default route('manage/events', async (request, response) => {
+  if (guard(request, response, ['GET', 'POST'])) return;
+  const session = await requireUser(request, response, { manage: true });
   if (!session) return;
   const user = session.user;
 
-  if (req.method === 'GET') {
-    const id = query(req, 'id');
+  if (request.method === 'GET') {
+    const id = query(request, 'id');
     if (id) {
-      if (!UUID.test(id)) return fail(res, 400, 'bad_request');
+      if (!UUID.test(id)) return fail(response, 400, 'bad_request');
       const row = await loadEvent(id);
-      if (!row) return fail(res, 404, 'not_found');
-      return ok(res, { event: managedEvent(row), attendees: await loadAttendees(row.id) });
+      if (!row) return fail(response, 404, 'not_found');
+      return ok(response, { event: managedEvent(row), attendees: await loadAttendees(row.id) });
     }
-    const { data, error } = await db()
-      .from(T.events)
+    const { data, error } = await database()
+      .from(TABLES.events)
       .select('id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, gftvevents_attendees(count)')
       .order('updated_at', { ascending: false })
       .limit(500);
     if (error) throw error;
     const now = Date.now();
-    return ok(res, { events: (data ?? []).map((row) => managedSummary(row, now)) });
+    return ok(response, { events: (data ?? []).map((row) => managedSummary(row, now)) });
   }
 
-  const body = await readJson(req, res, { maxBytes: 64 * 1024 });
+  const body = await readJson(request, response, { maxBytes: 64 * 1024 });
   if (!body) return;
-  if (await limited(req, res, 'manageWrite', [`u:${user.id}`])) return;
+  if (await limited(request, response, 'manageWrite', [`u:${user.id}`])) return;
 
   if (body.action === 'create' || body.action === 'update') {
     const check = validateEvent(body.event);
-    if (!check.ok) return fail(res, 400, check.error, { field: check.field });
+    if (!check.ok) return fail(response, 400, check.error, { field: check.field });
     const fields = { ...check.fields, updated_by: user.id };
 
     if (body.action === 'create') {
-      const { data, error } = await db()
-        .from(T.events)
+      const { data, error } = await database()
+        .from(TABLES.events)
         .insert({ ...fields, created_by: user.id })
         .select(MANAGE_COLUMNS)
         .single();
-      if (error) return saveError(res, error);
-      await audit(req, { action: 'event.created', actorId: user.id, eventId: data.id, details: { status: data.status } });
-      return ok(res, { event: managedEvent(data) });
+      if (error) return saveError(response, error);
+      await audit(request, { action: 'event.created', actorId: user.id, eventId: data.id, details: { status: data.status } });
+      return ok(response, { event: managedEvent(data) });
     }
 
-    if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
+    if (!UUID.test(String(body.id ?? ''))) return fail(response, 400, 'bad_request');
     const before = await loadEvent(body.id);
-    if (!before) return fail(res, 404, 'not_found');
-    const { data, error } = await db()
-      .from(T.events)
+    if (!before) return fail(response, 404, 'not_found');
+    const { data, error } = await database()
+      .from(TABLES.events)
       .update(fields)
       .eq('id', body.id)
       .select(MANAGE_COLUMNS)
       .maybeSingle();
-    if (error) return saveError(res, error);
-    if (!data) return fail(res, 404, 'not_found');
-    await audit(req, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
+    if (error) return saveError(response, error);
+    if (!data) return fail(response, 404, 'not_found');
+    await audit(request, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
     background(notifyEventChange(before, data));
-    return ok(res, { event: managedEvent(data) });
+    return ok(response, { event: managedEvent(data) });
   }
 
   if (body.action === 'delete') {
-    if (!isAdmin(user)) return fail(res, 403, 'admin_only');
-    if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
-    const { data, error } = await db().from(T.events).delete().eq('id', body.id).select('id, slug, cover_image_path');
+    if (!isAdmin(user)) return fail(response, 403, 'admin_only');
+    if (!UUID.test(String(body.id ?? ''))) return fail(response, 400, 'bad_request');
+    const { data, error } = await database().from(TABLES.events).delete().eq('id', body.id).select('id, slug, cover_image_path');
     if (error) throw error;
-    if (!data?.length) return fail(res, 404, 'not_found');
+    if (!data?.length) return fail(response, 404, 'not_found');
     await deleteCover(data[0].cover_image_path);
     // event_id is set null on the audit rows by the foreign key, so the slug
     // goes in the details to keep the trail readable.
-    await audit(req, { action: 'event.deleted', actorId: user.id, details: { slug: data[0].slug } });
-    return ok(res, { deleted: true });
+    await audit(request, { action: 'event.deleted', actorId: user.id, details: { slug: data[0].slug } });
+    return ok(response, { deleted: true });
   }
 
   if (body.action === 'remove-attendee') {
-    if (!UUID.test(String(body.id ?? ''))) return fail(res, 400, 'bad_request');
+    if (!UUID.test(String(body.id ?? ''))) return fail(response, 400, 'bad_request');
     const username = String(body.username ?? '').trim();
-    if (!username || username.length > 64) return fail(res, 400, 'bad_request');
+    if (!username || username.length > 64) return fail(response, 400, 'bad_request');
     // Matched against this event's own list, so only someone on it can go.
-    const { data: rows, error: rowsError } = await db()
-      .from(T.attendees)
-      .select(`user_id, account:${T.accounts} ( kind, username, staff:${T.users} ( username ) )`)
+    const { data: rows, error: rowsError } = await database()
+      .from(TABLES.attendees)
+      .select(`user_id, account:${TABLES.accounts} ( kind, username, staff:${TABLES.users} ( username ) )`)
       .eq('event_id', body.id);
     if (rowsError) throw rowsError;
     const match = (rows ?? []).find((r) => {
@@ -138,12 +138,12 @@ export default route('manage/events', async (req, res) => {
       const name = a.kind === 'staff' ? a.staff?.username : a.username;
       return name === username && (body.staff === undefined || body.staff === (a.kind === 'staff'));
     });
-    if (!match) return fail(res, 404, 'not_found');
-    const { error } = await db().from(T.attendees).delete().eq('event_id', body.id).eq('user_id', match.user_id);
+    if (!match) return fail(response, 404, 'not_found');
+    const { error } = await database().from(TABLES.attendees).delete().eq('event_id', body.id).eq('user_id', match.user_id);
     if (error) throw error;
-    await audit(req, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
-    return ok(res, { attendees: await loadAttendees(body.id) });
+    await audit(request, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
+    return ok(response, { attendees: await loadAttendees(body.id) });
   }
 
-  fail(res, 400, 'bad_request');
+  fail(response, 400, 'bad_request');
 });

@@ -18,7 +18,7 @@
 // address; those stay on the event page for people going.
 
 import { waitUntil } from '@vercel/functions';
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { siteUrl } from './env.js';
 import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
@@ -83,7 +83,7 @@ export function noticeFor(kind, row) {
 
 async function telegramChats(accountIds) {
   if (!telegramConfigured() || accountIds.length === 0) return new Map();
-  const { data, error } = await db().from(T.telegram).select('user_id, chat_id').in('user_id', accountIds);
+  const { data, error } = await database().from(TABLES.telegram).select('user_id, chat_id').in('user_id', accountIds);
   if (error) throw error;
   return new Map((data ?? []).map((r) => [r.user_id, r.chat_id]));
 }
@@ -110,9 +110,9 @@ export async function deliver(accounts, notice) {
 }
 
 async function attendeeAccounts(eventId, pref) {
-  const { data, error } = await db()
-    .from(T.attendees)
-    .select(`user_id, account:${T.accounts} ( id, status, notify_updates, notify_reminders, notify_telegram )`)
+  const { data, error } = await database()
+    .from(TABLES.attendees)
+    .select(`user_id, account:${TABLES.accounts} ( id, status, notify_updates, notify_reminders, notify_telegram )`)
     .eq('event_id', eventId);
   if (error) throw error;
   return (data ?? []).map((r) => r.account).filter((a) => a && a.status === 'active' && a[pref] === true);
@@ -145,8 +145,8 @@ export async function notifyEventChange(before, after) {
 export async function sendReminders(now = Date.now()) {
   const from = new Date(now).toISOString();
   const to = new Date(now + REMIND_WITHIN_HOURS * 3600_000).toISOString();
-  const { data: events, error } = await db()
-    .from(T.events)
+  const { data: events, error } = await database()
+    .from(TABLES.events)
     .select('id, slug, title, status, publish_at, starts_at, ends_at, timezone, dates_hidden, venue_name, city, is_online')
     .eq('status', 'published')
     .eq('dates_hidden', false)
@@ -156,17 +156,17 @@ export async function sendReminders(now = Date.now()) {
   if (error) throw error;
   let sent = 0;
   for (const event of (events ?? []).filter((e) => isReleased(e, now))) {
-    const { data: rows, error: rowsError } = await db()
-      .from(T.attendees)
-      .select(`user_id, account:${T.accounts} ( id, status, notify_reminders, notify_telegram )`)
+    const { data: rows, error: rowsError } = await database()
+      .from(TABLES.attendees)
+      .select(`user_id, account:${TABLES.accounts} ( id, status, notify_reminders, notify_telegram )`)
       .eq('event_id', event.id)
       .is('reminded_at', null);
     if (rowsError) throw rowsError;
     const due = (rows ?? []).map((r) => r.account).filter(Boolean);
     if (due.length === 0) continue;
     // Marked first, so a slow or failing send is never repeated next hour.
-    const { error: markError } = await db()
-      .from(T.attendees)
+    const { error: markError } = await database()
+      .from(TABLES.attendees)
       .update({ reminded_at: new Date(now).toISOString() })
       .eq('event_id', event.id)
       .is('reminded_at', null);
@@ -180,8 +180,8 @@ export async function sendReminders(now = Date.now()) {
 // Hourly: one "new event" notice per newly released event, to the accounts
 // that asked for them.
 export async function announceNewEvents(now = Date.now()) {
-  const { data: events, error } = await db()
-    .from(T.events)
+  const { data: events, error } = await database()
+    .from(TABLES.events)
     .select('id, slug, title, status, publish_at, starts_at, ends_at, timezone, dates_hidden, venue_name, city, is_online, last_at')
     .eq('status', 'published')
     .is('announced_at', null)
@@ -192,13 +192,13 @@ export async function announceNewEvents(now = Date.now()) {
   // Released but already over: nothing to announce, but marked so it does
   // not sit in the next run's window forever.
   for (const event of released.filter(isPast)) {
-    const { error: markError } = await db().from(T.events).update({ announced_at: new Date(now).toISOString() }).eq('id', event.id);
+    const { error: markError } = await database().from(TABLES.events).update({ announced_at: new Date(now).toISOString() }).eq('id', event.id);
     if (markError) throw markError;
   }
   const fresh = released.filter((e) => !isPast(e));
   if (fresh.length === 0) return 0;
-  const { data: accounts, error: accountsError } = await db()
-    .from(T.accounts)
+  const { data: accounts, error: accountsError } = await database()
+    .from(TABLES.accounts)
     .select('id, status, notify_telegram')
     .eq('notify_new_events', true)
     .eq('status', 'active')
@@ -206,7 +206,7 @@ export async function announceNewEvents(now = Date.now()) {
   if (accountsError) throw accountsError;
   let sent = 0;
   for (const event of fresh) {
-    const { error: markError } = await db().from(T.events).update({ announced_at: new Date(now).toISOString() }).eq('id', event.id).is('announced_at', null);
+    const { error: markError } = await database().from(TABLES.events).update({ announced_at: new Date(now).toISOString() }).eq('id', event.id).is('announced_at', null);
     if (markError) throw markError;
     sent += await deliver(accounts ?? [], noticeFor('new', event));
   }

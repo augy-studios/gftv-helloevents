@@ -1,12 +1,12 @@
 // The public event feed: upcoming, dates to come, or past, by kind.
 
 import '../app.js';
-import { t, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api } from '../api.js';
 import { errorText } from '../ui.js';
 import { eventCard } from '../cards.js';
 
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 const state = { when: 'upcoming', kind: '', offset: 0, events: [], next: null };
 let request = 0;
 
@@ -17,18 +17,18 @@ function press(groupId, attr, value) {
 }
 
 function render() {
-  const feed = $('feed');
+  const feed = byId('feed');
   feed.replaceChildren(...state.events.map(eventCard));
   feed.setAttribute('aria-busy', 'false');
-  $('feedEmpty').hidden = state.events.length > 0;
-  $('feedMore').hidden = state.next === null;
-  $('feedStatus').textContent = t('home.count', { count: state.events.length });
+  byId('feedEmpty').hidden = state.events.length > 0;
+  byId('feedMore').hidden = state.next === null;
+  byId('feedStatus').textContent = translate('home.count', { count: state.events.length });
 }
 
 async function load({ append = false } = {}) {
   const mine = ++request;
-  $('feedError').textContent = '';
-  if (!append) $('feed').setAttribute('aria-busy', 'true');
+  byId('feedError').textContent = '';
+  if (!append) byId('feed').setAttribute('aria-busy', 'true');
   const params = new URLSearchParams({ when: state.when, offset: String(append ? state.next : 0) });
   if (state.kind) params.set('kind', state.kind);
   try {
@@ -39,13 +39,13 @@ async function load({ append = false } = {}) {
     render();
   } catch (error) {
     if (mine !== request) return;
-    $('feed').setAttribute('aria-busy', 'false');
-    if (!append) $('feed').replaceChildren();
-    $('feedError').textContent = errorText(error);
+    byId('feed').setAttribute('aria-busy', 'false');
+    if (!append) byId('feed').replaceChildren();
+    byId('feedError').textContent = errorText(error);
   }
 }
 
-$('whenPicker').addEventListener('click', (e) => {
+byId('whenPicker').addEventListener('click', (e) => {
   const b = e.target.closest('[data-when-filter]');
   if (!b) return;
   state.when = b.getAttribute('data-when-filter');
@@ -53,7 +53,7 @@ $('whenPicker').addEventListener('click', (e) => {
   load();
 });
 
-$('kindPicker').addEventListener('click', (e) => {
+byId('kindPicker').addEventListener('click', (e) => {
   const b = e.target.closest('[data-kind]');
   if (!b) return;
   state.kind = b.getAttribute('data-kind');
@@ -61,7 +61,7 @@ $('kindPicker').addEventListener('click', (e) => {
   load();
 });
 
-$('feedMore').addEventListener('click', () => load({ append: true }));
+byId('feedMore').addEventListener('click', () => load({ append: true }));
 
 // Cards are built in code, so they are rebuilt in the new language.
 onChange(() => { if (state.events.length) render(); });

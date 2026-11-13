@@ -17,7 +17,7 @@
 //
 // Pure functions first, so tests/unit.test.js runs them directly.
 
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 
 const LOOKALIKE = {
   // Cyrillic
@@ -94,7 +94,7 @@ export function forgetNameFilters() {
 
 export async function customTerms() {
   if (Date.now() - cache.at < 60_000) return cache.terms;
-  const { data, error } = await db().from(T.nameFilters).select('term').limit(2000);
+  const { data, error } = await database().from(TABLES.nameFilters).select('term').limit(2000);
   if (error) {
     // A missing table (003 not run yet) or a hiccup: the built-in list still
     // applies.

@@ -13,7 +13,7 @@
 // is never stored as sent. The same approach as gftv-linktree's avatars.
 
 import sharp from 'sharp';
-import { db, T } from './supabase.js';
+import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 import { randomToken } from './crypto.js';
 
@@ -31,7 +31,7 @@ const PATH = /^[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
 export function coverUrl(path) {
   if (!path || !PATH.test(path)) return null;
   const base = optionalEnv('SUPABASE_URL').replace(/\/+$/, '');
-  return base ? `${base}/storage/v1/object/public/${T.coversBucket}/${path}` : null;
+  return base ? `${base}/storage/v1/object/public/${TABLES.coversBucket}/${path}` : null;
 }
 
 function isWebp(buffer) {
@@ -78,7 +78,7 @@ export async function prepareCover(input) {
 // Upload under a fresh random name. Returns the path to keep on the event.
 export async function storeCover(eventId, buffer) {
   const path = `${eventId}/${randomToken(18)}.webp`;
-  const { error } = await db().storage.from(T.coversBucket).upload(path, buffer, {
+  const { error } = await database().storage.from(TABLES.coversBucket).upload(path, buffer, {
     contentType: 'image/webp',
     cacheControl: '31536000',
     upsert: false,
@@ -91,6 +91,6 @@ export async function storeCover(eventId, buffer) {
 // error here would fail an action that has otherwise succeeded.
 export async function deleteCover(path) {
   if (!path || !PATH.test(path)) return;
-  const { error } = await db().storage.from(T.coversBucket).remove([path]);
+  const { error } = await database().storage.from(TABLES.coversBucket).remove([path]);
   if (error) console.warn('[helloevents] cover delete:', path, error.message);
 }

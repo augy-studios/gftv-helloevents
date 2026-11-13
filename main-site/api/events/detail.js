@@ -14,17 +14,17 @@ import { canManage } from '../_lib/users.js';
 import { releasedEventBySlug, anyEventBySlug, isGoing, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
-export default route('events/detail', async (req, res) => {
-  if (guard(req, res, ['GET'])) return;
-  const slug = query(req, 'slug').toLowerCase();
-  const session = await currentSession(req);
+export default route('events/detail', async (request, response) => {
+  if (guard(request, response, ['GET'])) return;
+  const slug = query(request, 'slug').toLowerCase();
+  const session = await currentSession(request);
   const manager = Boolean(session && canManage(session.user));
 
   const row = manager ? await anyEventBySlug(slug, DETAIL_COLUMNS) : await releasedEventBySlug(slug);
-  if (!row) return fail(res, 404, 'not_found');
+  if (!row) return fail(response, 404, 'not_found');
 
   const going = session ? await isGoing(row.id, session.user.id) : false;
-  ok(res, {
+  ok(response, {
     event: publicEventDetail(row, { signedIn: Boolean(session), going, canManage: manager }),
     // Only an editor ever sees an unreleased event, and is told so.
     preview: manager ? row.status === 'draft' || Boolean(row.publish_at && new Date(row.publish_at) > new Date()) : false,

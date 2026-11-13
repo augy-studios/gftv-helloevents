@@ -3,9 +3,9 @@
 // themselves here.
 
 import { session } from '../app.js';
-import { t, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
-import { el, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
+import { createElement, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
 import { iconNode } from '../icons.js';
 import { eventCard } from '../cards.js';
 import { showCodes } from '../codes.js';
@@ -13,7 +13,7 @@ import { qrSvg } from '../qr.js';
 import { passkeysSupported, createPasskey, passkeyErrorCode } from '../passkeys.js';
 import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice } from '../push-client.js';
 
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 let me = null;
 let security = null;
 let rsvps = null;
@@ -24,100 +24,100 @@ let totpSetup = null; // the set-up token while an authenticator is being added
 let pending = null;
 
 function renderProfile() {
-  $('displayName').textContent = me.displayName;
-  $('username').textContent = me.username;
-  $('role').textContent = t(`role.${me.role}`);
+  byId('displayName').textContent = me.displayName;
+  byId('username').textContent = me.username;
+  byId('role').textContent = translate(`role.${me.role}`);
   if (me.avatarUrl) {
-    $('avatar').referrerPolicy = 'no-referrer';
-    $('avatar').src = me.avatarUrl;
-    $('avatar').hidden = false;
+    byId('avatar').referrerPolicy = 'no-referrer';
+    byId('avatar').src = me.avatarUrl;
+    byId('avatar').hidden = false;
   }
-  $('deleteBox').hidden = me.kind !== 'public';
+  byId('deleteBox').hidden = me.kind !== 'public';
   // Staff names come from gftv.asia.
-  $('nameForm').hidden = me.kind !== 'public';
-  if (document.activeElement !== $('nameInput')) $('nameInput').value = me.displayName;
+  byId('nameForm').hidden = me.kind !== 'public';
+  if (document.activeElement !== byId('nameInput')) byId('nameInput').value = me.displayName;
 }
 
 function renderRsvps() {
-  $('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((r) => r.event).map((r) => eventCard(r.event)));
-  $('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
-  $('pastBox').hidden = rsvps.past.length === 0;
-  $('rsvpPast').replaceChildren(...rsvps.past.filter((r) => r.event).map((r) => eventCard(r.event)));
+  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((r) => r.event).map((r) => eventCard(r.event)));
+  byId('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
+  byId('pastBox').hidden = rsvps.past.length === 0;
+  byId('rsvpPast').replaceChildren(...rsvps.past.filter((r) => r.event).map((r) => eventCard(r.event)));
 }
 
 function renderNotify() {
   const n = notify;
-  $('prefUpdates').checked = n.prefs.updates;
-  $('prefReminders').checked = n.prefs.reminders;
-  $('prefNewEvents').checked = n.prefs.newEvents;
-  $('prefTelegram').checked = n.prefs.telegram;
-  $('notifyTelegramBox').hidden = !n.telegram.available;
-  $('prefTelegram').disabled = !n.telegram.linked;
-  $('notifyTelegramNote').hidden = n.telegram.linked;
+  byId('prefUpdates').checked = n.prefs.updates;
+  byId('prefReminders').checked = n.prefs.reminders;
+  byId('prefNewEvents').checked = n.prefs.newEvents;
+  byId('prefTelegram').checked = n.prefs.telegram;
+  byId('notifyTelegramBox').hidden = !n.telegram.available;
+  byId('prefTelegram').disabled = !n.telegram.linked;
+  byId('notifyTelegramNote').hidden = n.telegram.linked;
 
   const can = n.push.available && pushSupported();
-  $('pushOn').hidden = !can || deviceOn;
-  $('pushOff').hidden = !can || !deviceOn;
-  $('pushTest').hidden = !(deviceOn || (n.telegram.linked && n.prefs.telegram));
-  $('pushState').textContent = !n.push.available
-    ? t('notify.push-unavailable')
+  byId('pushOn').hidden = !can || deviceOn;
+  byId('pushOff').hidden = !can || !deviceOn;
+  byId('pushTest').hidden = !(deviceOn || (n.telegram.linked && n.prefs.telegram));
+  byId('pushState').textContent = !n.push.available
+    ? translate('notify.push-unavailable')
     : !pushSupported()
-      ? t('notify.push-unsupported')
+      ? translate('notify.push-unsupported')
       : deviceOn
-        ? t('notify.push-on-here')
-        : t('notify.push-off-here');
+        ? translate('notify.push-on-here')
+        : translate('notify.push-off-here');
 }
 
 // "Last used 14 Nov 2026, 2:00 pm" under a passkey, or "Never used" for one
 // that has not signed in yet (lastUsedAt is null).
 function passkeyLastUsed(lastUsedAt) {
   if (!lastUsedAt) {
-    return t('security.passkey-never-used');
+    return translate('security.passkey-never-used');
   }
-  return t('security.passkey-last-used', { date: formatDate(lastUsedAt) });
+  return translate('security.passkey-last-used', { date: formatDate(lastUsedAt) });
 }
 
 function renderSecurity() {
   const s = security;
-  $('securityLede').textContent = t(s.required ? 'security.lede-staff' : 'security.lede-public');
-  $('totpState').textContent = s.totp.shared
-    ? t('security.totp-shared')
+  byId('securityLede').textContent = translate(s.required ? 'security.lede-staff' : 'security.lede-public');
+  byId('totpState').textContent = s.totp.shared
+    ? translate('security.totp-shared')
     : s.totp.local
-      ? t('security.totp-local')
-      : t('security.totp-none');
-  $('totpAdd').hidden = s.totp.shared || s.totp.local || totpSetup !== null;
-  $('totpRemove').hidden = !s.totp.local;
-  $('totpSetup').hidden = totpSetup === null;
+      ? translate('security.totp-local')
+      : translate('security.totp-none');
+  byId('totpAdd').hidden = s.totp.shared || s.totp.local || totpSetup !== null;
+  byId('totpRemove').hidden = !s.totp.local;
+  byId('totpSetup').hidden = totpSetup === null;
 
-  $('passkeyList').replaceChildren(
+  byId('passkeyList').replaceChildren(
     ...(s.passkeys.length === 0
-      ? [el('li', { class: 'muted small', text: t('security.passkeys-none') })]
-      : s.passkeys.map((p) => el('li', { class: 'item-row' }, [
+      ? [createElement('li', { class: 'muted small', text: translate('security.passkeys-none') })]
+      : s.passkeys.map((p) => createElement('li', { class: 'item-row' }, [
         iconNode('key'),
-        el('span', { class: 'item-main' }, [
-          el('span', { text: p.label || t('security.passkey-unnamed') }),
-          el('span', { class: 'muted small', text: t('security.passkey-added', { date: formatDate(p.createdAt) }) }),
-          el('span', { class: 'muted small', text: passkeyLastUsed(p.lastUsedAt) }),
+        createElement('span', { class: 'item-main' }, [
+          createElement('span', { text: p.label || translate('security.passkey-unnamed') }),
+          createElement('span', { class: 'muted small', text: translate('security.passkey-added', { date: formatDate(p.createdAt) }) }),
+          createElement('span', { class: 'muted small', text: passkeyLastUsed(p.lastUsedAt) }),
         ]),
-        el('button', {
+        createElement('button', {
           class: 'btn btn-small btn-quiet',
           type: 'button',
-          text: t('security.remove'),
-          'aria-label': t('security.passkey-remove', { name: p.label || t('security.passkey-unnamed') }),
+          text: translate('security.remove'),
+          'aria-label': translate('security.passkey-remove', { name: p.label || translate('security.passkey-unnamed') }),
           onclick: () => askPassword({ kind: 'passkey-remove', id: p.id }),
         }),
       ])))
   );
-  $('passkeyAdd').hidden = !passkeysSupported();
+  byId('passkeyAdd').hidden = !passkeysSupported();
 
-  $('telegramBox').hidden = !s.telegram.available;
-  $('telegramState').textContent = s.telegram.linked
-    ? (s.telegram.username ? t('security.telegram-linked-as', { username: s.telegram.username }) : t('security.telegram-linked'))
-    : t('security.telegram-none');
-  $('telegramLink').hidden = s.telegram.linked;
-  $('telegramUnlink').hidden = !s.telegram.linked;
+  byId('telegramBox').hidden = !s.telegram.available;
+  byId('telegramState').textContent = s.telegram.linked
+    ? (s.telegram.username ? translate('security.telegram-linked-as', { username: s.telegram.username }) : translate('security.telegram-linked'))
+    : translate('security.telegram-none');
+  byId('telegramLink').hidden = s.telegram.linked;
+  byId('telegramUnlink').hidden = !s.telegram.linked;
 
-  $('backupState').textContent = t('security.backup-left', { count: s.backupCodesLeft });
+  byId('backupState').textContent = translate('security.backup-left', { count: s.backupCodesLeft });
 }
 
 async function load() {
@@ -130,14 +130,14 @@ async function load() {
   try {
     [security, rsvps, notify] = await Promise.all([api('/api/me/security'), api('/api/me/rsvps'), api('/api/me/notifications')]);
   } catch (error) {
-    $('accountLoading').hidden = true;
-    $('accountView').hidden = false;
-    $('securityError').textContent = errorText(error);
+    byId('accountLoading').hidden = true;
+    byId('accountView').hidden = false;
+    byId('securityError').textContent = errorText(error);
     renderProfile();
     return;
   }
-  $('accountLoading').hidden = true;
-  $('accountView').hidden = false;
+  byId('accountLoading').hidden = true;
+  byId('accountView').hidden = false;
   renderProfile();
   renderRsvps();
   renderNotify();
@@ -152,9 +152,9 @@ async function load() {
 // ---------------------------------------------------------------------------
 
 for (const [id, key] of [['prefUpdates', 'updates'], ['prefReminders', 'reminders'], ['prefNewEvents', 'newEvents'], ['prefTelegram', 'telegram']]) {
-  $(id).addEventListener('change', () => {
-    const box = $(id);
-    withBusy(null, $('notifyError'), async () => {
+  byId(id).addEventListener('change', () => {
+    const box = byId(id);
+    withBusy(null, byId('notifyError'), async () => {
       try {
         notify = await post('/api/me/notifications', { action: 'prefs', [key]: box.checked });
       } catch (error) {
@@ -166,8 +166,8 @@ for (const [id, key] of [['prefUpdates', 'updates'], ['prefReminders', 'reminder
   });
 }
 
-$('pushOn').addEventListener('click', () => {
-  withBusy($('pushOn'), $('notifyError'), async () => {
+byId('pushOn').addEventListener('click', () => {
+  withBusy(byId('pushOn'), byId('notifyError'), async () => {
     const subscription = await subscribeDevice(notify.push.publicKey);
     notify = await post('/api/me/notifications', { action: 'subscribe', subscription });
     deviceOn = true;
@@ -175,8 +175,8 @@ $('pushOn').addEventListener('click', () => {
   });
 });
 
-$('pushOff').addEventListener('click', () => {
-  withBusy($('pushOff'), $('notifyError'), async () => {
+byId('pushOff').addEventListener('click', () => {
+  withBusy(byId('pushOff'), byId('notifyError'), async () => {
     const endpoint = await unsubscribeDevice();
     if (endpoint) notify = await post('/api/me/notifications', { action: 'unsubscribe', endpoint });
     deviceOn = false;
@@ -184,8 +184,8 @@ $('pushOff').addEventListener('click', () => {
   });
 });
 
-$('pushTest').addEventListener('click', () => {
-  withBusy($('pushTest'), $('notifyError'), async () => {
+byId('pushTest').addEventListener('click', () => {
+  withBusy(byId('pushTest'), byId('notifyError'), async () => {
     await post('/api/me/notifications', { action: 'test' });
   });
 });
@@ -196,22 +196,22 @@ $('pushTest').addEventListener('click', () => {
 
 function askPassword(action) {
   pending = action;
-  $('confirmPassword').value = '';
-  $('passwordModalError').textContent = '';
-  $('passkeyLabelField').hidden = action.kind !== 'passkey-add';
-  $('passwordModalLede').textContent = t(action.kind === 'delete-account' ? 'account.delete-confirm' : 'security.password-lede');
-  openModal('passwordModal', { initialFocus: action.kind === 'passkey-add' ? $('newPasskeyLabel') : $('confirmPassword') });
+  byId('confirmPassword').value = '';
+  byId('passwordModalError').textContent = '';
+  byId('passkeyLabelField').hidden = action.kind !== 'passkey-add';
+  byId('passwordModalLede').textContent = translate(action.kind === 'delete-account' ? 'account.delete-confirm' : 'security.password-lede');
+  openModal('passwordModal', { initialFocus: action.kind === 'passkey-add' ? byId('newPasskeyLabel') : byId('confirmPassword') });
 }
 
 function showNewCodes(codes) {
-  showCodes($('codesList'), codes, { copyButton: $('codesCopy'), downloadButton: $('codesDownload') });
-  $('newCodes').hidden = false;
+  showCodes(byId('codesList'), codes, { copyButton: byId('codesCopy'), downloadButton: byId('codesDownload') });
+  byId('newCodes').hidden = false;
 }
 
-$('passwordModalForm').addEventListener('submit', (e) => {
+byId('passwordModalForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const password = $('confirmPassword').value;
-  withBusy($('passwordModalSubmit'), $('passwordModalError'), async () => {
+  const password = byId('confirmPassword').value;
+  withBusy(byId('passwordModalSubmit'), byId('passwordModalError'), async () => {
     const action = pending;
     if (action.kind === 'passkey-add') {
       const { options } = await post('/api/me/security', { action: 'passkey-options', password });
@@ -221,11 +221,11 @@ $('passwordModalForm').addEventListener('submit', (e) => {
       } catch (cause) {
         throw Object.assign(new Error('passkey'), { code: passkeyErrorCode(cause) });
       }
-      const { codes, ...rest } = await post('/api/me/security', { action: 'passkey-finish', response, label: $('newPasskeyLabel').value });
+      const { codes, ...rest } = await post('/api/me/security', { action: 'passkey-finish', response, label: byId('newPasskeyLabel').value });
       security = rest;
       // A first passkey that turns 2FA on comes with backup codes.
       if (codes) showNewCodes(codes);
-      $('newPasskeyLabel').value = '';
+      byId('newPasskeyLabel').value = '';
     } else if (action.kind === 'passkey-remove') {
       security = await post('/api/me/security', { action: 'passkey-remove', id: action.id, password });
     } else if (action.kind === 'telegram-unlink') {
@@ -239,8 +239,8 @@ $('passwordModalForm').addEventListener('submit', (e) => {
     } else if (action.kind === 'totp-add') {
       const data = await post('/api/me/security', { action: 'totp-start', password });
       totpSetup = data.setup;
-      $('totpQr').innerHTML = qrSvg(data.uri, t('setup.totp-qr-label'));
-      $('totpSecret').textContent = data.secret.replace(/(.{4})/g, '$1 ').trim();
+      byId('totpQr').innerHTML = qrSvg(data.uri, translate('setup.totp-qr-label'));
+      byId('totpSecret').textContent = data.secret.replace(/(.{4})/g, '$1 ').trim();
     } else if (action.kind === 'totp-remove') {
       security = await post('/api/me/security', { action: 'totp-remove', password });
     } else if (action.kind === 'delete-account') {
@@ -250,16 +250,16 @@ $('passwordModalForm').addEventListener('submit', (e) => {
     }
     closeModal('passwordModal');
     renderSecurity();
-    if (action.kind === 'totp-add') $('totpCode').focus();
+    if (action.kind === 'totp-add') byId('totpCode').focus();
   });
 });
 
-$('totpForm').addEventListener('submit', (e) => {
+byId('totpForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  withBusy($('totpSubmit'), $('securityError'), async () => {
-    const data = await post('/api/me/security', { action: 'totp-finish', setup: totpSetup, code: $('totpCode').value });
+  withBusy(byId('totpSubmit'), byId('securityError'), async () => {
+    const data = await post('/api/me/security', { action: 'totp-finish', setup: totpSetup, code: byId('totpCode').value });
     totpSetup = null;
-    $('totpCode').value = '';
+    byId('totpCode').value = '';
     const { codes, ...rest } = data;
     security = rest;
     if (codes) showNewCodes(codes);
@@ -267,28 +267,28 @@ $('totpForm').addEventListener('submit', (e) => {
   });
 });
 
-$('nameForm').addEventListener('submit', (e) => {
+byId('nameForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  withBusy($('nameSubmit'), $('nameError'), async () => {
-    const { user } = await post('/api/me/profile', { displayName: $('nameInput').value });
+  withBusy(byId('nameSubmit'), byId('nameError'), async () => {
+    const { user } = await post('/api/me/profile', { displayName: byId('nameInput').value });
     me = user;
     renderProfile();
-    $('accountNotice').textContent = t('account.name-saved');
+    byId('accountNotice').textContent = translate('account.name-saved');
   });
 });
 
-$('totpAdd').addEventListener('click', () => askPassword({ kind: 'totp-add' }));
-$('totpRemove').addEventListener('click', () => askPassword({ kind: 'totp-remove' }));
-$('passkeyAdd').addEventListener('click', () => askPassword({ kind: 'passkey-add' }));
-$('telegramUnlink').addEventListener('click', () => askPassword({ kind: 'telegram-unlink' }));
-$('backupNew').addEventListener('click', () => askPassword({ kind: 'backup-new' }));
-$('deleteAccount').addEventListener('click', () => askPassword({ kind: 'delete-account' }));
+byId('totpAdd').addEventListener('click', () => askPassword({ kind: 'totp-add' }));
+byId('totpRemove').addEventListener('click', () => askPassword({ kind: 'totp-remove' }));
+byId('passkeyAdd').addEventListener('click', () => askPassword({ kind: 'passkey-add' }));
+byId('telegramUnlink').addEventListener('click', () => askPassword({ kind: 'telegram-unlink' }));
+byId('backupNew').addEventListener('click', () => askPassword({ kind: 'backup-new' }));
+byId('deleteAccount').addEventListener('click', () => askPassword({ kind: 'delete-account' }));
 
-$('telegramLink').addEventListener('click', () => {
-  withBusy($('telegramLink'), $('securityError'), async () => {
+byId('telegramLink').addEventListener('click', () => {
+  withBusy(byId('telegramLink'), byId('securityError'), async () => {
     const { url } = await post('/api/me/security', { action: 'telegram-link' });
     window.open(url, '_blank', 'noopener');
-    $('telegramState').textContent = t('security.telegram-pending');
+    byId('telegramState').textContent = translate('security.telegram-pending');
     // Linking finishes in Telegram; look again when the person comes back.
     const refresh = async () => {
       if (document.visibilityState !== 'visible') return;
@@ -301,17 +301,17 @@ $('telegramLink').addEventListener('click', () => {
   });
 });
 
-$('signOut').addEventListener('click', () => {
-  withBusy($('signOut'), $('securityError'), async () => {
+byId('signOut').addEventListener('click', () => {
+  withBusy(byId('signOut'), byId('securityError'), async () => {
     await post('/api/auth/session', { action: 'logout' });
     location.replace('/');
   });
 });
 
-$('signOutOthers').addEventListener('click', () => {
-  withBusy($('signOutOthers'), $('securityError'), async () => {
+byId('signOutOthers').addEventListener('click', () => {
+  withBusy(byId('signOutOthers'), byId('securityError'), async () => {
     await post('/api/auth/session', { action: 'logout-others' });
-    $('accountNotice').textContent = t('account.signed-out-others');
+    byId('accountNotice').textContent = translate('account.signed-out-others');
   });
 });
 
