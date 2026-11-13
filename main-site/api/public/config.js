@@ -9,8 +9,11 @@
 import { route, guard, ok } from '../_lib/http.js';
 import { turnstileSiteKey } from '../_lib/turnstile.js';
 
+// The same answer for everyone, so the CDN may cache it for a minute.
 export default route('public/config', async (request, response) => {
-  if (guard(request, response, ['GET'])) return;
+  if (guard(request, response, ['GET'])) {
+    return;
+  }
   response.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
   ok(response, { turnstileSiteKey: turnstileSiteKey() });
 });

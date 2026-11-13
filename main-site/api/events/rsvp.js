@@ -17,6 +17,8 @@ import { canManage } from '../_lib/users.js';
 import { releasedEventBySlug } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
+// What the gftvevents_rsvp database function can answer: null for a place
+// taken (now or before), or the status and error code to refuse with.
 const RESULTS = {
   ok: null,
   already: null,
@@ -26,36 +28,74 @@ const RESULTS = {
   event_over: [409, 'event_over'],
 };
 
+// Joins (going: true) or leaves (going: false) a released event, then
+// answers with the event as this person now sees it.
 export default route('events/rsvp', async (request, response) => {
-  if (guard(request, response, ['POST'])) return;
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
   const session = await requireUser(request, response);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   const body = await readJson(request, response);
-  if (!body) return;
-  if (await limited(request, response, 'rsvp', [`u:${session.user.id}`])) return;
+  if (!body) {
+    return;
+  }
+  if (await limited(request, response, 'rsvp', [`u:${session.user.id}`])) {
+    return;
+  }
 
-  const event = await releasedEventBySlug(String(body.slug ?? '').toLowerCase());
-  if (!event) return fail(response, 404, 'not_found');
+  let typedSlug = '';
+  if (body.slug !== null && body.slug !== undefined) {
+    typedSlug = body.slug;
+  }
+  const event = await releasedEventBySlug(String(typedSlug).toLowerCase());
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
 
   if (body.going === true) {
     const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
     const result = String(data);
-    if (!(result in RESULTS)) throw new Error(`unexpected rsvp result ${result}`);
-    if (RESULTS[result]) return fail(response, RESULTS[result][0], RESULTS[result][1]);
-    if (result === 'ok') await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
+    if (!(result in RESULTS)) {
+      throw new Error(`unexpected rsvp result ${result}`);
+    }
+    const refusal = RESULTS[result];
+    if (refusal) {
+      const status = refusal[0];
+      const errorCode = refusal[1];
+      return fail(response, status, errorCode);
+    }
+    if (result === 'ok') {
+      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
+    }
   } else if (body.going === false) {
-    const { error } = await database().from(TABLES.attendees).delete().eq('event_id', event.id).eq('user_id', session.user.id);
-    if (error) throw error;
+    const { error } = await database()
+      .from(TABLES.attendees)
+      .delete()
+      .eq('event_id', event.id)
+      .eq('user_id', session.user.id);
+    if (error) {
+      throw error;
+    }
     await audit(request, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
   } else {
     return fail(response, 400, 'bad_request');
   }
 
-  // Read it again, so the count and spaces left are current.
+  // Read it again, so the count and spaces left are current. If it has gone
+  // in the meantime, the copy read before is shown.
   const fresh = await releasedEventBySlug(event.slug);
+  let shown = event;
+  if (fresh !== null && fresh !== undefined) {
+    shown = fresh;
+  }
   ok(response, {
-    event: publicEventDetail(fresh ?? event, {
+    event: publicEventDetail(shown, {
       signedIn: true,
       going: body.going === true,
       canManage: canManage(session.user),

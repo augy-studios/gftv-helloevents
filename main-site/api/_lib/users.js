@@ -29,7 +29,7 @@ const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash`;
 export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${TABLES.users} ( ${STAFF_COLUMNS} )`;
 
 // The one shape every route sees. password_hash and totp_secret are only
-// present when the account was loaded with { auth: true }.
+// present when the account was loaded with { withSecrets: true }.
 function fromStaff(staff, account = null) {
   let avatarUrl = staff.avatar_url;
   if (avatarUrl === undefined) {
@@ -218,11 +218,11 @@ async function loadStaff(staffUserId, columns, account) {
   return null;
 }
 
-// An account by id, normalised. { auth: true } (withSecrets here) adds the
-// password hash and the shared TOTP secret, for the routes that check them.
+// An account by id, normalised. { withSecrets: true } adds the password hash
+// and the shared TOTP secret, for the routes that check them.
 // A staff member is read from gftvhello_users, through their accounts row
 // when it exists, or directly by the same id when it does not exist yet.
-export async function loadAccount(accountId, { auth: withSecrets = false } = {}) {
+export async function loadAccount(accountId, { withSecrets = false } = {}) {
   let accountColumns = ACCOUNT_COLUMNS;
   let staffColumns = STAFF_COLUMNS;
   if (withSecrets) {

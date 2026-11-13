@@ -6,7 +6,7 @@
 // admin reset codes, sign-up allowances and rate limit buckets, and audit
 // entries older than AUDIT_DAYS.
 
-import { route, send } from '../_lib/http.js';
+import { route, send, errorDetail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { optionalEnv } from '../_lib/env.js';
 import { safeEqual } from '../_lib/crypto.js';
@@ -14,38 +14,56 @@ import { safeEqual } from '../_lib/crypto.js';
 const AUDIT_DAYS = 365;
 const RATE_BUCKET_HOURS = 24;
 
+// Checks Vercel's cron secret, then runs each sweep in turn and answers with
+// how many rows each one removed.
 export default route('cron/cleanup', async (request, response) => {
   const secret = optionalEnv('CRON_SECRET');
-  const given = String(request.headers.authorization || '');
-  if (!secret || !safeEqual(given, `Bearer ${secret}`)) return send(response, 401, { ok: false });
+  let given = '';
+  if (request.headers.authorization) {
+    given = String(request.headers.authorization);
+  }
+  if (!secret || !safeEqual(given, `Bearer ${secret}`)) {
+    return send(response, 401, { ok: false });
+  }
 
   const now = new Date().toISOString();
   const counts = {};
-  const sweep = async (name, q) => {
-    const { count, error } = await q;
-    if (error) throw error;
-    counts[name] = count ?? 0;
+  // Runs one delete and records how many rows it removed under name.
+  const sweep = async (name, deleteQuery) => {
+    const { count, error } = await deleteQuery;
+    if (error) {
+      throw error;
+    }
+    let removed = 0;
+    if (count !== null && count !== undefined) {
+      removed = count;
+    }
+    counts[name] = removed;
   };
-  const del = (table) => database().from(table).delete({ count: 'exact' });
+  // A delete from table that also counts the rows it removes.
+  const deleteFrom = (table) => database().from(table).delete({ count: 'exact' });
 
-  await sweep('sessions', del(TABLES.sessions).lt('expires_at', now));
-  await sweep('challenges', del(TABLES.challenges).lt('expires_at', now));
-  await sweep('webauthn', del(TABLES.webauthn).lt('expires_at', now));
-  await sweep('telegramTokens', del(TABLES.telegramTokens).lt('expires_at', now));
-  await sweep(
-    'rateLimits',
-    del(TABLES.rateLimits).lt('window_start', new Date(Date.now() - RATE_BUCKET_HOURS * 3600_000).toISOString())
-  );
+  await sweep('sessions', deleteFrom(TABLES.sessions).lt('expires_at', now));
+  await sweep('challenges', deleteFrom(TABLES.challenges).lt('expires_at', now));
+  await sweep('webauthn', deleteFrom(TABLES.webauthn).lt('expires_at', now));
+  await sweep('telegramTokens', deleteFrom(TABLES.telegramTokens).lt('expires_at', now));
+  const rateCutoff = new Date(Date.now() - RATE_BUCKET_HOURS * 3600_000).toISOString();
+  await sweep('rateLimits', deleteFrom(TABLES.rateLimits).lt('window_start', rateCutoff));
   // migrations/003; harmless before it has run (the error is the missing
   // table, which is logged and skipped).
-  for (const [name, table] of [['passwordResets', TABLES.passwordResets], ['signupAllowances', TABLES.signupAllowances]]) {
+  const laterTables = [
+    ['passwordResets', TABLES.passwordResets],
+    ['signupAllowances', TABLES.signupAllowances],
+  ];
+  for (const [name, table] of laterTables) {
     try {
-      await sweep(name, del(table).lt('expires_at', now));
+      await sweep(name, deleteFrom(table).lt('expires_at', now));
     } catch (cause) {
-      console.warn('[helloevents] cleanup', name, cause?.message ?? cause);
+      console.warn('[helloevents] cleanup', name, errorDetail(cause));
     }
   }
-  await sweep('audit', del(TABLES.audit).lt('created_at', new Date(Date.now() - AUDIT_DAYS * 86400_000).toISOString()));
+  const auditCutoff = new Date(Date.now() - AUDIT_DAYS * 86400_000).toISOString();
+  await sweep('audit', deleteFrom(TABLES.audit).lt('created_at', auditCutoff));
 
   send(response, 200, { ok: true, swept: counts });
 });

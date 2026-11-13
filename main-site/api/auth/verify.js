@@ -24,15 +24,29 @@ import { loadAccount, canSignIn } from '../_lib/users.js';
 import { totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
 import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
 
+// Checks the second factor the person chose against the sign-in challenge
+// from /api/auth/login, and signs them in when it is right.
 export default route('auth/verify', async (request, response) => {
-  if (guard(request, response, ['POST'])) return;
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
   const body = await readJson(request, response);
-  if (!body) return;
-  if (await limited(request, response, 'secondFactor', [`c:${sha256(String(body.challenge ?? ''))}`])) return;
+  if (!body) {
+    return;
+  }
+  let typedChallenge = '';
+  if (body.challenge !== null && body.challenge !== undefined) {
+    typedChallenge = body.challenge;
+  }
+  if (await limited(request, response, 'secondFactor', [`c:${sha256(String(typedChallenge))}`])) {
+    return;
+  }
 
   const challenge = await findChallenge(body.challenge, 'login');
-  if (!challenge) return fail(response, 401, 'challenge_expired');
-  const user = await loadAccount(challenge.user_id, { auth: true });
+  if (!challenge) {
+    return fail(response, 401, 'challenge_expired');
+  }
+  const user = await loadAccount(challenge.user_id, { withSecrets: true });
   if (!user || !canSignIn(user)) {
     await deleteChallenge(challenge);
     return fail(response, 403, 'no_access');
@@ -47,10 +61,16 @@ export default route('auth/verify', async (request, response) => {
       passed = await spendBackupCode(user, body.code);
       break;
     case 'telegram-send': {
-      if (!telegramConfigured()) return fail(response, 400, 'telegram_off');
+      if (!telegramConfigured()) {
+        return fail(response, 400, 'telegram_off');
+      }
       const chat = await linkedChat(user.id);
-      if (!chat) return fail(response, 400, 'telegram_not_linked');
-      if (await limited(request, response, 'telegramSend', [`u:${user.id}`])) return;
+      if (!chat) {
+        return fail(response, 400, 'telegram_not_linked');
+      }
+      if (await limited(request, response, 'telegramSend', [`u:${user.id}`])) {
+        return;
+      }
       await sendTelegramCode(challenge, chat.chat_id, { purpose: 'sign-in', username: user.username });
       return ok(response, { sent: true });
     }
@@ -59,7 +79,9 @@ export default route('auth/verify', async (request, response) => {
       break;
     case 'passkey-options': {
       const options = await authenticationOptions(user.id);
-      if (!options) return fail(response, 400, 'no_passkeys');
+      if (!options) {
+        return fail(response, 400, 'no_passkeys');
+      }
       return ok(response, { options });
     }
     case 'passkey':

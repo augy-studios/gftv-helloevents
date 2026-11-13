@@ -24,24 +24,12 @@ import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
 import { eventNoticeMessage } from './telegram-messages.js';
 import { isReleased, datesAnnounced } from './event-rules.js';
+import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
 // The most accounts one "new event" run tells, so one cron run stays short.
 export const MAX_ANNOUNCE = 2000;
 export const REMIND_WITHIN_HOURS = 24;
-
-// What to log for a failure: its message, or the thrown value itself when
-// it has none.
-function describeCause(cause) {
-  if (cause === null || cause === undefined) {
-    return cause;
-  }
-  const message = cause.message;
-  if (message === null || message === undefined) {
-    return cause;
-  }
-  return message;
-}
 
 // A query's rows, or an empty list when it gave back none (null).
 function rowsOf(data) {
@@ -55,7 +43,7 @@ function rowsOf(data) {
 // Tests await settle() to see it finish.
 const pending = new Set();
 export function background(promise) {
-  const tracked = Promise.resolve(promise).catch((cause) => console.error('[helloevents] notify:', describeCause(cause)));
+  const tracked = Promise.resolve(promise).catch((cause) => console.error('[helloevents] notify:', errorDetail(cause)));
   pending.add(tracked);
   tracked.finally(() => pending.delete(tracked));
   try {
@@ -150,7 +138,7 @@ export async function deliver(accounts, notice) {
           await sendRichTelegram(chat, message);
           reachedAccount = true;
         } catch (cause) {
-          console.warn('[helloevents] telegram notice:', describeCause(cause));
+          console.warn('[helloevents] telegram notice:', errorDetail(cause));
         }
       }
       if (reachedAccount) {

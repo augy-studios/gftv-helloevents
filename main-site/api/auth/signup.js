@@ -29,25 +29,53 @@ import { createSession } from '../_lib/session.js';
 import { identityTaken, loadAccount } from '../_lib/users.js';
 import { validateSignup } from '../_lib/account-rules.js';
 
+// Checks the limits, Turnstile and the form, makes the public account, and
+// signs it in.
 export default route('auth/signup', async (request, response) => {
-  if (guard(request, response, ['POST'])) return;
+  if (guard(request, response, ['POST'])) {
+    return;
+  }
   const body = await readJson(request, response);
-  if (!body) return;
+  if (!body) {
+    return;
+  }
+  // A staff member's sign-up allowance raises the connection's limit.
   const allowance = await signupAllowance(request);
-  const subjects = [`email:${sha256(String(body.email ?? '').trim().toLowerCase())}`];
-  if (await limited(request, response, 'signup', subjects, allowance ? { max: allowance.max_per_hour } : {})) return;
-  if (await refusedForTurnstile(request, response, body, 'signup')) return;
+  let typedEmail = '';
+  if (body.email !== null && body.email !== undefined) {
+    typedEmail = body.email;
+  }
+  const subjects = [`email:${sha256(String(typedEmail).trim().toLowerCase())}`];
+  let limitOptions = {};
+  if (allowance) {
+    limitOptions = { max: allowance.max_per_hour };
+  }
+  if (await limited(request, response, 'signup', subjects, limitOptions)) {
+    return;
+  }
+  if (await refusedForTurnstile(request, response, body, 'signup')) {
+    return;
+  }
 
   const check = validateSignup(body);
-  if (!check.ok) return fail(response, 400, check.error);
+  if (!check.ok) {
+    return fail(response, 400, check.error);
+  }
   const { username, displayName, email } = check.fields;
-  if (await refusedName(username)) return fail(response, 400, 'username_reserved');
-  if (await refusedName(displayName)) return fail(response, 400, 'display_name_reserved');
+  if (await refusedName(username)) {
+    return fail(response, 400, 'username_reserved');
+  }
+  if (await refusedName(displayName)) {
+    return fail(response, 400, 'display_name_reserved');
+  }
 
   const taken = await identityTaken({ username, email });
-  if (taken) return fail(response, 409, taken);
+  if (taken) {
+    return fail(response, 409, taken);
+  }
 
   const now = new Date().toISOString();
+  const passwordHash = await hashPassword(body.password);
   const { data, error } = await database()
     .from(TABLES.accounts)
     .insert({
@@ -55,7 +83,7 @@ export default route('auth/signup', async (request, response) => {
       username,
       display_name: displayName,
       email,
-      password_hash: await hashPassword(body.password),
+      password_hash: passwordHash,
       terms_accepted_at: now,
       password_changed_at: now,
     })
@@ -63,12 +91,22 @@ export default route('auth/signup', async (request, response) => {
     .single();
   if (error) {
     // Two sign-ups racing for the same name or address.
-    if (error.code === '23505') return fail(response, 409, String(error.message).includes('email') ? 'email_taken' : 'username_taken');
+    if (error.code === '23505') {
+      let takenCode = 'username_taken';
+      if (String(error.message).includes('email')) {
+        takenCode = 'email_taken';
+      }
+      return fail(response, 409, takenCode);
+    }
     throw error;
   }
 
   const account = await loadAccount(data.id);
   await createSession(request, response, account, 'password');
-  await audit(request, { action: 'account.created', actorId: account.id, details: allowance ? { allowance: allowance.id } : {} });
+  let auditDetails = {};
+  if (allowance) {
+    auditDetails = { allowance: allowance.id };
+  }
+  await audit(request, { action: 'account.created', actorId: account.id, details: auditDetails });
   ok(response);
 });
