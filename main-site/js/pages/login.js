@@ -5,7 +5,7 @@
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { post } from '../api.js';
-import { withBusy, toast, errorText } from '../ui.js';
+import { withBusy, toast } from '../ui.js';
 import { passkeysSupported, usePasskey, passkeyErrorCode } from '../passkeys.js';
 import { humanCheck } from '../turnstile.js';
 
