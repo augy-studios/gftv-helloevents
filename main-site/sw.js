@@ -76,8 +76,12 @@ const EVENT_PATH = /^\/e\/[a-z0-9-]{3,60}$/;
 // A redirected response cannot be served to a navigation, so store a clean copy.
 async function fetchForCache(url) {
   const response = await fetch(url, { cache: 'no-cache' });
-  if (!response.ok) throw new Error(`precache ${url}: ${response.status}`);
-  if (!response.redirected) return response;
+  if (!response.ok) {
+    throw new Error(`precache ${url}: ${response.status}`);
+  }
+  if (!response.redirected) {
+    return response;
+  }
   const headers = new Headers(response.headers);
   headers.delete('content-encoding');
   headers.delete('content-length');
@@ -96,14 +100,29 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k.startsWith(PREFIX) && k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((key) => {
+            if (!key.startsWith(PREFIX)) {
+              return false;
+            }
+            return key !== CACHE;
+          })
+          .map((key) => caches.delete(key))
+      )
     )
   );
   // No clients.claim() here either; see the message handler.
 });
 
 self.addEventListener('message', (event) => {
-  const type = typeof event.data === 'string' ? event.data : event.data?.type;
+  // The message is either the bare string, or an object with a type.
+  let type;
+  if (typeof event.data === 'string') {
+    type = event.data;
+  } else if (event.data !== null && event.data !== undefined) {
+    type = event.data.type;
+  }
 
   // The only place either of these is ever called.
   if (type === 'skip-waiting') {
@@ -116,17 +135,41 @@ self.addEventListener('message', (event) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try {
-    data = event.data ? event.data.json() : {};
+    if (event.data) {
+      data = event.data.json();
+    }
   } catch {
-    data = { title: 'GFTV HelloEvents', body: event.data ? event.data.text() : '' };
+    let fallbackBody = '';
+    if (event.data) {
+      fallbackBody = event.data.text();
+    }
+    data = { title: 'GFTV HelloEvents', body: fallbackBody };
   }
+
+  let title = 'GFTV HelloEvents';
+  if (data.title) {
+    title = data.title;
+  }
+  let body = '';
+  if (data.body) {
+    body = data.body;
+  }
+  let tag;
+  if (typeof data.tag === 'string') {
+    tag = data.tag.slice(0, 64);
+  }
+  let notificationPath = '/';
+  if (typeof data.url === 'string') {
+    notificationPath = data.url;
+  }
+
   event.waitUntil(
-    self.registration.showNotification(String(data.title || 'GFTV HelloEvents').slice(0, 120), {
-      body: String(data.body || '').slice(0, 300),
-      tag: typeof data.tag === 'string' ? data.tag.slice(0, 64) : undefined,
+    self.registration.showNotification(String(title).slice(0, 120), {
+      body: String(body).slice(0, 300),
+      tag,
       icon: '/GHE-192.png',
       badge: '/GHE-192.png',
-      data: { url: typeof data.url === 'string' ? data.url : '/' },
+      data: { url: notificationPath },
     })
   );
 });
@@ -137,15 +180,25 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   let target = new URL('/', self.location.origin);
   try {
-    const url = new URL(event.notification.data?.url || '/', self.location.origin);
-    if (url.origin === self.location.origin) target = url;
+    let requestedPath = '/';
+    const notificationData = event.notification.data;
+    if (notificationData !== null && notificationData !== undefined && notificationData.url) {
+      requestedPath = notificationData.url;
+    }
+    const url = new URL(requestedPath, self.location.origin);
+    if (url.origin === self.location.origin) {
+      target = url;
+    }
   } catch {
     /* keep the home page */
   }
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      const open = list.find((c) => c.url === target.href);
-      return open ? open.focus() : self.clients.openWindow(target.href);
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      const openClient = windowClients.find((windowClient) => windowClient.url === target.href);
+      if (openClient) {
+        return openClient.focus();
+      }
+      return self.clients.openWindow(target.href);
     })
   );
 });
@@ -153,17 +206,28 @@ self.addEventListener('notificationclick', (event) => {
 // /login, /login/ and /login.html are the same page.
 function pageKey(url) {
   let path = url.pathname.replace(/\/index\.html$/, '/').replace(/\.html$/, '');
-  if (path.length > 1) path = path.replace(/\/$/, '');
+  if (path.length > 1) {
+    path = path.replace(/\/$/, '');
+  }
   return path;
 }
 
+// Decides, for each request, whether the worker answers it or leaves it to the
+// browser. Navigations get the precached shell (or the 404 page offline);
+// everything else on this origin is cache first, then network.
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (request.method !== 'GET') return;
+  if (request.method !== 'GET') {
+    return;
+  }
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/')) return;
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
 
   if (request.mode === 'navigate') {
     const key = pageKey(url);
@@ -172,9 +236,18 @@ self.addEventListener('fetch', (event) => {
     // precache, so they open instantly and offline. The event itself always
     // comes from the network.
     if (SHELL_PAGES.has(key) || EVENT_PATH.test(key)) {
-      const shell = EVENT_PATH.test(key) ? '/event' : key;
+      let shell = key;
+      if (EVENT_PATH.test(key)) {
+        shell = '/event';
+      }
       event.respondWith(
-        caches.open(CACHE).then(async (cache) => (await cache.match(shell)) || fetch(request))
+        caches.open(CACHE).then(async (cache) => {
+          const cachedShell = await cache.match(shell);
+          if (cachedShell) {
+            return cachedShell;
+          }
+          return fetch(request);
+        })
       );
       return;
     }
@@ -182,7 +255,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request).catch(async () => {
         const cache = await caches.open(CACHE);
-        return (await cache.match('/404.html')) || Response.error();
+        const notFoundPage = await cache.match('/404.html');
+        if (notFoundPage) {
+          return notFoundPage;
+        }
+        return Response.error();
       })
     );
     return;
@@ -193,9 +270,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(request, { ignoreSearch: true });
-      if (cached) return cached;
+      if (cached) {
+        return cached;
+      }
       const response = await fetch(request);
-      if (response.ok && !response.redirected) cache.put(request, response.clone());
+      if (response.ok && !response.redirected) {
+        cache.put(request, response.clone());
+      }
       return response;
     })
   );
