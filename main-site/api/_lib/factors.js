@@ -38,40 +38,81 @@ import { linkedChat, sendRichTelegram, telegramConfigured, CODE_MINUTES } from '
 import { codeMessage } from './telegram-messages.js';
 import { updateChallenge } from './session.js';
 
+// Supabase answers data: null when a query returns nothing; read that as no
+// rows.
+function rowsOrEmpty(rows) {
+  if (rows === null || rows === undefined) {
+    return [];
+  }
+  return rows;
+}
+
+// Supabase's exact count, or 0 when it gives none.
+function countOrZero(count) {
+  if (count === null || count === undefined) {
+    return 0;
+  }
+  return count;
+}
+
 async function eventsTotpSecret(userId) {
   const { data, error } = await database().from(TABLES.totp).select('secret_enc').eq('user_id', userId).maybeSingle();
-  if (error) throw error;
-  return data ? decryptSecret(data.secret_enc) : null;
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    return null;
+  }
+  const encryptedSecret = data.secret_enc;
+  return decryptSecret(encryptedSecret);
 }
 
 export async function hasLocalTotp(userId) {
   const { data, error } = await database().from(TABLES.totp).select('user_id').eq('user_id', userId).maybeSingle();
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return Boolean(data);
 }
 
 export async function saveEventsTotp(userId, plainSecret) {
   const { error } = await database()
     .from(TABLES.totp)
-    .upsert({ user_id: userId, secret_enc: encryptSecret(plainSecret), created_at: new Date().toISOString() }, { onConflict: 'user_id' });
-  if (error) throw error;
+    .upsert(
+      { user_id: userId, secret_enc: encryptSecret(plainSecret), created_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  if (error) {
+    throw error;
+  }
 }
 
+// Whether code is right for the gftv.asia authenticator or, failing that,
+// one set up on this site.
 export async function totpOk(user, code) {
-  if (user.totp_secret && verifyTotp(code, user.totp_secret)) return true;
-  const local = await eventsTotpSecret(user.id);
-  return Boolean(local) && verifyTotp(code, local);
+  if (user.totp_secret && verifyTotp(code, user.totp_secret)) {
+    return true;
+  }
+  const localSecret = await eventsTotpSecret(user.id);
+  if (!localSecret) {
+    return false;
+  }
+  return verifyTotp(code, localSecret);
 }
 
 async function sharedBackupCount(account) {
-  if (account.kind !== 'staff') return 0;
+  if (account.kind !== 'staff') {
+    return 0;
+  }
   const userId = account.id;
   const { count, error } = await database()
     .from(TABLES.sharedBackupCodes)
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId);
-  if (error) throw error;
-  return count ?? 0;
+  if (error) {
+    throw error;
+  }
+  return countOrZero(count);
 }
 
 export async function localBackupCount(userId) {
@@ -80,26 +121,49 @@ export async function localBackupCount(userId) {
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .eq('used', false);
-  if (error) throw error;
-  return count ?? 0;
+  if (error) {
+    throw error;
+  }
+  return countOrZero(count);
 }
 
 // { totp, passkey, telegram, backup } for the sign-in page. user is a
 // normalised account loaded with { auth: true }, since the shared secret is
-// part of it.
+// part of it. The five lookups run at the same time.
 export async function methodsFor(user) {
-  const [local, passkeys, chat, shared, own] = await Promise.all([
-    user.totp_secret ? true : hasLocalTotp(user.id),
-    countPasskeys(user.id),
-    telegramConfigured() ? linkedChat(user.id) : Promise.resolve(null),
-    sharedBackupCount(user),
-    localBackupCount(user.id),
+  // A shared authenticator is enough, so this site's own is only looked up
+  // when there is none.
+  let localTotpLookup = true;
+  if (!user.totp_secret) {
+    localTotpLookup = hasLocalTotp(user.id);
+  }
+  const passkeyLookup = countPasskeys(user.id);
+  let chatLookup;
+  if (telegramConfigured()) {
+    chatLookup = linkedChat(user.id);
+  } else {
+    chatLookup = Promise.resolve(null);
+  }
+  const sharedBackupLookup = sharedBackupCount(user);
+  const localBackupLookup = localBackupCount(user.id);
+
+  const [hasLocal, passkeyCount, chat, sharedBackups, localBackups] = await Promise.all([
+    localTotpLookup,
+    passkeyLookup,
+    chatLookup,
+    sharedBackupLookup,
+    localBackupLookup,
   ]);
+
+  let hasTotp = false;
+  if (user.totp_secret || hasLocal === true) {
+    hasTotp = true;
+  }
   return {
-    totp: Boolean(user.totp_secret) || local === true,
-    passkey: passkeys > 0,
+    totp: hasTotp,
+    passkey: passkeyCount > 0,
     telegram: Boolean(chat),
-    backup: shared + own > 0,
+    backup: sharedBackups + localBackups > 0,
   };
 }
 
@@ -109,8 +173,16 @@ export async function methodsFor(user) {
 // should not start demanding a code at every sign-in. Once 2FA is on,
 // Telegram is accepted as the second step too.
 export function hasSecondFactor(methods, account = null) {
-  if (account?.kind === 'public') return Boolean(methods.totp || methods.passkey);
-  return Boolean(methods.totp || methods.passkey || methods.telegram);
+  if (account !== null && account !== undefined && account.kind === 'public') {
+    if (methods.totp || methods.passkey) {
+      return true;
+    }
+    return false;
+  }
+  if (methods.totp || methods.passkey || methods.telegram) {
+    return true;
+  }
+  return false;
 }
 
 // Spend one backup code, this site's first, then the shared ones. True if one
@@ -121,46 +193,96 @@ export function hasSecondFactor(methods, account = null) {
 // account: a normalised account; only staff have shared codes.
 export async function spendBackupCode(account, typed) {
   const userId = account.id;
-  if (normaliseCode(typed).length < 6) return false;
+  if (normaliseCode(typed).length < 6) {
+    return false;
+  }
 
-  const { data: own, error } = await database()
+  const localMatch = await findLocalBackupCode(userId, typed);
+  if (localMatch) {
+    return markBackupCodeUsed(localMatch.id);
+  }
+
+  if (account.kind !== 'staff') {
+    return false;
+  }
+  const sharedMatch = await findSharedBackupCode(userId, typed);
+  if (!sharedMatch) {
+    return false;
+  }
+  return deleteSharedBackupCode(sharedMatch.id);
+}
+
+// The unused code of this site's that matches typed, or null.
+async function findLocalBackupCode(userId, typed) {
+  const { data: localCodes, error } = await database()
     .from(TABLES.backupCodes)
     .select('id, code_hash')
     .eq('user_id', userId)
     .eq('used', false);
-  if (error) throw error;
-  const match = await findMatchingCode(typed, own ?? []);
-  if (match) {
-    // Conditional on used = false, so two requests racing the same code
-    // cannot both succeed.
-    const { data: spent, error: spendError } = await database()
-      .from(TABLES.backupCodes)
-      .update({ used: true, used_at: new Date().toISOString() })
-      .eq('id', match.id)
-      .eq('used', false)
-      .select('id');
-    if (spendError) throw spendError;
-    return (spent ?? []).length === 1;
+  if (error) {
+    throw error;
   }
+  return findMatchingCode(typed, rowsOrEmpty(localCodes));
+}
 
-  if (account.kind !== 'staff') return false;
-  const { data: shared, error: sharedError } = await database()
+// Marks one of this site's codes used. Conditional on used = false, so two
+// requests racing the same code cannot both succeed. True if this one did.
+async function markBackupCodeUsed(codeId) {
+  const { data: spent, error } = await database()
+    .from(TABLES.backupCodes)
+    .update({ used: true, used_at: new Date().toISOString() })
+    .eq('id', codeId)
+    .eq('used', false)
+    .select('id');
+  if (error) {
+    throw error;
+  }
+  return rowsOrEmpty(spent).length === 1;
+}
+
+// The shared code that matches typed, in either format, or null. Every row
+// is checked, without stopping at the first match.
+async function findSharedBackupCode(userId, typed) {
+  const { data: sharedCodes, error } = await database()
     .from(TABLES.sharedBackupCodes)
     .select('id, code_hash')
     .eq('user_id', userId);
-  if (sharedError) throw sharedError;
-  const lower = normaliseCode(typed);
-  const legacy = sha256(String(typed).trim().toUpperCase().replace(/\s/g, '').replace('-', ''));
-  let matched = null;
-  for (const row of shared ?? []) {
-    const hash = String(row.code_hash || '');
-    const isMatch = hash.startsWith('$2') ? await bcrypt.compare(lower, hash) : safeEqual(hash, legacy);
-    if (isMatch && !matched) matched = row;
+  if (error) {
+    throw error;
   }
-  if (!matched) return false;
-  const { data: gone, error: deleteError } = await database().from(TABLES.sharedBackupCodes).delete().eq('id', matched.id).select('id');
-  if (deleteError) throw deleteError;
-  return (gone ?? []).length === 1;
+  const normalised = normaliseCode(typed);
+  const legacyHash = sha256(String(typed).trim().toUpperCase().replace(/\s/g, '').replace('-', ''));
+  let matched = null;
+  for (const row of rowsOrEmpty(sharedCodes)) {
+    let storedHash = '';
+    if (row.code_hash) {
+      storedHash = String(row.code_hash);
+    }
+    let isMatch;
+    if (storedHash.startsWith('$2')) {
+      isMatch = await bcrypt.compare(normalised, storedHash);
+    } else {
+      isMatch = safeEqual(storedHash, legacyHash);
+    }
+    if (isMatch && !matched) {
+      matched = row;
+    }
+  }
+  return matched;
+}
+
+// Deletes a spent shared code, as every GFTV site does. True if this request
+// deleted it.
+async function deleteSharedBackupCode(codeId) {
+  const { data: deleted, error } = await database()
+    .from(TABLES.sharedBackupCodes)
+    .delete()
+    .eq('id', codeId)
+    .select('id');
+  if (error) {
+    throw error;
+  }
+  return rowsOrEmpty(deleted).length === 1;
 }
 
 // A fresh set of ten of this site's codes, replacing any old set. Returns
@@ -170,9 +292,13 @@ export async function issueBackupCodes(userId) {
   const codes = generateBackupCodes(10);
   const rows = await Promise.all(codes.map(async (code) => ({ user_id: userId, code_hash: await hashCode(code) })));
   const { error: deleteError } = await database().from(TABLES.backupCodes).delete().eq('user_id', userId);
-  if (deleteError) throw deleteError;
+  if (deleteError) {
+    throw deleteError;
+  }
   const { error } = await database().from(TABLES.backupCodes).insert(rows);
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
   return codes;
 }
 
@@ -186,11 +312,22 @@ export async function sendTelegramCode(challenge, chatId, { purpose, username })
   await sendRichTelegram(chatId, codeMessage({ purpose, username, code, minutes: CODE_MINUTES }));
 }
 
+// Whether typed is the challenge's Telegram code and it has not expired.
 export async function telegramCodeOk(challenge, typed) {
-  if (!challenge.telegram_code_hash || !challenge.telegram_code_expires_at) return false;
-  if (new Date(challenge.telegram_code_expires_at).getTime() <= Date.now()) return false;
-  const digits = String(typed ?? '').replace(/\D/g, '');
-  if (digits.length !== 6) return false;
+  if (!challenge.telegram_code_hash || !challenge.telegram_code_expires_at) {
+    return false;
+  }
+  if (new Date(challenge.telegram_code_expires_at).getTime() <= Date.now()) {
+    return false;
+  }
+  let typedText = '';
+  if (typed !== null && typed !== undefined) {
+    typedText = String(typed);
+  }
+  const digits = typedText.replace(/\D/g, '');
+  if (digits.length !== 6) {
+    return false;
+  }
   return bcrypt.compare(digits, challenge.telegram_code_hash);
 }
 
@@ -199,7 +336,11 @@ export async function telegramCodeOk(challenge, typed) {
 // on can get back in, and can reset a forgotten password with one
 // (recover.js). Returns the plain codes to show once, or null.
 export async function backupCodesForNewFactor(account) {
-  if ((await localBackupCount(account.id)) > 0) return null;
-  if ((await sharedBackupCount(account)) > 0) return null;
+  if ((await localBackupCount(account.id)) > 0) {
+    return null;
+  }
+  if ((await sharedBackupCount(account)) > 0) {
+    return null;
+  }
   return issueBackupCodes(account.id);
 }

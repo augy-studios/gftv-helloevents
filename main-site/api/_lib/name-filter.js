@@ -37,23 +37,50 @@ const BUILT_IN = Object.freeze({
   wholeWord: ['mod', 'mods', 'gm', 'dev'],
 });
 
+// The value as a string, with null and undefined read as ''.
+function stringOrEmpty(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value);
+}
+
+// The letter one character stands for: its reading in ambiguous first, then
+// the look-alike table, otherwise the character itself.
+function letterFor(character, ambiguous) {
+  const ambiguousReading = ambiguous[character];
+  if (ambiguousReading !== null && ambiguousReading !== undefined) {
+    return ambiguousReading;
+  }
+  const lookalike = LOOKALIKE[character];
+  if (lookalike !== null && lookalike !== undefined) {
+    return lookalike;
+  }
+  return character;
+}
+
+// One folded reading of text: lowercased, accents dropped, every character
+// mapped to the letter it stands for, and anything that is not then a plain
+// letter or digit left out.
 function foldWith(text, ambiguous) {
-  const base = String(text ?? '')
+  const base = stringOrEmpty(text)
     .normalize('NFKC')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/\p{M}+/gu, '');
-  let out = '';
-  for (const ch of base) {
-    const mapped = ambiguous[ch] ?? LOOKALIKE[ch] ?? ch;
-    if (/^[a-z0-9]$/.test(mapped)) out += mapped;
+  let folded = '';
+  for (const character of base) {
+    const letter = letterFor(character, ambiguous);
+    if (/^[a-z0-9]$/.test(letter)) {
+      folded += letter;
+    }
   }
-  return out;
+  return folded;
 }
 
 // Every folded reading of a name.
 export function foldings(text) {
-  return [...new Set(AMBIGUOUS.map((a) => foldWith(text, a)))];
+  return [...new Set(AMBIGUOUS.map((reading) => foldWith(text, reading)))];
 }
 
 // The canonical folded form, for storing an admin's word.
@@ -61,22 +88,29 @@ export function fold(text) {
   return foldWith(text, AMBIGUOUS[0]);
 }
 
-function words(text) {
-  return String(text ?? '')
+// Every folded reading of each word in text, for the whole-word list.
+function foldedWords(text) {
+  return stringOrEmpty(text)
     .normalize('NFKC')
     .split(/[^\p{L}\p{N}@$|!+€£]+/u)
     .filter(Boolean)
-    .flatMap((w) => foldings(w));
+    .flatMap((word) => foldings(word));
 }
 
-// The first listed word a name contains, or null. custom: folded terms.
-export function blockedTerm(name, custom = []) {
-  const whole = foldings(name);
-  for (const term of [...BUILT_IN.anywhere, ...custom]) {
-    if (term.length >= 3 && whole.some((f) => f.includes(term))) return term;
+// The first listed word a name contains, or null. adminTerms: folded terms.
+export function blockedTerm(name, adminTerms = []) {
+  const nameFoldings = foldings(name);
+  for (const term of [...BUILT_IN.anywhere, ...adminTerms]) {
+    if (term.length >= 3 && nameFoldings.some((folding) => folding.includes(term))) {
+      return term;
+    }
   }
-  const tokens = new Set(words(name));
-  for (const term of BUILT_IN.wholeWord) if (tokens.has(term)) return term;
+  const nameWords = new Set(foldedWords(name));
+  for (const term of BUILT_IN.wholeWord) {
+    if (nameWords.has(term)) {
+      return term;
+    }
+  }
   return null;
 }
 
@@ -86,14 +120,18 @@ export const BUILT_IN_TERMS = [...BUILT_IN.anywhere, ...BUILT_IN.wholeWord];
 // The admins' list, cached per function instance for a minute.
 // ---------------------------------------------------------------------------
 
-let cache = { at: 0, terms: [] };
+const CACHE_MILLISECONDS = 60_000;
+
+let cache = { fetchedAt: 0, terms: [] };
 
 export function forgetNameFilters() {
-  cache = { at: 0, terms: [] };
+  cache = { fetchedAt: 0, terms: [] };
 }
 
 export async function customTerms() {
-  if (Date.now() - cache.at < 60_000) return cache.terms;
+  if (Date.now() - cache.fetchedAt < CACHE_MILLISECONDS) {
+    return cache.terms;
+  }
   const { data, error } = await database().from(TABLES.nameFilters).select('term').limit(2000);
   if (error) {
     // A missing table (003 not run yet) or a hiccup: the built-in list still
@@ -101,11 +139,16 @@ export async function customTerms() {
     console.error('[helloevents] name filters:', error.message);
     return cache.terms;
   }
-  cache = { at: Date.now(), terms: (data ?? []).map((r) => r.term) };
+  let rows = [];
+  if (data !== null && data !== undefined) {
+    rows = data;
+  }
+  cache = { fetchedAt: Date.now(), terms: rows.map((row) => row.term) };
   return cache.terms;
 }
 
 // The word a public username or display name may not use, or null.
 export async function refusedName(name) {
-  return blockedTerm(name, await customTerms());
+  const adminTerms = await customTerms();
+  return blockedTerm(name, adminTerms);
 }
