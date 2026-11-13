@@ -7,50 +7,76 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const DIGITS = 6;
 const STEP_SECONDS = 30;
-const WINDOW = 1;
+// How many steps either side of now are accepted, for clock drift.
+const DRIFT_STEPS = 1;
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
+// The value as a string, with null or undefined read as ''.
+function asText(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value);
+}
+
+// The secret's bytes, or null when it is empty or not base32. Spaces,
+// hyphens, lower case and "=" padding are allowed, as apps show them.
 export function decodeBase32(secret) {
-  const cleaned = String(secret ?? '').toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
-  if (cleaned === '') return null;
+  const cleaned = asText(secret).toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
+  if (cleaned === '') {
+    return null;
+  }
+  // Each character carries 5 bits; a byte is taken off the top whenever 8
+  // have built up.
   let bits = 0;
   let value = 0;
-  const out = [];
-  for (const char of cleaned) {
-    const index = BASE32.indexOf(char);
-    if (index < 0) return null;
+  const bytes = [];
+  for (const character of cleaned) {
+    const index = BASE32.indexOf(character);
+    if (index < 0) {
+      return null;
+    }
     value = (value << 5) | index;
     bits += 5;
     if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
+      bytes.push((value >>> (bits - 8)) & 0xff);
       bits -= 8;
     }
   }
-  return out.length > 0 ? Buffer.from(out) : null;
+  if (bytes.length > 0) {
+    return Buffer.from(bytes);
+  }
+  return null;
 }
 
+// A new secret: 20 random bytes as 32 base32 characters.
 export function generateTotpSecret() {
-  const bytes = randomBytes(20);
+  const randomData = randomBytes(20);
+  // Each byte adds 8 bits; a character is taken off the top for every 5.
   let bits = 0;
   let value = 0;
-  let out = '';
-  for (const byte of bytes) {
+  let secret = '';
+  for (const byte of randomData) {
     value = (value << 8) | byte;
     bits += 8;
     while (bits >= 5) {
-      out += BASE32[(value >>> (bits - 5)) & 31];
+      secret += BASE32[(value >>> (bits - 5)) & 31];
       bits -= 5;
     }
   }
-  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31];
-  return out;
+  if (bits > 0) {
+    secret += BASE32[(value << (5 - bits)) & 31];
+  }
+  return secret;
 }
 
-function hotp(key, counter) {
+// RFC 4226 HOTP: the six digit code for one counter value.
+function hotpCode(key, counter) {
   const buffer = Buffer.alloc(8);
   buffer.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
   buffer.writeUInt32BE(counter >>> 0, 4);
   const digest = createHmac('sha1', key).update(buffer).digest();
+  // Dynamic truncation: four bytes from an offset the digest itself picks.
   const offset = digest[digest.length - 1] & 0x0f;
   const binary =
     ((digest[offset] & 0x7f) << 24) |
@@ -61,33 +87,41 @@ function hotp(key, counter) {
 }
 
 export function verifyTotp(code, secret, at = Date.now()) {
-  const digits = String(code ?? '').replace(/\D/g, '');
-  if (digits.length !== DIGITS) return false;
+  const digits = asText(code).replace(/\D/g, '');
+  if (digits.length !== DIGITS) {
+    return false;
+  }
   const key = decodeBase32(secret);
-  if (!key) return false;
+  if (!key) {
+    return false;
+  }
   const counter = Math.floor(at / 1000 / STEP_SECONDS);
+  // Every step in the window is compared, in constant time, so the answer
+  // takes as long whichever one matched.
   let matched = false;
-  for (let offset = -WINDOW; offset <= WINDOW; offset += 1) {
-    const candidate = Buffer.from(hotp(key, counter + offset));
-    if (timingSafeEqual(candidate, Buffer.from(digits))) matched = true;
+  for (let offset = -DRIFT_STEPS; offset <= DRIFT_STEPS; offset += 1) {
+    const candidate = Buffer.from(hotpCode(key, counter + offset));
+    if (timingSafeEqual(candidate, Buffer.from(digits))) {
+      matched = true;
+    }
   }
   return matched;
 }
 
 // Exposed for the tests, which need a code for a known secret and time.
 export function totpAt(secret, at = Date.now()) {
-  return hotp(decodeBase32(secret), Math.floor(at / 1000 / STEP_SECONDS));
+  return hotpCode(decodeBase32(secret), Math.floor(at / 1000 / STEP_SECONDS));
 }
 
 export function otpauthUri({ account, secret }) {
   const issuer = 'GFTV HelloEvents';
   const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(account)}`;
-  const params = new URLSearchParams({
+  const parameters = new URLSearchParams({
     secret,
     issuer,
     algorithm: 'SHA1',
     digits: String(DIGITS),
     period: String(STEP_SECONDS),
   });
-  return `otpauth://totp/${label}?${params.toString()}`;
+  return `otpauth://totp/${label}?${parameters.toString()}`;
 }
