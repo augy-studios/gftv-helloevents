@@ -30,7 +30,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, datesAnnounced, utcToWall } from './event-rules.js';
+import { isOver, datesAnnounced, utcToWall, storedLocations } from './event-rules.js';
 import { roleOf, canManage } from './users.js';
 import { coverUrl } from './covers.js';
 
@@ -168,6 +168,41 @@ export function passkeyView(row) {
 // Events
 // ---------------------------------------------------------------------------
 
+// The description's language: "zh" for Chinese, otherwise "en".
+function descriptionLanguage(row) {
+  if (row.description_lang === 'zh') {
+    return 'zh';
+  }
+  return 'en';
+}
+
+// A stored time split for the form's date and time inputs, in the event's
+// zone: { date: "2026-11-14", time: "14:00" }, the time '' while it is to be
+// confirmed, both '' when there is no time.
+function dateAndTime(isoTime, timeZone, timeTbc) {
+  const wallTime = utcToWall(isoTime, timeZone);
+  if (!wallTime) {
+    return { date: '', time: '' };
+  }
+  let time = wallTime.slice(11, 16);
+  if (timeTbc) {
+    time = '';
+  }
+  return { date: wallTime.slice(0, 10), time };
+}
+
+// The start and end for the edit form. An end the API filled in itself (a
+// start with no time and no end lasts its whole day, event-rules.js
+// readTimes) goes back blank, as the editor left it.
+function managedWhen(row) {
+  const start = dateAndTime(row.starts_at, row.timezone, row.start_time_tbc === true);
+  let end = dateAndTime(row.ends_at, row.timezone, row.end_time_tbc === true);
+  if (row.start_time_tbc === true && row.end_time_tbc === true && end.date === start.date) {
+    end = { date: '', time: '' };
+  }
+  return { startDate: start.date, startTime: start.time, endDate: end.date, endTime: end.time };
+}
+
 // The price. A card shows only the price itself; the event page also shows
 // the organiser's note under it, so only the page asks for it (withNote).
 function priceView(row, { withNote = false } = {}) {
@@ -191,11 +226,54 @@ function priceView(row, { withNote = false } = {}) {
   return view;
 }
 
+// When: the start and end, and whether each one's time is still to be
+// confirmed (then the pages show its date alone).
 function whenView(row) {
   if (!datesAnnounced(row)) {
     return { tba: true, timezone: row.timezone };
   }
-  return { tba: false, startsAt: row.starts_at, endsAt: emptyToNull(row.ends_at), timezone: row.timezone };
+  return {
+    tba: false,
+    startsAt: row.starts_at,
+    endsAt: emptyToNull(row.ends_at),
+    startTimeTbc: row.start_time_tbc === true,
+    endTimeTbc: row.end_time_tbc === true,
+    timezone: row.timezone,
+  };
+}
+
+// One location on the event page. addressShown: whether this viewer may see
+// the street address and the map link (an attendees-only address keeps
+// both from everyone else, since the link gives the place away too).
+function locationView(location, addressShown) {
+  let address = null;
+  let mapsUrl = null;
+  if (addressShown) {
+    address = emptyToNull(location.venue_address);
+    mapsUrl = emptyToNull(location.maps_url);
+  }
+  return {
+    label: location.label,
+    customLabel: emptyToNull(location.custom_label),
+    venueName: emptyToNull(location.venue_name),
+    city: emptyToNull(location.city),
+    country: emptyToNull(location.country),
+    address,
+    mapsUrl,
+  };
+}
+
+// One location on the edit form, every field a string.
+function managedLocation(location) {
+  return {
+    label: location.label,
+    customLabel: emptyToBlank(location.custom_label),
+    venueName: emptyToBlank(location.venue_name),
+    venueAddress: emptyToBlank(location.venue_address),
+    city: emptyToBlank(location.city),
+    country: emptyToBlank(location.country),
+    mapsUrl: emptyToBlank(location.maps_url),
+  };
 }
 
 // The count of people going, from an embedded aggregate
@@ -265,10 +343,11 @@ export function publicEventCard(row, now = Date.now()) {
 // The event page. viewer: { signedIn, going, canManage }. Only call this for
 // a released event, or for an editor.
 //
-// It is the card plus the price note, the spaces left, the description, the
-// organiser and the link. People going and editors ("insiders") also get an
-// attendees-only address and the online link; everyone else gets only a flag
-// saying there is one for attendees.
+// It is the card plus the price note, the spaces left, the description (and
+// its language), the organiser, the link and every location. People going
+// and editors ("insiders") also get attendees-only addresses and map links,
+// and the online link; everyone else gets only a flag saying there is one
+// for attendees.
 export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   const card = publicEventCard(row, now);
   let insider = false;
@@ -280,12 +359,15 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     addressShown = true;
   }
 
-  let address = null;
-  if (addressShown) {
-    address = emptyToNull(row.venue_address);
-  }
+  const locations = storedLocations(row);
+  const hasAddress = locations.some((location) => {
+    if (location.venue_address || location.maps_url) {
+      return true;
+    }
+    return false;
+  });
   let addressForAttendees = false;
-  if (row.address_attendees_only && row.venue_address && !addressShown) {
+  if (row.address_attendees_only && hasAddress && !addressShown) {
     addressForAttendees = true;
   }
   let onlineUrl = null;
@@ -302,11 +384,12 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     price: priceView(row, { withNote: true }),
     ...spacesView(row, card.going),
     description: emptyToNull(row.description),
+    descriptionLang: descriptionLanguage(row),
     organiserName: emptyToNull(row.organiser_name),
     externalUrl: emptyToNull(row.external_url),
     where: {
       ...card.where,
-      address,
+      locations: locations.map((location) => locationView(location, addressShown)),
       addressForAttendees,
       onlineUrl,
       onlineUrlForAttendees,
@@ -378,16 +461,13 @@ export function managedEvent(row) {
     capacity: missingToNull(row.capacity),
     summary: emptyToBlank(row.summary),
     description: emptyToBlank(row.description),
-    startsLocal: utcToWall(row.starts_at, row.timezone),
-    endsLocal: utcToWall(row.ends_at, row.timezone),
+    descriptionLang: descriptionLanguage(row),
+    ...managedWhen(row),
     publishLocal: utcToWall(row.publish_at, row.timezone),
     isOnline: row.is_online === true,
     onlineUrl: emptyToBlank(row.online_url),
-    venueName: emptyToBlank(row.venue_name),
-    venueAddress: emptyToBlank(row.venue_address),
+    locations: storedLocations(row).map(managedLocation),
     addressAttendeesOnly: row.address_attendees_only === true,
-    city: emptyToBlank(row.city),
-    country: emptyToBlank(row.country),
     ...managedCover(row),
     externalUrl: emptyToBlank(row.external_url),
     organiserName: emptyToBlank(row.organiser_name),

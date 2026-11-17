@@ -119,8 +119,10 @@ const form = (over = {}) => ({
   kind: 'convention',
   status: 'draft',
   timezone: 'Asia/Singapore',
-  startsLocal: '2027-03-01T10:00',
-  endsLocal: '2027-03-02T18:00',
+  startDate: '2027-03-01',
+  startTime: '10:00',
+  endDate: '2027-03-02',
+  endTime: '18:00',
   priceType: 'free',
   ...over,
 });
@@ -143,8 +145,13 @@ test('bad input is refused with the field named', () => {
   assert.deepEqual(rules.validateEvent(form({ title: '' })), { ok: false, error: 'invalid_field', field: 'title' });
   assert.equal(rules.validateEvent(form({ slug: 'Bad Slug!' })).field, 'slug');
   assert.equal(rules.validateEvent(form({ kind: 'party' })).field, 'kind');
-  assert.equal(rules.validateEvent(form({ endsLocal: '2027-02-01T10:00' })).field, 'endsLocal');
-  assert.equal(rules.validateEvent(form({ startsLocal: '' })).field, 'startsLocal');
+  assert.equal(rules.validateEvent(form({ endDate: '2027-02-01' })).field, 'endDate');
+  assert.equal(rules.validateEvent(form({ endDate: '2027-03-01', endTime: '09:00' })).field, 'endTime');
+  assert.equal(rules.validateEvent(form({ startDate: '' })).field, 'startDate');
+  assert.equal(rules.validateEvent(form({ startDate: '2027-02-30' })).field, 'startDate');
+  assert.equal(rules.validateEvent(form({ startTime: '25:00' })).field, 'startTime');
+  assert.equal(rules.validateEvent(form({ descriptionLang: 'fr' })).field, 'descriptionLang');
+  assert.equal(rules.validateEvent(form({ priceType: 'paid', priceMin: '5', currency: 'ZZZ' })).field, 'currency');
   assert.equal(rules.validateEvent(form({ externalUrl: 'http://example.com/a' })).field, 'externalUrl');
   assert.equal(rules.validateEvent(form({ onlineUrl: 'javascript:alert(1)' })).field, 'onlineUrl');
   assert.equal(rules.validateEvent(form({ externalUrl: 'https://user:pw@example.com' })).field, 'externalUrl');
@@ -154,10 +161,68 @@ test('bad input is refused with the field named', () => {
   assert.equal(rules.validateEvent(form({ title: 'x'.repeat(121) })).field, 'title');
 });
 
-test('dates to be announced may leave the start empty', () => {
-  const r = rules.validateEvent(form({ startsLocal: '', endsLocal: '', datesHidden: true }));
+test('the start date is required even when the dates are kept off the public page', () => {
+  assert.equal(rules.validateEvent(form({ startDate: '', endDate: '', datesHidden: true })).field, 'startDate');
+  const r = rules.validateEvent(form({ datesHidden: true }));
   assert.equal(r.ok, true);
-  assert.equal(r.fields.starts_at, null);
+  assert.equal(r.fields.dates_hidden, true);
+});
+
+test('a time left blank is to be confirmed, and the day still counts until it ends', () => {
+  // A start with no time and no end: the whole of that day, in the event's zone.
+  const day = rules.validateEvent(form({ startTime: '', endDate: '', endTime: '' }));
+  assert.equal(day.ok, true);
+  assert.equal(day.fields.starts_at, '2027-02-28T16:00:00.000Z');
+  assert.equal(day.fields.start_time_tbc, true);
+  assert.equal(day.fields.ends_at, '2027-03-01T15:59:00.000Z');
+  assert.equal(day.fields.end_time_tbc, true);
+
+  // A time on the start only: no end.
+  const timed = rules.validateEvent(form({ endDate: '', endTime: '' }));
+  assert.equal(timed.fields.start_time_tbc, false);
+  assert.equal(timed.fields.ends_at, null);
+
+  // An end time with no end date ends on the start date.
+  const sameDay = rules.validateEvent(form({ endDate: '', endTime: '17:00' }));
+  assert.equal(sameDay.fields.ends_at, '2027-03-01T09:00:00.000Z');
+
+  // A later end date with its time to be confirmed lasts to that day's end.
+  const conWeekend = rules.validateEvent(form({ startTime: '', endTime: '' }));
+  assert.equal(conWeekend.fields.ends_at, '2027-03-02T15:59:00.000Z');
+  assert.equal(conWeekend.fields.end_time_tbc, true);
+});
+
+test('locations are checked, blank ones dropped, and the main one copied to the venue columns', () => {
+  const r = rules.validateEvent(form({
+    locations: [
+      { label: 'meeting', venueName: 'Dhoby Ghaut MRT, Exit B', city: 'Singapore', country: 'sg' },
+      { label: 'custom', customLabel: '', venueName: 'After-party bar' },
+    ],
+  }));
+  assert.equal(r.ok, false, 'a custom label with a place needs its label');
+  assert.equal(r.field, 'customLabel');
+  assert.equal(r.location, 1);
+
+  const good = rules.validateEvent(form({
+    locations: [
+      { label: 'meeting', venueName: 'Dhoby Ghaut MRT, Exit B', city: 'Singapore', country: 'sg', customLabel: 'ignored' },
+      { label: 'event', venueName: 'ION Orchard', venueAddress: '2 Orchard Turn', city: 'Singapore', country: 'SG', mapsUrl: 'https://maps.app.goo.gl/abc' },
+      { label: 'custom', customLabel: '', venueName: '', venueAddress: '', city: '', country: '', mapsUrl: '' },
+    ],
+  }));
+  assert.equal(good.ok, true);
+  assert.equal(good.fields.locations.length, 2, 'the blank one is dropped');
+  assert.equal(good.fields.locations[0].country, 'SG');
+  assert.equal(good.fields.locations[0].custom_label, null);
+  assert.equal(good.fields.venue_name, 'ION Orchard', 'the event location, not the first');
+  assert.equal(good.fields.venue_address, '2 Orchard Turn');
+
+  assert.equal(rules.validateEvent(form({ locations: [{ label: 'party', venueName: 'X' }] })).field, 'locationLabel');
+  assert.equal(rules.validateEvent(form({ locations: [{ label: 'event', mapsUrl: 'javascript:alert(1)' }] })).field, 'mapsUrl');
+  assert.equal(rules.validateEvent(form({ locations: 'Hall' })).field, 'locations');
+  assert.equal(rules.validateEvent(form({ locations: Array.from({ length: 11 }, () => ({ label: 'event', venueName: 'X' })) })).field, 'locations');
+  const none = rules.validateEvent(form({ locations: [] }));
+  assert.equal(none.fields.venue_name, null);
 });
 
 // ---------------------------------------------------------------------------
@@ -194,18 +259,30 @@ test('dates to be announced go out without the stored dates', () => {
 test('attendees-only address and the online link go only to people going and editors', () => {
   const r = row({ address_attendees_only: true, is_online: true, online_url: 'https://meet.example.com/x' });
   const stranger = ser.publicEventDetail(r, { signedIn: true, going: false }, now);
-  assert.equal(stranger.where.address, null);
+  assert.equal(stranger.where.locations[0].address, null);
+  assert.equal(stranger.where.locations[0].venueName, 'Hall');
   assert.equal(stranger.where.onlineUrl, null);
   assert.equal(stranger.where.addressForAttendees, true);
   assert.equal(json(stranger).includes('Secret Road'), false);
   assert.equal(json(stranger).includes('meet.example.com'), false);
 
   const going = ser.publicEventDetail(r, { signedIn: true, going: true }, now);
-  assert.equal(going.where.address, '1 Secret Road');
+  assert.equal(going.where.locations[0].address, '1 Secret Road');
   assert.equal(going.where.onlineUrl, 'https://meet.example.com/x');
 
   const editor = ser.publicEventDetail(r, { signedIn: true, canManage: true }, now);
-  assert.equal(editor.where.address, '1 Secret Road');
+  assert.equal(editor.where.locations[0].address, '1 Secret Road');
+
+  // A map link gives the place away too, so it is kept with the address.
+  const mapped = row({
+    address_attendees_only: true,
+    locations: [{ label: 'event', venue_name: 'Hall', venue_address: null, maps_url: 'https://maps.app.goo.gl/hidden' }],
+  });
+  const outsider = ser.publicEventDetail(mapped, { signedIn: true, going: false }, now);
+  assert.equal(outsider.where.locations[0].mapsUrl, null);
+  assert.equal(outsider.where.addressForAttendees, true);
+  assert.equal(json(outsider).includes('goo.gl/hidden'), false);
+  assert.equal(ser.publicEventDetail(mapped, { going: true }, now).where.locations[0].mapsUrl, 'https://maps.app.goo.gl/hidden');
 });
 
 test('RSVP state and spaces come from the count', () => {
@@ -246,11 +323,33 @@ test('a public account can never manage events, whatever its row says', () => {
 test('the editor view round-trips the form fields, including staff notes', () => {
   const view = ser.managedEvent(row(), now);
   assert.equal(view.staffNotes, 'internal only');
-  assert.equal(view.startsLocal, '2026-11-14T14:00');
+  assert.equal(view.startDate, '2026-11-14');
+  assert.equal(view.startTime, '14:00');
+  assert.equal(view.descriptionLang, 'en');
+  // An event saved before the locations list has its place as its one location.
+  assert.deepEqual(view.locations, [{ label: 'event', customLabel: '', venueName: 'Hall', venueAddress: '1 Secret Road', city: 'Singapore', country: 'Singapore', mapsUrl: '' }]);
   const again = rules.validateEvent(view);
   assert.equal(again.ok, true);
   assert.equal(again.fields.starts_at, row().starts_at);
+  assert.equal(again.fields.ends_at, row().ends_at);
+  assert.equal(again.fields.venue_name, 'Hall');
+
+  // A day with its time to be confirmed comes back with the times blank,
+  // and the end the API filled in blank too.
+  const day = rules.validateEvent({ ...view, startTime: '', endDate: '', endTime: '' }).fields;
+  const dayView = ser.managedEvent(row({ ...day, description_lang: 'zh' }), now);
+  assert.deepEqual([dayView.startDate, dayView.startTime, dayView.endDate, dayView.endTime], ['2026-11-14', '', '', '']);
+  assert.equal(dayView.descriptionLang, 'zh');
+  assert.equal(rules.validateEvent(dayView).fields.ends_at, day.ends_at);
 });
+
+test('when goes out with whether each time is still to be confirmed', () => {
+  const card = ser.publicEventCard(row({ start_time_tbc: true, end_time_tbc: true }), now);
+  assert.equal(card.when.startTimeTbc, true);
+  assert.equal(card.when.endTimeTbc, true);
+  assert.equal(ser.publicEventCard(row(), now).when.startTimeTbc, false);
+});
+
 
 test('no route sends a database result straight out', () => {
   const api = join(dirname(fileURLToPath(import.meta.url)), '..', 'api');
@@ -429,6 +528,16 @@ test('only a change of time or place, or a cancellation, of a released event is 
   assert.equal(notify.changeKind(row({ status: 'draft' }), row({ status: 'draft', venue_name: 'X' })), null);
   assert.equal(notify.changeKind(live, { ...live, status: 'draft', venue_name: 'X' }), null, 'unpublished: nothing goes out');
   assert.equal(notify.changeKind(live, { ...live, starts_at: '2026-11-14T06:00:00Z' }), null, 'same instant, other spelling');
+
+  // The first save after migrations/004 writes the place into the list in
+  // full; that is the same place, so nobody is told.
+  const saved = rules.validateEvent(ser.managedEvent(live, now)).fields;
+  assert.equal(notify.changeKind(live, { ...live, ...saved }), null, 'columns only, then the list');
+  const migrated = { ...live, locations: [{ label: 'event', venue_name: 'Hall', venue_address: '1 Secret Road', city: 'Singapore', country: 'Singapore' }] };
+  assert.equal(notify.changeKind(migrated, { ...live, ...saved }), null, 'a shorter stored shape');
+  assert.equal(notify.changeKind(live, { ...live, ...saved, start_time_tbc: true }), 'updated', 'the time no longer set');
+  const meeting = { label: 'meeting', venue_name: 'Exit B', custom_label: null, venue_address: null, city: null, country: null, maps_url: null };
+  assert.equal(notify.changeKind(live, { ...live, ...saved, locations: [...saved.locations, meeting] }), 'updated', 'a meeting point added');
 });
 
 test('a notice carries public fields only', () => {

@@ -2,6 +2,7 @@
 // zone, with the zone's short name, since "2pm" means the venue's 2pm.
 
 import { t as translate, getLocale } from '../assets/i18n/i18n.js';
+import { countryName } from './choices.js';
 
 // A time in the given zone; in the browser's own zone if the zone is not
 // one the browser knows.
@@ -18,29 +19,57 @@ function sameDay(firstTime, secondTime, timeZone) {
   return formatInZone(firstTime, timeZone, dayOnly) === formatInZone(secondTime, timeZone, dayOnly);
 }
 
+const DATE_ONLY = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
+const DATE_TIME = { ...DATE_ONLY, hour: 'numeric', minute: '2-digit' };
+
 // "Sat, 14 Nov 2026, 2:00 pm SGT", or a range. The zone's name goes on the
-// last time shown; an end on the same day shows only its time.
+// last time shown; an end on the same day shows only its time. A start or
+// end whose time is still to be confirmed shows its date alone, and a start
+// like that adds "(time to be confirmed)".
 export function whenText(when) {
   if (!when || when.tba) {
     return translate('event.dates-tba');
   }
   const timeZone = when.timezone;
-  const dateTime = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' };
-  let startZoneName = 'short';
-  if (when.endsAt) {
-    startZoneName = undefined;
+  const startTbc = when.startTimeTbc === true;
+  const endTbc = when.endTimeTbc === true;
+  let oneDay = false;
+  if (when.endsAt && sameDay(when.startsAt, when.endsAt, timeZone)) {
+    oneDay = true;
   }
-  const start = formatInZone(when.startsAt, timeZone, { ...dateTime, timeZoneName: startZoneName });
-  if (!when.endsAt) {
-    return start;
+  let endShowsTime = false;
+  if (when.endsAt && !endTbc) {
+    endShowsTime = true;
   }
-  let end;
-  if (sameDay(when.startsAt, when.endsAt, timeZone)) {
-    end = formatInZone(when.endsAt, timeZone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+  let start;
+  if (startTbc) {
+    start = formatInZone(when.startsAt, timeZone, DATE_ONLY);
   } else {
-    end = formatInZone(when.endsAt, timeZone, { ...dateTime, timeZoneName: 'short' });
+    let startZoneName = 'short';
+    if (endShowsTime) {
+      startZoneName = undefined;
+    }
+    start = formatInZone(when.startsAt, timeZone, { ...DATE_TIME, timeZoneName: startZoneName });
   }
-  return translate('event.range', { start, end });
+
+  let text = start;
+  if (when.endsAt && oneDay && endShowsTime) {
+    const end = formatInZone(when.endsAt, timeZone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    text = translate('event.range', { start, end });
+  } else if (when.endsAt && !oneDay) {
+    let end;
+    if (endTbc) {
+      end = formatInZone(when.endsAt, timeZone, DATE_ONLY);
+    } else {
+      end = formatInZone(when.endsAt, timeZone, { ...DATE_TIME, timeZoneName: 'short' });
+    }
+    text = translate('event.range', { start, end });
+  }
+  if (startTbc) {
+    return translate('event.time-tbc', { when: text });
+  }
+  return text;
 }
 
 // The day and month for the date badge on a card: { day: "14", month: "Nov" }.
@@ -88,11 +117,30 @@ export function priceText(price) {
   return formatMoney(price.min, price.currency);
 }
 
+// "Venue, City, Country" for a place (an event's main place, or one of its
+// locations), the country by name.
+export function locationText(place) {
+  return [place.venueName, place.city, countryName(place.country)].filter(Boolean).join(', ');
+}
+
+// What a location is, as the event page heads it: "Event location",
+// "Meeting location", or the editor's own label.
+export function locationLabel(location) {
+  if (location.label === 'custom' && location.customLabel) {
+    return location.customLabel;
+  }
+  let label = location.label;
+  if (!['event', 'meeting'].includes(label)) {
+    label = 'event';
+  }
+  return translate(`location.${label}`);
+}
+
 export function placeText(where) {
   if (!where) {
     return '';
   }
-  const parts = [where.venueName, where.city, where.country].filter(Boolean);
+  const parts = [where.venueName, where.city, countryName(where.country)].filter(Boolean);
   if (where.online && parts.length === 0) {
     return translate('event.online');
   }

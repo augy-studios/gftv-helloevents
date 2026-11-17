@@ -5,7 +5,7 @@ import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
-import { whenText, placeText, priceText, spacesText } from '../format.js';
+import { whenText, placeText, priceText, spacesText, locationText, locationLabel } from '../format.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -31,15 +31,51 @@ function renderCover() {
   }
 }
 
-// The place, the address and online link when this viewer may see them, and
-// a note when they are kept for attendees.
+// The street address and map link of one location, when this viewer may
+// see them.
+function addressLines(location) {
+  const lines = [];
+  if (location.address) {
+    lines.push(createElement('span', { class: 'muted', text: location.address }));
+  }
+  if (location.mapsUrl) {
+    lines.push(createElement('a', { class: 'text-link', href: location.mapsUrl, target: '_blank', rel: 'noopener noreferrer', text: translate('event.open-map') }));
+  }
+  return lines;
+}
+
+// The place lines: one place on its own reads as before ("Venue, City,
+// Country", and online); several, or one labelled other than the event's
+// location, each get their label, then "Online too" when it is.
+function placeLines(where) {
+  const locations = where.locations;
+  if (locations.length === 0) {
+    return [createElement('span', { text: placeText(where) })];
+  }
+  if (locations.length === 1 && locations[0].label === 'event') {
+    return [createElement('span', { text: placeText(where) }), ...addressLines(locations[0])];
+  }
+  const lines = [];
+  for (const location of locations) {
+    lines.push(createElement('span', { class: 'location-heading', text: locationLabel(location) }));
+    let name = locationText(location);
+    if (!name) {
+      name = translate('event.place-tba');
+    }
+    lines.push(createElement('span', { text: name }), ...addressLines(location));
+  }
+  if (where.online) {
+    lines.push(createElement('span', { text: translate('event.online-too') }));
+  }
+  return lines;
+}
+
+// The places, their addresses and the online link when this viewer may see
+// them, and a note when they are kept for attendees.
 function renderWhere() {
   const whereElement = byId('factWhere');
   const where = event.where;
-  const lines = [createElement('span', { text: placeText(where) })];
-  if (where.address) {
-    lines.push(createElement('span', { class: 'muted', text: where.address }));
-  }
+  const lines = placeLines(where);
   if (where.addressForAttendees) {
     lines.push(createElement('span', { class: 'muted small', text: translate('event.address-for-attendees') }));
   }
@@ -107,9 +143,15 @@ function render() {
     summary = '';
   }
   byId('eventSummary').textContent = summary;
+  // The description is marked with the language it is written in, so the
+  // right font and screen reader voice are used; the placeholder is the
+  // page's own language.
   let description = event.description;
-  if (!description) {
+  if (description) {
+    byId('eventDescription').lang = event.descriptionLang;
+  } else {
     description = translate('event.no-description');
+    byId('eventDescription').removeAttribute('lang');
   }
   byId('eventDescription').textContent = description;
   byId('eventOrganiser').hidden = !event.organiserName;

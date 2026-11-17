@@ -61,6 +61,14 @@
         <div class="callout danger" id="manageError" role="alert"></div>
         <div class="callout ok" id="manageNotice" role="status"></div>
 
+        <div class="tabs" role="tablist" id="manageTabs" aria-label="Manage" data-i18n-attr="aria-label:manage.tabs-label" hidden>
+            <button class="tab" type="button" role="tab" id="tab-events" data-tab="events" aria-controls="panel-events" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="manage.tab.events">Events</span></button>
+            <button class="tab" type="button" role="tab" id="tab-signups" data-tab="signups" aria-controls="panel-signups" aria-selected="false" tabindex="-1" hidden><span data-icon="users"></span><span data-i18n="admin.allowance-title">Venue sign-ups</span></button>
+            <button class="tab" type="button" role="tab" id="tab-filter" data-tab="filter" aria-controls="panel-filter" aria-selected="false" tabindex="-1" hidden><span data-icon="alert"></span><span data-i18n="admin.filter-title">Name filter</span></button>
+            <button class="tab" type="button" role="tab" id="tab-reset" data-tab="reset" aria-controls="panel-reset" aria-selected="false" tabindex="-1" hidden><span data-icon="key"></span><span data-i18n="manage.tab.reset">Password resets</span></button>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-events" aria-labelledby="tab-events">
             <form id="eventForm" class="glass-card page-card editor" novalidate hidden aria-labelledby="editorTitle">
                 <div class="row between">
                     <h2 id="editorTitle"></h2>
@@ -75,11 +83,6 @@
                             <input id="f-title" name="title" type="text" maxlength="120" required>
                         </label>
                         <label class="field">
-                            <span data-i18n="manage.field.slug">Address</span>
-                            <input id="f-slug" name="slug" type="text" maxlength="60" autocapitalize="none" spellcheck="false" pattern="[a-z0-9]+(-[a-z0-9]+)*">
-                            <span class="field-hint" data-i18n="manage.hint.slug">Lowercase letters, numbers and hyphens. Blank makes one from the title.</span>
-                        </label>
-                        <label class="field">
                             <span data-i18n="manage.field.kind">Kind</span>
                             <select id="f-kind" name="kind">
                                 <option value="furmeet" data-i18n="kind.furmeet">Furmeet</option>
@@ -87,15 +90,25 @@
                                 <option value="other" data-i18n="kind.other">Other</option>
                             </select>
                         </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.organiserName">Organiser</span>
+                            <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
+                        </label>
                         <label class="field span-2">
-                            <span data-i18n="manage.field.summary">Short summary</span>
+                            <span data-i18n="manage.field.summary-optional">Short summary (optional)</span>
                             <input id="f-summary" name="summary" type="text" maxlength="280">
                         </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.description">Description</span>
-                            <textarea id="f-description" name="description" maxlength="8000" rows="6"></textarea>
+                        <div class="field span-2">
+                            <div class="field-head">
+                                <label for="f-description" data-i18n="manage.field.description">Description</label>
+                                <select id="f-descriptionLang" name="descriptionLang" aria-label="Language of the description" data-i18n-attr="aria-label:manage.field.descriptionLang">
+                                    <option value="en" lang="en">English</option>
+                                    <option value="zh" lang="zh">中文</option>
+                                </select>
+                            </div>
+                            <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en"></textarea>
                             <span class="field-hint" data-i18n="manage.hint.description">Plain text. Line breaks are kept.</span>
-                        </label>
+                        </div>
                         <div class="field span-2 cover-field">
                             <span data-i18n="manage.field.cover">Cover picture</span>
                             <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
@@ -107,12 +120,8 @@
                             </div>
                             <div class="callout danger" id="coverError" role="alert"></div>
                         </div>
-                        <label class="field">
-                            <span data-i18n="manage.field.organiserName">Organiser</span>
-                            <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.externalUrl">Tickets or website</span>
+                        <label class="field span-2">
+                            <span data-i18n="manage.field.externalUrl-optional">Tickets or website (optional)</span>
                             <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://">
                         </label>
                     </div>
@@ -123,18 +132,26 @@
                     <div class="form-grid">
                         <label class="field span-2">
                             <span data-i18n="manage.field.timezone">Time zone</span>
-                            <input id="f-timezone" name="timezone" type="text" list="tzList" maxlength="64" autocapitalize="none" spellcheck="false">
-                            <span class="field-hint" data-i18n="manage.hint.timezone">Where the event happens, for example Asia/Singapore. Times below are in this zone.</span>
-                        </label>
-                        <datalist id="tzList"></datalist>
-                        <label class="field">
-                            <span data-i18n="manage.field.startsLocal">Starts</span>
-                            <input id="f-startsLocal" name="startsLocal" type="datetime-local">
+                            <select id="f-timezone" name="timezone"></select>
+                            <span class="field-hint" data-i18n="manage.hint.timezone">Where the event happens. The dates and times below are in this zone.</span>
                         </label>
                         <label class="field">
-                            <span data-i18n="manage.field.endsLocal">Ends</span>
-                            <input id="f-endsLocal" name="endsLocal" type="datetime-local">
+                            <span data-i18n="manage.field.startDate">Start date</span>
+                            <input id="f-startDate" name="startDate" type="date" required>
                         </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.startTime-optional">Start time (optional)</span>
+                            <input id="f-startTime" name="startTime" type="time">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.endDate-optional">End date (optional)</span>
+                            <input id="f-endDate" name="endDate" type="date">
+                        </label>
+                        <label class="field">
+                            <span data-i18n="manage.field.endTime-optional">End time (optional)</span>
+                            <input id="f-endTime" name="endTime" type="time">
+                        </label>
+                        <p class="field-hint span-2 times-hint" data-i18n="manage.hint.times">Leave a time blank while it is to be confirmed: the event page shows the date alone. With no end date, the event ends on its start date.</p>
                         <label class="check span-2">
                             <input type="checkbox" id="f-datesHidden" name="datesHidden">
                             <span data-i18n="manage.field.datesHidden">Dates to be announced: keep the dates off the public page</span>
@@ -144,28 +161,16 @@
 
                 <fieldset>
                     <legend data-i18n="manage.section.where">Where</legend>
-                    <div class="form-grid">
-                        <label class="field">
-                            <span data-i18n="manage.field.venueName">Venue</span>
-                            <input id="f-venueName" name="venueName" type="text" maxlength="160">
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.city">City</span>
-                            <input id="f-city" name="city" type="text" maxlength="80">
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.venueAddress">Street address</span>
-                            <input id="f-venueAddress" name="venueAddress" type="text" maxlength="300">
-                        </label>
+                    <div id="locationList" class="location-list"></div>
+                    <p class="muted small" id="locationsEmpty" hidden data-i18n="manage.locations-empty">No locations yet. An online-only event needs none.</p>
+                    <div class="actions inline">
+                        <button class="btn" type="button" id="locationAdd"><span data-icon="plus"></span><span data-i18n="manage.location-add">Add a location</span></button>
+                    </div>
+                    <div class="form-grid u-mt-1">
                         <label class="check span-2">
                             <input type="checkbox" id="f-addressAttendeesOnly" name="addressAttendeesOnly">
-                            <span data-i18n="manage.field.addressAttendeesOnly">Show the street address only to people going</span>
+                            <span data-i18n="manage.field.addressAttendeesOnly">Show the street addresses and map links only to people going</span>
                         </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.country">Country</span>
-                            <input id="f-country" name="country" type="text" maxlength="80">
-                        </label>
-                        <span></span>
                         <label class="check span-2">
                             <input type="checkbox" id="f-isOnline" name="isOnline">
                             <span data-i18n="manage.field.isOnline">Online, or online too</span>
@@ -191,8 +196,9 @@
                         </label>
                         <label class="field">
                             <span data-i18n="manage.field.currency">Currency</span>
-                            <input id="f-currency" name="currency" type="text" maxlength="3" placeholder="SGD" autocapitalize="characters">
+                            <input id="f-currency" name="currency" type="text" list="currencyList" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Search code or name" data-i18n-attr="placeholder:manage.currency-search">
                         </label>
+                        <datalist id="currencyList"></datalist>
                         <label class="field">
                             <span data-i18n="manage.field.priceMin">From</span>
                             <input id="f-priceMin" name="priceMin" type="number" min="0" step="0.01" inputmode="decimal">
@@ -261,82 +267,94 @@
                 </section>
             </form>
 
-        <section class="glass-card page-card" id="listBox" aria-busy="true">
-            <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
-            <ul class="item-list" id="eventList"></ul>
-            <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
-        </section>
+            <section class="glass-card page-card" id="listBox" aria-busy="true">
+                <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
+                <ul class="item-list" id="eventList"></ul>
+                <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
+                <nav class="pager" id="listPager" aria-label="Pages" data-i18n-attr="aria-label:manage.pages" hidden>
+                    <button class="btn btn-small" type="button" id="pagePrev"><span data-i18n="manage.page-prev">Previous</span></button>
+                    <span class="muted small" id="pageInfo" aria-live="polite"></span>
+                    <button class="btn btn-small" type="button" id="pageNext"><span data-i18n="manage.page-next">Next</span></button>
+                </nav>
+            </section>
+        </div>
 
-        <section class="glass-card page-card admin-tools" id="allowanceBox" hidden aria-labelledby="allowanceTitle">
-            <h2 id="allowanceTitle" data-i18n="admin.allowance-title">Venue sign-ups</h2>
-            <p class="muted small" data-i18n="admin.allowance-lede">New accounts are limited to 5 an hour from one connection. At a meet or con where everyone shares the venue's Wi-Fi, open this page on that Wi-Fi and raise the limit for that connection for a few hours. It ends by itself.</p>
-            <p class="small" id="allowanceHere"></p>
-            <form id="allowanceForm" novalidate>
-                <div class="form-grid">
-                    <label class="field">
-                        <span data-i18n="admin.allowance-hours">For how long</span>
-                        <select id="allowanceHours">
-                            <option value="2" data-i18n="admin.hours-2">2 hours</option>
-                            <option value="4" data-i18n="admin.hours-4">4 hours</option>
-                            <option value="8" selected data-i18n="admin.hours-8">8 hours</option>
-                            <option value="12" data-i18n="admin.hours-12">12 hours</option>
-                        </select>
+        <div class="tab-panel" role="tabpanel" id="panel-signups" aria-labelledby="tab-signups" hidden>
+            <section class="glass-card page-card admin-tools" id="allowanceBox" aria-labelledby="allowanceTitle">
+                <h2 id="allowanceTitle" data-i18n="admin.allowance-title">Venue sign-ups</h2>
+                <p class="muted small" data-i18n="admin.allowance-lede">New accounts are limited to 5 an hour from one connection. At a meet or con where everyone shares the venue's Wi-Fi, open this page on that Wi-Fi and raise the limit for that connection for a few hours. It ends by itself.</p>
+                <p class="small" id="allowanceHere"></p>
+                <form id="allowanceForm" novalidate>
+                    <div class="form-grid">
+                        <label class="field">
+                            <span data-i18n="admin.allowance-hours">For how long</span>
+                            <select id="allowanceHours">
+                                <option value="2" data-i18n="admin.hours-2">2 hours</option>
+                                <option value="4" data-i18n="admin.hours-4">4 hours</option>
+                                <option value="8" selected data-i18n="admin.hours-8">8 hours</option>
+                                <option value="12" data-i18n="admin.hours-12">12 hours</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span data-i18n="admin.allowance-rate">Sign-ups an hour</span>
+                            <select id="allowanceRate">
+                                <option value="50">50</option>
+                                <option value="100" selected>100</option>
+                                <option value="200">200</option>
+                                <option value="500">500</option>
+                            </select>
+                        </label>
+                        <label class="field span-2">
+                            <span data-i18n="admin.allowance-label">Where (optional)</span>
+                            <input id="allowanceLabel" type="text" maxlength="80">
+                        </label>
+                    </div>
+                    <div class="actions inline"><button class="btn btn-primary" type="submit" id="allowanceSubmit"><span data-icon="users"></span><span data-i18n="admin.allowance-grant">Raise the limit on this connection</span></button></div>
+                </form>
+                <ul class="item-list u-mt-1" id="allowanceList"></ul>
+                <div class="callout danger" id="allowanceError" role="alert"></div>
+            </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-filter" aria-labelledby="tab-filter" hidden>
+            <section class="glass-card page-card admin-tools" id="filterBox" aria-labelledby="filterTitle">
+                <h2 id="filterTitle" data-i18n="admin.filter-title">Name filter</h2>
+                <p class="muted small" data-i18n="admin.filter-lede">Words public accounts may not use in a username or display name. Matching ignores case, spacing, accents, look-alike letters and numbers used as letters.</p>
+                <p class="small"><span data-i18n="admin.filter-builtin">Always blocked:</span> <span id="builtInTerms"></span></p>
+                <ul class="item-list" id="filterList"></ul>
+                <form id="filterForm" class="row u-mt-1" novalidate>
+                    <label class="field grow">
+                        <span data-i18n="admin.filter-add-label">Add a word</span>
+                        <input id="filterTerm" type="text" maxlength="40" autocapitalize="none" spellcheck="false">
                     </label>
-                    <label class="field">
-                        <span data-i18n="admin.allowance-rate">Sign-ups an hour</span>
-                        <select id="allowanceRate">
-                            <option value="50">50</option>
-                            <option value="100" selected>100</option>
-                            <option value="200">200</option>
-                            <option value="500">500</option>
-                        </select>
+                    <button class="btn" type="submit" id="filterSubmit"><span data-icon="plus"></span><span data-i18n="admin.filter-add">Add</span></button>
+                </form>
+                <h3 class="section-label" data-i18n="admin.flagged-title">Existing names that match</h3>
+                <p class="muted small" data-i18n="admin.flagged-lede">Names chosen before a word was listed are kept, and shown here.</p>
+                <ul class="item-list" id="flaggedList"></ul>
+                <div class="callout danger" id="filterError" role="alert"></div>
+            </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-reset" aria-labelledby="tab-reset" hidden>
+            <section class="glass-card page-card admin-tools" id="resetBox" aria-labelledby="resetTitle">
+                <h2 id="resetTitle" data-i18n="admin.reset-title">Reset a member's password</h2>
+                <p class="muted small" data-i18n="admin.reset-lede">For a member with no linked Telegram and no 2FA. Check it is really them first. The code is shown once, works once, and lasts 24 hours; they type it at events.globalfurry.tv/reset.</p>
+                <form id="resetForm" class="row" novalidate>
+                    <label class="field grow">
+                        <span data-i18n="field.username">Username</span>
+                        <input id="resetUsername" type="text" maxlength="32" autocapitalize="none" spellcheck="false">
                     </label>
-                    <label class="field span-2">
-                        <span data-i18n="admin.allowance-label">Where (optional)</span>
-                        <input id="allowanceLabel" type="text" maxlength="80">
-                    </label>
+                    <button class="btn" type="submit" id="resetSubmit"><span data-icon="key"></span><span data-i18n="admin.reset-make">Make a reset code</span></button>
+                </form>
+                <div id="resetResult" hidden>
+                    <code class="secret" id="resetCodeShown"></code>
+                    <p class="small muted" id="resetExpiry"></p>
+                    <div class="actions inline"><button class="btn" type="button" id="resetCopy"><span data-icon="copy"></span><span data-i18n="codes.copy">Copy</span></button></div>
                 </div>
-                <div class="actions inline"><button class="btn btn-primary" type="submit" id="allowanceSubmit"><span data-icon="users"></span><span data-i18n="admin.allowance-grant">Raise the limit on this connection</span></button></div>
-            </form>
-            <ul class="item-list u-mt-1" id="allowanceList"></ul>
-            <div class="callout danger" id="allowanceError" role="alert"></div>
-        </section>
-
-        <section class="glass-card page-card admin-tools" id="filterBox" hidden aria-labelledby="filterTitle">
-            <h2 id="filterTitle" data-i18n="admin.filter-title">Name filter</h2>
-            <p class="muted small" data-i18n="admin.filter-lede">Words public accounts may not use in a username or display name. Matching ignores case, spacing, accents, look-alike letters and numbers used as letters.</p>
-            <p class="small"><span data-i18n="admin.filter-builtin">Always blocked:</span> <span id="builtInTerms"></span></p>
-            <ul class="item-list" id="filterList"></ul>
-            <form id="filterForm" class="row u-mt-1" novalidate>
-                <label class="field grow">
-                    <span data-i18n="admin.filter-add-label">Add a word</span>
-                    <input id="filterTerm" type="text" maxlength="40" autocapitalize="none" spellcheck="false">
-                </label>
-                <button class="btn" type="submit" id="filterSubmit"><span data-icon="plus"></span><span data-i18n="admin.filter-add">Add</span></button>
-            </form>
-            <h3 class="section-label" data-i18n="admin.flagged-title">Existing names that match</h3>
-            <p class="muted small" data-i18n="admin.flagged-lede">Names chosen before a word was listed are kept, and shown here.</p>
-            <ul class="item-list" id="flaggedList"></ul>
-            <div class="callout danger" id="filterError" role="alert"></div>
-        </section>
-
-        <section class="glass-card page-card admin-tools" id="resetBox" hidden aria-labelledby="resetTitle">
-            <h2 id="resetTitle" data-i18n="admin.reset-title">Reset a member's password</h2>
-            <p class="muted small" data-i18n="admin.reset-lede">For a member with no linked Telegram and no 2FA. Check it is really them first. The code is shown once, works once, and lasts 24 hours; they type it at events.globalfurry.tv/reset.</p>
-            <form id="resetForm" class="row" novalidate>
-                <label class="field grow">
-                    <span data-i18n="field.username">Username</span>
-                    <input id="resetUsername" type="text" maxlength="32" autocapitalize="none" spellcheck="false">
-                </label>
-                <button class="btn" type="submit" id="resetSubmit"><span data-icon="key"></span><span data-i18n="admin.reset-make">Make a reset code</span></button>
-            </form>
-            <div id="resetResult" hidden>
-                <code class="secret" id="resetCodeShown"></code>
-                <p class="small muted" id="resetExpiry"></p>
-                <div class="actions inline"><button class="btn" type="button" id="resetCopy"><span data-icon="copy"></span><span data-i18n="codes.copy">Copy</span></button></div>
-            </div>
-            <div class="callout danger" id="resetError" role="alert"></div>
-        </section>
+                <div class="callout danger" id="resetError" role="alert"></div>
+            </section>
+        </div>
     </main>
 
     <div class="modal-backdrop hidden" id="deleteModal">

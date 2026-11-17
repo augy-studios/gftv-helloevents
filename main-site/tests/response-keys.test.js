@@ -123,7 +123,7 @@ const USER = ['username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage
 const METHODS = ['totp', 'passkey', 'telegram', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];
 
-const WHEN = ['tba', 'startsAt', 'endsAt', 'timezone'];
+const WHEN = ['tba', 'startsAt', 'endsAt', 'startTimeTbc', 'endTimeTbc', 'timezone'];
 const WHERE = ['online', 'venueName', 'city', 'country'];
 // A card (the feed, and "Events you are going to"), for an event with dates
 // and a price.
@@ -138,20 +138,23 @@ const CARD_TBA_FREE = [
   ...nest('when', ['tba', 'timezone']), ...nest('where', WHERE), ...nest('price', ['type']),
   'going', 'rsvp',
 ];
+// One of an event's locations on its page.
+const LOCATION = ['label', 'customLabel', 'venueName', 'city', 'country', 'address', 'mapsUrl'];
 // The event page: the card, plus what only the page shows.
 const DETAIL = [
-  ...CARD, 'price.note', 'capacity', 'left', 'description', 'organiserName', 'externalUrl',
-  'where.address', 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
+  ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionLang', 'organiserName', 'externalUrl',
+  ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...nest('viewer', ['signedIn', 'going', 'canManage']),
 ];
 
 // /manage: a row of the event list, the edit form, an attendee.
 const SUMMARY = ['id', 'slug', 'title', 'kind', 'status', 'released', 'startsAt', 'datesHidden', 'going', 'capacity'];
+const EDITOR_LOCATION = ['label', 'customLabel', 'venueName', 'venueAddress', 'city', 'country', 'mapsUrl'];
 const EDITOR = [
   'id', 'slug', 'title', 'kind', 'status', 'datesHidden', 'timezone', 'capacity', 'summary', 'description',
-  'startsLocal', 'endsLocal', 'publishLocal', 'isOnline', 'onlineUrl', 'venueName', 'venueAddress',
-  'addressAttendeesOnly', 'city', 'country', 'coverImageUrl', 'hasCover', 'externalUrl', 'organiserName',
-  'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'rsvpOpen', 'staffNotes',
+  'descriptionLang', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
+  ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
+  'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'rsvpOpen', 'staffNotes',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
 const ATTENDEE = ['username', 'displayName', 'staff', 'rsvpAt'];
@@ -392,7 +395,14 @@ test('the event list, the edit form, attendees and the cover answer only what /m
   const { b: editor } = await staff('editor', { is_editor: true });
   const made = await editor.call(manage, {
     method: 'POST',
-    body: { action: 'create', event: { title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startsLocal: '2030-01-01T10:00', priceType: 'free', capacity: '50' } },
+    body: {
+      action: 'create',
+      event: {
+        title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00',
+        priceType: 'free', capacity: '50', locations: [{ label: 'event', venueName: 'Expo Hall', city: 'Singapore', country: 'SG' }],
+      },
+    },
+
   });
   assertKeys(made, nest('event', EDITOR));
   const id = made.json.event.id;

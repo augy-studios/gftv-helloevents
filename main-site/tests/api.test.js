@@ -244,7 +244,7 @@ test('RSVP needs a session, respects capacity, and reveals the online link only 
   const going = await a.call(rsvp, { method: 'POST', body: { slug: 'small-meet', going: true } });
   assert.equal(going.status, 200);
   assert.equal(going.json.event.where.onlineUrl, 'https://meet.example.com/abc');
-  assert.equal(going.json.event.where.address, '1 Hidden Lane');
+  assert.equal(going.json.event.where.locations[0].address, '1 Hidden Lane');
   assert.equal(going.json.event.going, 1);
   assert.deepEqual(leaks(going.json), []);
 
@@ -293,7 +293,7 @@ test('members cannot manage; editors create and edit; only admins delete', async
     method: 'POST',
     body: {
       action: 'create',
-      event: { title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startsLocal: '2030-01-01T10:00', priceType: 'free', staffNotes: 'budget 5k', created_by: 'forged' },
+      event: { title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00', priceType: 'free', staffNotes: 'budget 5k', created_by: 'forged' },
     },
   });
   assert.equal(made.status, 200, JSON.stringify(made.json));
@@ -303,12 +303,38 @@ test('members cannot manage; editors create and edit; only admins delete', async
   const row = db.table('gftvevents_events').find((e) => e.slug === 'mega-con');
   assert.notEqual(row.created_by, 'forged');
 
-  const dup = await ed.call(manage, { method: 'POST', body: { action: 'create', event: { title: 'Mega Con', kind: 'convention', status: 'draft', startsLocal: '2030-01-01T10:00', priceType: 'free' } } });
+  // The same title again gets the next free address, since the form has no
+  // address field; an address the caller chose is refused when it is taken.
+  const again = { title: 'Mega Con', kind: 'convention', status: 'draft', startDate: '2030-01-01', priceType: 'free' };
+  const second = await ed.call(manage, { method: 'POST', body: { action: 'create', event: again } });
+  assert.equal(second.status, 200, JSON.stringify(second.json));
+  assert.equal(second.json.event.slug, 'mega-con-2');
+  const third = await ed.call(manage, { method: 'POST', body: { action: 'create', event: again } });
+  assert.equal(third.json.event.slug, 'mega-con-3');
+  const dup = await ed.call(manage, { method: 'POST', body: { action: 'create', event: { ...again, slug: 'mega-con' } } });
   assert.equal(dup.json.error, 'slug_taken');
+  for (const extra of [second, third]) {
+    db.table('gftvevents_events').splice(db.table('gftvevents_events').findIndex((e) => e.id === extra.json.event.id), 1);
+  }
+
+  // A new title keeps the address, so the event's page never moves.
+  const renamed = await ed.call(manage, { method: 'POST', body: { action: 'update', id: row.id, event: { ...made.json.event, slug: undefined, title: 'Mega Con Renamed' } } });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.json));
+  assert.equal(renamed.json.event.slug, 'mega-con');
+  assert.equal(renamed.json.event.title, 'Mega Con Renamed');
 
   const bad = await ed.call(manage, { method: 'POST', body: { action: 'update', id: row.id, event: { title: '', kind: 'convention', status: 'draft', priceType: 'free' } } });
   assert.equal(bad.json.error, 'invalid_field');
   assert.equal(bad.json.field, 'title');
+
+  // A bad field in a location says which location.
+  const badPlace = await ed.call(manage, {
+    method: 'POST',
+    body: { action: 'update', id: row.id, event: { ...made.json.event, locations: [{ label: 'event', venueName: 'Hall' }, { label: 'meeting', mapsUrl: 'ftp://x' }] } },
+  });
+  assert.equal(badPlace.json.field, 'mapsUrl');
+  assert.equal(badPlace.json.location, 1);
+
 
   // The public page has none of the editor-only fields.
   const pub = await browser().call(detail, { query: { slug: 'mega-con' } });

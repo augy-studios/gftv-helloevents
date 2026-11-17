@@ -23,7 +23,7 @@ import { siteUrl } from './env.js';
 import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
 import { eventNoticeMessage } from './telegram-messages.js';
-import { isReleased, datesAnnounced } from './event-rules.js';
+import { isReleased, datesAnnounced, storedLocations } from './event-rules.js';
 import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
@@ -60,23 +60,25 @@ export async function settle() {
 }
 
 // When the event starts, in its own time zone, or "Dates to be announced".
+// A start whose time is still to be confirmed shows its date alone.
 function whenText(row) {
   if (!datesAnnounced(row)) {
     return 'Dates to be announced';
   }
-  try {
-    return new Intl.DateTimeFormat('en-SG', {
-      timeZone: row.timezone,
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(new Date(row.starts_at));
-  } catch {
-    return new Date(row.starts_at).toUTCString();
+  const options = { timeZone: row.timezone, weekday: 'short', day: 'numeric', month: 'short' };
+  if (!row.start_time_tbc) {
+    Object.assign(options, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
   }
+  let text;
+  try {
+    text = new Intl.DateTimeFormat('en-SG', options).format(new Date(row.starts_at));
+  } catch {
+    text = new Date(row.starts_at).toUTCString();
+  }
+  if (row.start_time_tbc) {
+    return `${text}, time to be confirmed`;
+  }
+  return text;
 }
 
 // The place name and city, and "online" for an online event.
@@ -174,9 +176,13 @@ async function attendeeAccounts(eventId, preference) {
 }
 
 // Whether one field differs between two versions of an event. A missing
-// field counts as null, and two timestamps are compared as moments, so the
-// same time written two ways is not a change.
+// field counts as null (and a missing "time to be confirmed" flag as
+// false), and two timestamps are compared as moments, so the same time
+// written two ways is not a change.
 function fieldChanged(field, before, after) {
+  if (field.endsWith('_tbc')) {
+    return (before[field] === true) !== (after[field] === true);
+  }
   let oldValue = before[field];
   if (oldValue === undefined) {
     oldValue = null;
@@ -191,6 +197,13 @@ function fieldChanged(field, before, after) {
   return oldValue !== newValue;
 }
 
+// Whether the places changed, compared in one shape, so an event saved
+// before the locations list (its place only in the venue columns, or
+// copied into the list by migrations/004) is not "moved" by its next save.
+function locationsChanged(before, after) {
+  return JSON.stringify(storedLocations(before)) !== JSON.stringify(storedLocations(after));
+}
+
 // What changed between two versions of an event that people going should
 // hear about: "cancelled", "updated" or null.
 export function changeKind(before, after) {
@@ -203,8 +216,14 @@ export function changeKind(before, after) {
   if (after.status === 'cancelled') {
     return null;
   }
-  const fields = ['starts_at', 'ends_at', 'timezone', 'dates_hidden', 'venue_name', 'venue_address', 'city', 'country', 'is_online'];
-  const moved = fields.some((field) => fieldChanged(field, before, after));
+  const fields = [
+    'starts_at', 'ends_at', 'start_time_tbc', 'end_time_tbc', 'timezone', 'dates_hidden',
+    'venue_name', 'venue_address', 'city', 'country', 'is_online',
+  ];
+  let moved = fields.some((field) => fieldChanged(field, before, after));
+  if (locationsChanged(before, after)) {
+    moved = true;
+  }
   if (moved && isReleased(before)) {
     return 'updated';
   }
@@ -229,7 +248,7 @@ export async function sendReminders(now = Date.now()) {
   const windowEnd = new Date(now + REMIND_WITHIN_HOURS * 3600_000).toISOString();
   const { data: events, error } = await database()
     .from(TABLES.events)
-    .select('id, slug, title, status, publish_at, starts_at, ends_at, timezone, dates_hidden, venue_name, city, is_online')
+    .select('id, slug, title, status, publish_at, starts_at, ends_at, start_time_tbc, timezone, dates_hidden, venue_name, city, is_online')
     .eq('status', 'published')
     .eq('dates_hidden', false)
     .gte('starts_at', windowStart)
@@ -276,7 +295,7 @@ export async function sendReminders(now = Date.now()) {
 export async function announceNewEvents(now = Date.now()) {
   const { data: events, error } = await database()
     .from(TABLES.events)
-    .select('id, slug, title, status, publish_at, starts_at, ends_at, timezone, dates_hidden, venue_name, city, is_online, last_at')
+    .select('id, slug, title, status, publish_at, starts_at, ends_at, start_time_tbc, timezone, dates_hidden, venue_name, city, is_online, last_at')
     .eq('status', 'published')
     .is('announced_at', null)
     .limit(20);

@@ -26,6 +26,7 @@ const DEFAULTS = {
     address_attendees_only: false, city: null, country: null, cover_image_url: null, external_url: null, organiser_name: null,
     price_type: 'free', price_min: null, price_max: null, currency: null, price_note: null, price_hidden: false,
     capacity: null, rsvp_open: true, staff_notes: null, created_by: null, updated_by: null, updated_at: now(),
+    description_lang: 'en', start_time_tbc: false, end_time_tbc: false, locations: [],
     cover_image_url: null, cover_image_path: null, announced_at: null,
   }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),

@@ -344,7 +344,8 @@ test('changing when or where an event happens tells the people going, by push an
   await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet' } } });
   await settle();
   assert.equal(pushes.length, 0);
-  await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', venueName: 'New Hall' } } });
+  const moved = [{ ...current.locations[0], venueName: 'New Hall' }];
+  await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', locations: moved } } });
   await settle();
   assert.equal(pushes.length, 1, 'only the person who wants updates');
   assert.equal(pushes[0].payload.title, 'Event updated: Moving Meet');
@@ -357,7 +358,8 @@ test('changing when or where an event happens tells the people going, by push an
   assert.match(tgNotice.body.rich_message.markdown, /## Event updated/);
 
   pushes = [];
-  await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', venueName: 'New Hall', status: 'cancelled' } } });
+  await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', locations: moved, status: 'cancelled' } } });
+
   await settle();
   assert.equal(pushes[0].payload.title, 'Event cancelled: Moving Meet');
 });

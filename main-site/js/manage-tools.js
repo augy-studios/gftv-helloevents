@@ -1,4 +1,4 @@
-// The staff tools under the events on /manage (api/manage/admin.js): venue
+// The staff tools in their own tabs on /manage (api/manage/admin.js): venue
 // sign-up allowances for editors and admins; the name filter, flagged names
 // and member password reset codes for admins. The server checks the role on
 // every request; hiding sections here is only tidiness.
@@ -110,20 +110,21 @@ async function removeFilter(id) {
   });
 }
 
-// Loads the tools' state and shows the sections this role may use: venue
+// Loads the tools' state and shows the tabs this role may use: venue
 // allowances for every editor, the name filter and reset codes for admins
-// only. Then wires the three forms: grant an allowance, add a filter word,
-// and make a one-time reset code (shown with a Copy button).
+// only (the page then calls its tabs' refresh). Then wires the three forms:
+// grant an allowance, add a filter word, and make a one-time reset code
+// (shown with a Copy button).
 export async function startTools(currentUser) {
   isAdmin = currentUser.role === 'admin';
   try {
     state = await api('/api/manage/admin');
   } catch {
-    return; // the events still work; the tools stay hidden
+    return; // the events still work; the tools' tabs stay hidden
   }
-  byId('allowanceBox').hidden = false;
-  byId('filterBox').hidden = !isAdmin;
-  byId('resetBox').hidden = !isAdmin;
+  byId('tab-signups').hidden = false;
+  byId('tab-filter').hidden = !isAdmin;
+  byId('tab-reset').hidden = !isAdmin;
   render();
 
   byId('allowanceForm').addEventListener('submit', (event) => {

@@ -8,12 +8,13 @@ import { releasedFilter, isSlug } from './event-rules.js';
 // The feed needs no description, address, online link, price note or staff
 // notes, so it does not even fetch them.
 export const CARD_COLUMNS =
-  'id, slug, title, kind, summary, status, publish_at, starts_at, ends_at, timezone, dates_hidden, ' +
+  'id, slug, title, kind, summary, status, publish_at, starts_at, ends_at, start_time_tbc, end_time_tbc, timezone, dates_hidden, ' +
   'is_online, venue_name, city, country, cover_image_path, price_type, price_min, price_max, currency, ' +
   'price_hidden, capacity, rsvp_open, gftvevents_attendees(count)';
 
 export const DETAIL_COLUMNS =
-  `${CARD_COLUMNS}, price_note, description, venue_address, address_attendees_only, online_url, organiser_name, external_url`;
+  `${CARD_COLUMNS}, price_note, description, description_lang, venue_address, locations, address_attendees_only, online_url, ` +
+  'organiser_name, external_url';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.

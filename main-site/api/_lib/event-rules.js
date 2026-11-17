@@ -7,6 +7,12 @@ export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
 export const PRICE_TYPES = ['free', 'paid', 'tba'];
 export const DEFAULT_TIMEZONE = 'Asia/Singapore';
+// The languages a description can be written in, picked next to the field.
+export const DESCRIPTION_LANGS = ['en', 'zh'];
+// What a location is: where the event is, where people meet first, or a
+// label the editor types.
+export const LOCATION_LABELS = ['event', 'meeting', 'custom'];
+export const MAX_LOCATIONS = 10;
 
 export const LIMITS = Object.freeze({
   title: 120,
@@ -26,6 +32,28 @@ export const LIMITS = Object.freeze({
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 // A wall-clock time as the edit form sends it: "2026-11-14T14:00".
 const WALL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+// A date and a time of day, as the form's date and time inputs send them.
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TIME_ONLY = /^([01]\d|2[0-3]):([0-5]\d)$/;
+// Where a date with no time is put: the start of its day, or the end of it,
+// so an event with a time still to be confirmed is not over until its last
+// day ends.
+const DAY_START = '00:00';
+const DAY_END = '23:59';
+// A two-letter ISO 3166 country code, as the form's country list sends it.
+const COUNTRY_CODE = /^[A-Za-z]{2}$/;
+
+// Every currency code this runtime knows (ISO 4217), for checking the form's
+// currency. Empty if the runtime cannot list them, and then any three
+// capital letters pass.
+function knownCurrencies() {
+  try {
+    return new Set(Intl.supportedValuesOf('currency'));
+  } catch {
+    return new Set();
+  }
+}
+const CURRENCIES = knownCurrencies();
 
 // The value as a string, with null and undefined read as ''.
 function stringOrEmpty(value) {
@@ -286,45 +314,93 @@ function readIdentity(body, fields) {
   return null;
 }
 
-// The free-text fields: [form field, column, longest allowed].
+// The free-text fields: [form field, column, longest allowed]. The place
+// fields are per location (readLocations).
 const TEXT_FIELDS = [
   ['summary', 'summary', LIMITS.summary],
   ['description', 'description', LIMITS.description],
-  ['venueName', 'venue_name', LIMITS.venueName],
-  ['venueAddress', 'venue_address', LIMITS.venueAddress],
-  ['city', 'city', LIMITS.city],
-  ['country', 'country', LIMITS.country],
   ['organiserName', 'organiser_name', LIMITS.organiserName],
   ['priceNote', 'price_note', LIMITS.priceNote],
   ['staffNotes', 'staff_notes', LIMITS.staffNotes],
 ];
 
-// Each free-text field, length-checked. A blank one is stored as null.
+// The text, length-checked, into column: { ok: true } with a blank stored as
+// null, or { ok: false } when it is too long.
+function putText(target, column, value, maximumLength) {
+  const text = cleanText(value, maximumLength);
+  if (text.length > maximumLength) {
+    return { ok: false };
+  }
+  if (text === '') {
+    target[column] = null;
+  } else {
+    target[column] = text;
+  }
+  return { ok: true };
+}
+
+// Each free-text field, length-checked, then the description's language
+// (English when the form names none).
 function readTextFields(body, fields) {
   for (const [formField, column, maximumLength] of TEXT_FIELDS) {
-    const value = cleanText(body[formField], maximumLength);
-    if (value.length > maximumLength) {
+    if (!putText(fields, column, body[formField], maximumLength).ok) {
       return formField;
     }
-    if (value === '') {
-      fields[column] = null;
-    } else {
-      fields[column] = value;
-    }
+  }
+  if (body.descriptionLang === undefined || body.descriptionLang === null || body.descriptionLang === '') {
+    fields.description_lang = 'en';
+  } else {
+    fields.description_lang = allowedOrNull(DESCRIPTION_LANGS, body.descriptionLang);
+  }
+  if (!fields.description_lang) {
+    return 'descriptionLang';
   }
   return null;
 }
 
-// The wall-clock times on the form, and the UTC columns they are stored in.
-const TIME_FIELDS = [
-  ['startsLocal', 'starts_at'],
-  ['endsLocal', 'ends_at'],
-  ['publishLocal', 'publish_at'],
-];
+// Whether "2027-02-30" is a day on the calendar, not only shaped like one.
+function isCalendarDate(value) {
+  const match = DATE_ONLY.exec(value);
+  if (!match) {
+    return false;
+  }
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day) {
+    return true;
+  }
+  return false;
+}
 
-// The time zone, then each time on the form converted from it to UTC (blank
-// is null). An event needs a start unless its dates are hidden, cannot end
-// without a start, and cannot end before it starts.
+// One date and optional time from the form, in the event's zone, as
+// { ok: true, at, timeTbc } (at in UTC; a blank time is put at
+// blankTimeAt and marked as to be confirmed) or { ok: false, field }
+// naming the form field that is wrong.
+function readDayAndTime(date, time, timeZone, blankTimeAt, names) {
+  if (!isCalendarDate(date)) {
+    return { ok: false, field: names.date };
+  }
+  let wallClock = blankTimeAt;
+  if (time !== '') {
+    if (!TIME_ONLY.test(time)) {
+      return { ok: false, field: names.time };
+    }
+    wallClock = time;
+  }
+  const at = wallToUtc(`${date}T${wallClock}`, timeZone);
+  if (!at) {
+    return { ok: false, field: names.date };
+  }
+  return { ok: true, at, timeTbc: time === '' };
+}
+
+// The time zone, then the start and end, and the release time, converted
+// from it to UTC.
+//
+// The start date is required; its time may be blank while it is still to be
+// confirmed. The end is optional. An end time with no end date ends on the
+// start date, and a start with no time and no end lasts the whole of its
+// day. The end cannot come before the start.
 function readTimes(body, fields) {
   if (body.timezone === undefined || body.timezone === '') {
     fields.timezone = DEFAULT_TIMEZONE;
@@ -334,29 +410,176 @@ function readTimes(body, fields) {
   if (!isTimeZone(fields.timezone)) {
     return 'timezone';
   }
-
   fields.dates_hidden = body.datesHidden === true;
-  for (const [formField, column] of TIME_FIELDS) {
-    const wallTime = cleanText(body[formField], 16);
-    if (wallTime === '') {
-      fields[column] = null;
-    } else {
-      const utcTime = wallToUtc(wallTime, fields.timezone);
-      if (!utcTime) {
-        return formField;
-      }
-      fields[column] = utcTime;
+
+  const startDate = cleanText(body.startDate, 10);
+  if (startDate === '') {
+    return 'startDate';
+  }
+  const start = readDayAndTime(startDate, cleanText(body.startTime, 5), fields.timezone, DAY_START, { date: 'startDate', time: 'startTime' });
+  if (!start.ok) {
+    return start.field;
+  }
+  fields.starts_at = start.at;
+  fields.start_time_tbc = start.timeTbc;
+
+  const endTime = cleanText(body.endTime, 5);
+  let endDate = cleanText(body.endDate, 10);
+  if (endDate === '' && (endTime !== '' || start.timeTbc)) {
+    endDate = startDate;
+  }
+  fields.ends_at = null;
+  fields.end_time_tbc = false;
+  if (endDate !== '') {
+    const end = readDayAndTime(endDate, endTime, fields.timezone, DAY_END, { date: 'endDate', time: 'endTime' });
+    if (!end.ok) {
+      return end.field;
+    }
+    fields.ends_at = end.at;
+    fields.end_time_tbc = end.timeTbc;
+  }
+  if (fields.ends_at && new Date(fields.ends_at) < new Date(fields.starts_at)) {
+    if (endDate === startDate) {
+      return 'endTime';
+    }
+    return 'endDate';
+  }
+
+  const publishWall = cleanText(body.publishLocal, 16);
+  fields.publish_at = null;
+  if (publishWall !== '') {
+    fields.publish_at = wallToUtc(publishWall, fields.timezone);
+    if (!fields.publish_at) {
+      return 'publishLocal';
     }
   }
+  return null;
+}
 
-  if (!fields.starts_at && !fields.dates_hidden) {
-    return 'startsLocal';
+// A location's text fields: [form field, key in the stored location, longest
+// allowed].
+const LOCATION_TEXT_FIELDS = [
+  ['customLabel', 'custom_label', LIMITS.label],
+  ['venueName', 'venue_name', LIMITS.venueName],
+  ['venueAddress', 'venue_address', LIMITS.venueAddress],
+  ['city', 'city', LIMITS.city],
+  ['country', 'country', LIMITS.country],
+];
+
+// One location from the form as { ok: true, location } (location null when
+// every field of it is blank, so an untouched row is dropped), or
+// { ok: false, field }.
+function readLocation(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, field: 'locations' };
   }
-  if (fields.ends_at && !fields.starts_at) {
-    return 'startsLocal';
+  const location = { label: allowedOrNull(LOCATION_LABELS, entry.label) };
+  if (!location.label) {
+    return { ok: false, field: 'locationLabel' };
   }
-  if (fields.ends_at && fields.starts_at && new Date(fields.ends_at) < new Date(fields.starts_at)) {
-    return 'endsLocal';
+  for (const [formField, key, maximumLength] of LOCATION_TEXT_FIELDS) {
+    if (!putText(location, key, entry[formField], maximumLength).ok) {
+      return { ok: false, field: formField };
+    }
+  }
+  // A country picked from the list is a code; one typed before the list
+  // existed is kept as it was.
+  if (location.country && COUNTRY_CODE.test(location.country)) {
+    location.country = location.country.toUpperCase();
+  }
+  const mapsLink = httpsUrl(entry.mapsUrl);
+  if (!mapsLink.ok) {
+    return { ok: false, field: 'mapsUrl' };
+  }
+  location.maps_url = mapsLink.url;
+
+  if (location.label !== 'custom') {
+    location.custom_label = null;
+  }
+  const placeKeys = ['venue_name', 'venue_address', 'city', 'country', 'maps_url'];
+  if (placeKeys.every((key) => location[key] === null)) {
+    return { ok: true, location: null };
+  }
+  if (location.label === 'custom' && !location.custom_label) {
+    return { ok: false, field: 'customLabel' };
+  }
+  return { ok: true, location };
+}
+
+// The keys of a stored location (migrations/004), in order.
+const LOCATION_KEYS = ['label', 'custom_label', 'venue_name', 'venue_address', 'city', 'country', 'maps_url'];
+
+// An event's locations as stored, each with every key (a blank one null),
+// so two versions compare equal whenever they say the same. An event saved
+// before the list existed has its one place in the venue columns, which
+// stand in as its only location.
+export function storedLocations(row) {
+  let locations = [];
+  if (Array.isArray(row.locations) && row.locations.length) {
+    locations = row.locations;
+  } else if (row.venue_name || row.venue_address || row.city || row.country) {
+    locations = [{ label: 'event', venue_name: row.venue_name, venue_address: row.venue_address, city: row.city, country: row.country }];
+  }
+  return locations.map((location) => {
+    const tidy = {};
+    for (const key of LOCATION_KEYS) {
+      tidy[key] = null;
+      if (location[key] !== undefined && location[key] !== null && location[key] !== '') {
+        tidy[key] = location[key];
+      }
+    }
+    return tidy;
+  });
+}
+
+// The main location: the first labelled as the event's own, or else the
+// first of all; null when there are none.
+export function mainLocation(locations) {
+  const eventPlace = locations.find((location) => location.label === 'event');
+  if (eventPlace) {
+    return eventPlace;
+  }
+  if (locations.length) {
+    return locations[0];
+  }
+  return null;
+}
+
+// The list of locations, at most MAX_LOCATIONS, each checked. The main one
+// is also copied to the venue_name, venue_address, city and country columns,
+// which the feed cards and the notices read (migrations/004).
+//
+// It returns the form field at the first problem, and sets
+// fields.badLocation to that location's place in the list, so the answer
+// can say which one (validateEvent).
+function readLocations(body, fields) {
+  let entries = body.locations;
+  if (entries === undefined || entries === null) {
+    entries = [];
+  }
+  if (!Array.isArray(entries) || entries.length > MAX_LOCATIONS) {
+    return 'locations';
+  }
+  const locations = [];
+  for (const [index, entry] of entries.entries()) {
+    const check = readLocation(entry);
+    if (!check.ok) {
+      fields.badLocation = index;
+      return check.field;
+    }
+    if (check.location) {
+      locations.push(check.location);
+    }
+  }
+  fields.locations = locations;
+
+  const main = mainLocation(locations);
+  for (const column of ['venue_name', 'venue_address', 'city', 'country']) {
+    if (main) {
+      fields[column] = main[column];
+    } else {
+      fields[column] = null;
+    }
   }
   return null;
 }
@@ -427,6 +650,9 @@ function readPrice(body, fields) {
   if (fields.currency && !/^[A-Z]{3}$/.test(fields.currency)) {
     return 'currency';
   }
+  if (fields.currency && CURRENCIES.size && !CURRENCIES.has(fields.currency)) {
+    return 'currency';
+  }
   return null;
 }
 
@@ -449,11 +675,12 @@ function readCapacity(body, fields) {
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readPlaceAndLinks, readPrice, readCapacity];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readCapacity];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
-// that is wrong.
+// that is wrong, plus location (its place in the list, from 0) when that
+// field is one location's.
 export function validateEvent(input) {
   let body = {};
   if (input && typeof input === 'object') {
@@ -463,7 +690,11 @@ export function validateEvent(input) {
   for (const step of VALIDATION_STEPS) {
     const badField = step(body, fields);
     if (badField !== null) {
-      return { ok: false, error: 'invalid_field', field: badField };
+      const problem = { ok: false, error: 'invalid_field', field: badField };
+      if (fields.badLocation !== undefined) {
+        problem.location = fields.badLocation;
+      }
+      return problem;
     }
   }
   return { ok: true, fields };

@@ -20,6 +20,9 @@ export const LIMITS = Object.freeze({
   recover: [5, 3600],
   notifyWrite: [30, 900],
   cover: [30, 3600],
+  // Google Maps links read for the edit form (api/manage/place.js), kept
+  // well inside Nominatim's one request a second.
+  placeLookup: [30, 600],
 });
 
 // Count one hit for each subject and answer 429 if any is over. Returns true

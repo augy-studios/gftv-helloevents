@@ -109,13 +109,45 @@ async function listEvents(response) {
   return ok(response, { events: rows.map((row) => managedSummary(row, now)) });
 }
 
-// "create": a new event from the checked fields.
-async function createEvent(request, response, fields, user) {
-  const { data, error } = await database()
-    .from(TABLES.events)
-    .insert({ ...fields, created_by: user.id })
-    .select(MANAGE_COLUMNS)
-    .single();
+// How many numbered addresses ("mega-con-2", "mega-con-3", ...) a new event
+// tries when the one made from its title is taken.
+const SLUG_TRIES = 20;
+
+// Whether the form named the event's address. The edit form no longer has
+// the field, so the address is made from the title (event-rules.js) and kept
+// from then on; only an API caller sends one.
+function slugGiven(event) {
+  if (event === null || event === undefined || typeof event !== 'object') {
+    return false;
+  }
+  if (event.slug === null || event.slug === undefined) {
+    return false;
+  }
+  return String(event.slug).trim() !== '';
+}
+
+// "create": a new event from the checked fields. An address made from the
+// title that another event already uses gets a number on the end instead;
+// one the caller chose is refused (slug_taken).
+async function createEvent(request, response, fields, user, { numberSlug }) {
+  let attempt = 1;
+  let data;
+  let error;
+  while (attempt <= SLUG_TRIES) {
+    let slug = fields.slug;
+    if (attempt > 1) {
+      slug = `${fields.slug}-${attempt}`;
+    }
+    ({ data, error } = await database()
+      .from(TABLES.events)
+      .insert({ ...fields, slug, created_by: user.id })
+      .select(MANAGE_COLUMNS)
+      .single());
+    if (!error || error.code !== '23505' || !numberSlug) {
+      break;
+    }
+    attempt += 1;
+  }
   if (error) {
     return answerSaveError(response, error);
   }
@@ -134,9 +166,15 @@ async function updateEvent(request, response, body, fields, user) {
   if (!before) {
     return fail(response, 404, 'not_found');
   }
+  // The address stays as it is unless the caller names a new one, so a new
+  // title never moves the event's page.
+  const changes = { ...fields };
+  if (!slugGiven(body.event)) {
+    changes.slug = before.slug;
+  }
   const { data, error } = await database()
     .from(TABLES.events)
-    .update(fields)
+    .update(changes)
     .eq('id', body.id)
     .select(MANAGE_COLUMNS)
     .maybeSingle();
@@ -156,11 +194,15 @@ async function updateEvent(request, response, body, fields, user) {
 async function saveEvent(request, response, body, user) {
   const check = validateEvent(body.event);
   if (!check.ok) {
-    return fail(response, 400, check.error, { field: check.field });
+    const detail = { field: check.field };
+    if (check.location !== undefined) {
+      detail.location = check.location;
+    }
+    return fail(response, 400, check.error, detail);
   }
   const fields = { ...check.fields, updated_by: user.id };
   if (body.action === 'create') {
-    return createEvent(request, response, fields, user);
+    return createEvent(request, response, fields, user, { numberSlug: !slugGiven(body.event) });
   }
   return updateEvent(request, response, body, fields, user);
 }
