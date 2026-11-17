@@ -326,7 +326,7 @@ test('push subscriptions are kept in Redis, checked, capped and removable', asyn
 });
 
 test('changing when or where an event happens tells the people going, by push and Telegram, with public fields only', async () => {
-  const event = addEvent({ slug: 'moving-meet', venue_name: 'Old Hall', is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
+  const event = addEvent({ slug: 'moving-meet', description: 'A meet that moves.', description_zh: '会搬家的聚会。', venue_name: 'Old Hall', is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
   const m = await member();
   await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
   await linkTelegram(m);

@@ -39,6 +39,7 @@ function row(over = {}) {
     kind: 'furmeet',
     summary: 'A meet',
     description: 'Long text',
+    description_zh: '长文',
     status: 'published',
     publish_at: null,
     starts_at: '2026-11-14T06:00:00.000Z',
@@ -116,6 +117,8 @@ test('wall-clock times convert to UTC and back in the event zone', () => {
 
 const form = (over = {}) => ({
   title: 'Big Con 2027',
+  description: 'All about it.',
+  descriptionZh: '关于大会。',
   kind: 'convention',
   status: 'draft',
   timezone: 'Asia/Singapore',
@@ -150,7 +153,9 @@ test('bad input is refused with the field named', () => {
   assert.equal(rules.validateEvent(form({ startDate: '' })).field, 'startDate');
   assert.equal(rules.validateEvent(form({ startDate: '2027-02-30' })).field, 'startDate');
   assert.equal(rules.validateEvent(form({ startTime: '25:00' })).field, 'startTime');
-  assert.equal(rules.validateEvent(form({ descriptionLang: 'fr' })).field, 'descriptionLang');
+  assert.equal(rules.validateEvent(form({ description: '  ' })).field, 'description', 'English is required');
+  assert.equal(rules.validateEvent(form({ descriptionZh: '' })).field, 'descriptionZh', 'and Chinese too');
+  assert.equal(rules.validateEvent(form({ descriptionZh: 'x'.repeat(8001) })).field, 'descriptionZh');
   assert.equal(rules.validateEvent(form({ priceType: 'paid', priceMin: '5', currency: 'ZZZ' })).field, 'currency');
   assert.equal(rules.validateEvent(form({ externalUrl: 'http://example.com/a' })).field, 'externalUrl');
   assert.equal(rules.validateEvent(form({ onlineUrl: 'javascript:alert(1)' })).field, 'onlineUrl');
@@ -325,7 +330,8 @@ test('the editor view round-trips the form fields, including staff notes', () =>
   assert.equal(view.staffNotes, 'internal only');
   assert.equal(view.startDate, '2026-11-14');
   assert.equal(view.startTime, '14:00');
-  assert.equal(view.descriptionLang, 'en');
+  assert.equal(view.description, 'Long text');
+  assert.equal(view.descriptionZh, '长文');
   // An event saved before the locations list has its place as its one location.
   assert.deepEqual(view.locations, [{ label: 'event', customLabel: '', venueName: 'Hall', venueAddress: '1 Secret Road', city: 'Singapore', country: 'Singapore', mapsUrl: '' }]);
   const again = rules.validateEvent(view);
@@ -337,9 +343,8 @@ test('the editor view round-trips the form fields, including staff notes', () =>
   // A day with its time to be confirmed comes back with the times blank,
   // and the end the API filled in blank too.
   const day = rules.validateEvent({ ...view, startTime: '', endDate: '', endTime: '' }).fields;
-  const dayView = ser.managedEvent(row({ ...day, description_lang: 'zh' }), now);
+  const dayView = ser.managedEvent(row(day), now);
   assert.deepEqual([dayView.startDate, dayView.startTime, dayView.endDate, dayView.endTime], ['2026-11-14', '', '', '']);
-  assert.equal(dayView.descriptionLang, 'zh');
   assert.equal(rules.validateEvent(dayView).fields.ends_at, day.ends_at);
 });
 

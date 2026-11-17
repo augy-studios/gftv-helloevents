@@ -83,7 +83,13 @@
 
             <div class="event-layout">
                 <section class="glass-card event-section">
-                    <h2 data-i18n="event.about">About this event</h2>
+                    <div class="row between">
+                        <h2 data-i18n="event.about">About this event</h2>
+                        <div class="lang-switch" id="descriptionSwitch" role="group" aria-label="Language" data-i18n-attr="aria-label:event.description-switch" hidden>
+                            <button class="lang-switch-btn" type="button" data-lang="en" aria-pressed="true" lang="en">English</button>
+                            <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文</button>
+                        </div>
+                    </div>
                     <p class="prewrap" id="eventDescription"></p>
                     <p class="muted small u-mt-1" id="eventOrganiser" hidden></p>
                 </section>

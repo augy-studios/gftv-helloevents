@@ -11,6 +11,7 @@ const NEW_EVENT = {
   slug: 'riverside-sketch-meet',
   summary: 'Bring a sketchbook; we draw the river and each other.',
   description: 'Pencils provided. We move indoors if it rains.',
+  descriptionZh: '提供铅笔。下雨就移到室内。',
   startDate: '2032-05-02',
   startTime: '15:00',
   endTime: '17:00',
@@ -56,7 +57,8 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(page.locator('#listBox')).toBeHidden();
   await expect(page.locator('#f-slug')).toHaveCount(0);
   await expect(page.locator('#f-timezone')).toHaveValue('Asia/Singapore');
-  await expect(page.locator('#f-descriptionLang')).toHaveValue('en');
+  await expect(page.locator('#descriptionSwitch [data-lang="en"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#f-descriptionZh')).toBeHidden();
   await expect(page.locator('#locationList .location-card')).toHaveCount(1);
   await expect(locationField(page, 0, 'label')).toHaveValue('event');
   // Singapore, Malaysia and Indonesia come first in the country list.
@@ -66,6 +68,9 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await page.locator('#f-title').fill(NEW_EVENT.title);
   await page.locator('#f-summary').fill(NEW_EVENT.summary);
   await page.locator('#f-description').fill(NEW_EVENT.description);
+  // The Chinese one is still blank: marked on the switcher.
+  await expect(page.locator('#descriptionSwitch [data-lang="zh"] .missing-mark')).toBeVisible();
+  await expect(page.locator('#descriptionSwitch [data-lang="en"] .missing-mark')).toBeHidden();
   await page.locator('#f-startDate').fill(NEW_EVENT.startDate);
   await page.locator('#f-startTime').fill(NEW_EVENT.startTime);
   await page.locator('#f-endTime').fill(NEW_EVENT.endTime);
@@ -75,6 +80,14 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await page.locator('#f-capacity').fill(NEW_EVENT.capacity);
   await page.locator('#f-status').selectOption('published');
   await page.locator('#f-staffNotes').fill(NEW_EVENT.staffNotes);
+  // Both descriptions are required: saving without the Chinese one opens it.
+  await page.locator('#editorSave').click();
+  await expect(page.locator('#editorError')).toHaveText('Check this field: Description (Chinese).');
+  await expect(page.locator('#f-descriptionZh')).toBeVisible();
+  await expect(page.locator('#f-descriptionZh')).toBeFocused();
+  await expect(page.locator('#f-description')).toBeHidden();
+  await page.locator('#f-descriptionZh').fill(NEW_EVENT.descriptionZh);
+  await expect(page.locator('#descriptionSwitch [data-lang="zh"] .missing-mark')).toBeHidden();
   await page.locator('#editorSave').click();
 
   await expect(page.locator('#manageNotice')).toHaveText('Saved.');
@@ -114,7 +127,11 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(page.locator('#eventView')).toBeVisible();
   await expect(page.locator('#eventTitle')).toHaveText(EDITED.title);
   await expect(page.locator('#eventSummary')).toHaveText(NEW_EVENT.summary);
+  await expect(page.locator('#eventDescription')).toHaveText(NEW_EVENT.description);
   await expect(page.locator('#eventDescription')).toHaveAttribute('lang', 'en');
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
+  await expect(page.locator('#eventDescription')).toHaveText(NEW_EVENT.descriptionZh);
+  await expect(page.locator('#eventDescription')).toHaveAttribute('lang', 'zh');
   await expect(page.locator('#factWhen')).toHaveText(/^Sun, May 2, 2032, 3:00\sPM to 5:00\sPM GMT\+8$/);
   await expect(page.locator('#factWhere')).toHaveText(`${EDITED.venueName}, Singapore, Singapore`);
   await expect(page.locator('#factGoing')).toHaveText('0 of 15 spaces taken');
@@ -126,13 +143,14 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(page.locator('#feed .event-card-title')).toHaveText([EVENTS.furmeet.title, EDITED.title, EVENTS.convention.title]);
 });
 
-test('an event with its times to be confirmed, a Chinese description and three locations', async ({ page }) => {
+test('an event with its times to be confirmed, both descriptions and three locations', async ({ page }) => {
   await openManage(page);
   await page.locator('#newEvent').click();
   await page.locator('#f-title').fill('Johor Day Trip');
-  await page.locator('#f-descriptionLang').selectOption('zh');
-  await expect(page.locator('#f-description')).toHaveAttribute('lang', 'zh');
-  await page.locator('#f-description').fill('一起去新山玩！');
+  await page.locator('#f-description').fill('A day out in Johor Bahru!');
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
+  await expect(page.locator('#f-descriptionZh')).toHaveAttribute('lang', 'zh');
+  await page.locator('#f-descriptionZh').fill('一起去新山玩！');
   // Dates only: the times are still to be confirmed.
   await page.locator('#f-startDate').fill('2032-06-12');
   await page.locator('#f-endDate').fill('2032-06-13');
@@ -165,7 +183,13 @@ test('an event with its times to be confirmed, a Chinese description and three l
   await page.goto('/e/johor-day-trip');
   await expect(page.locator('#eventView')).toBeVisible();
   await expect(page.locator('#factWhen')).toHaveText('Sat, Jun 12, 2032 to Sun, Jun 13, 2032 (time to be confirmed)');
+  await expect(page.locator('#eventDescription')).toHaveText('A day out in Johor Bahru!');
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
+  await expect(page.locator('#eventDescription')).toHaveText('一起去新山玩！');
   await expect(page.locator('#eventDescription')).toHaveAttribute('lang', 'zh');
+  // The pick is remembered for the next visit.
+  await page.reload();
+  await expect(page.locator('#eventDescription')).toHaveText('一起去新山玩！');
   await expect(page.locator('#factWhere .location-heading')).toHaveText(['Event location', 'Meeting location', 'Dinner']);
   await expect(page.locator('#factWhere')).toContainText('Mid Valley Southkey, Johor Bahru, Malaysia');
   await expect(page.locator('#factWhere')).toContainText('Woodlands Checkpoint, Singapore');
@@ -178,7 +202,8 @@ test('the event list shows ten events a page', async ({ page }) => {
   // Made through the API from the signed-in page, the way the form saves.
   await page.evaluate(async (count) => {
     for (let number = 1; number <= count; number += 1) {
-      const event = { title: `Paged Meet ${number}`, kind: 'furmeet', status: 'draft', priceType: 'free', startDate: '2033-01-01' };
+      const event = { title: `Paged Meet ${number}`, description: 'A meet.', descriptionZh: '聚会。', kind:
+ 'furmeet', status: 'draft', priceType: 'free', startDate: '2033-01-01' };
       const response = await fetch('/api/manage/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

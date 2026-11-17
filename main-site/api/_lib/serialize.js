@@ -168,14 +168,6 @@ export function passkeyView(row) {
 // Events
 // ---------------------------------------------------------------------------
 
-// The description's language: "zh" for Chinese, otherwise "en".
-function descriptionLanguage(row) {
-  if (row.description_lang === 'zh') {
-    return 'zh';
-  }
-  return 'en';
-}
-
 // A stored time split for the form's date and time inputs, in the event's
 // zone: { date: "2026-11-14", time: "14:00" }, the time '' while it is to be
 // confirmed, both '' when there is no time.
@@ -343,8 +335,8 @@ export function publicEventCard(row, now = Date.now()) {
 // The event page. viewer: { signedIn, going, canManage }. Only call this for
 // a released event, or for an editor.
 //
-// It is the card plus the price note, the spaces left, the description (and
-// its language), the organiser, the link and every location. People going
+// It is the card plus the price note, the spaces left, the descriptions (in
+// English and Chinese), the organiser, the link and every location. People going
 // and editors ("insiders") also get attendees-only addresses and map links,
 // and the online link; everyone else gets only a flag saying there is one
 // for attendees.
@@ -384,7 +376,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     price: priceView(row, { withNote: true }),
     ...spacesView(row, card.going),
     description: emptyToNull(row.description),
-    descriptionLang: descriptionLanguage(row),
+    descriptionZh: emptyToNull(row.description_zh),
     organiserName: emptyToNull(row.organiser_name),
     externalUrl: emptyToNull(row.external_url),
     where: {
@@ -461,7 +453,7 @@ export function managedEvent(row) {
     capacity: missingToNull(row.capacity),
     summary: emptyToBlank(row.summary),
     description: emptyToBlank(row.description),
-    descriptionLang: descriptionLanguage(row),
+    descriptionZh: emptyToBlank(row.description_zh),
     ...managedWhen(row),
     publishLocal: utcToWall(row.publish_at, row.timezone),
     isOnline: row.is_online === true,

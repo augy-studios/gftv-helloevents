@@ -6,11 +6,13 @@ import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel } from '../format.js';
+import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
 let event = null;
 let preview = false;
+let descriptionLang = preferredDescriptionLang();
 
 function renderCover() {
   const box = byId('eventCover');
@@ -88,6 +90,45 @@ function renderWhere() {
   whereElement.replaceChildren(...lines.map((line) => createElement('span', { class: 'fact-line' }, [line])));
 }
 
+// The description in the language picked on the switcher, which shows only
+// when the event has both (an event saved before both were required may
+// have one). The text is marked with its language, so the right font and
+// screen reader voice are used; the placeholder is the page's own language.
+function renderDescription() {
+  const texts = { en: event.description, zh: event.descriptionZh };
+  const box = byId('eventDescription');
+  let hasBoth = false;
+  if (texts.en && texts.zh) {
+    hasBoth = true;
+  }
+  byId('descriptionSwitch').hidden = !hasBoth;
+  let lang = descriptionLang;
+  if (!texts[lang]) {
+    lang = 'en';
+    if (!texts.en) {
+      lang = 'zh';
+    }
+  }
+  for (const button of descriptionSwitch.buttons) {
+    button.setAttribute('aria-pressed', String(button.dataset.lang === lang));
+  }
+  if (texts[lang]) {
+    box.lang = lang;
+    box.textContent = texts[lang];
+  } else {
+    box.removeAttribute('lang');
+    box.textContent = translate('event.no-description');
+  }
+}
+
+const descriptionSwitch = startLangSwitch(byId('descriptionSwitch'), (lang) => {
+  descriptionLang = lang;
+  rememberDescriptionLang(lang);
+  if (event) {
+    renderDescription();
+  }
+});
+
 // The RSVP box: "you're going", a sign-in link for visitors while RSVPs are
 // open, and one button that says Going or Cancel, plus the spaces line.
 function renderRsvp() {
@@ -143,17 +184,7 @@ function render() {
     summary = '';
   }
   byId('eventSummary').textContent = summary;
-  // The description is marked with the language it is written in, so the
-  // right font and screen reader voice are used; the placeholder is the
-  // page's own language.
-  let description = event.description;
-  if (description) {
-    byId('eventDescription').lang = event.descriptionLang;
-  } else {
-    description = translate('event.no-description');
-    byId('eventDescription').removeAttribute('lang');
-  }
-  byId('eventDescription').textContent = description;
+  renderDescription();
   byId('eventOrganiser').hidden = !event.organiserName;
   let organiserText = '';
   if (event.organiserName) {

@@ -13,6 +13,7 @@ import { startTools } from '../manage-tools.js';
 import { startTabs } from '../tabs.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations } from '../manage-locations.js';
+import { startLangSwitch } from '../lang-switch.js';
 
 const byId = (id) => document.getElementById(id);
 const form = byId('eventForm');
@@ -22,7 +23,7 @@ const PAGE_SIZE = 10;
 // The form's plain fields, by the name the server takes. The time zone,
 // currency and locations have their own handling below.
 const TEXT_FIELDS = [
-  'title', 'kind', 'summary', 'description', 'descriptionLang', 'organiserName', 'externalUrl',
+  'title', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
 ];
@@ -39,7 +40,6 @@ const BLANK = {
   kind: 'furmeet',
   status: 'draft',
   priceType: 'free',
-  descriptionLang: 'en',
   rsvpOpen: true,
   timezone: browserTimeZone,
   locations: [{ label: 'event' }],
@@ -139,9 +139,8 @@ function setForm(values) {
   for (const name of CHECK_FIELDS) {
     byId(`f-${name}`).checked = values[name] === true;
   }
-  if (!byId('f-descriptionLang').value) {
-    byId('f-descriptionLang').value = 'en';
-  }
+  descriptionSwitch.select('en');
+  markMissingDescriptions();
   fillTimeZoneSelect(byId('f-timezone'), values.timezone);
   byId('f-currency').value = currencyLabel(values.currency);
   let locations = values.locations;
@@ -220,19 +219,57 @@ function readForm() {
   return values;
 }
 
-// Fields that only mean something with another one switched on, and the
-// description marked with the language it is written in.
+// Fields that only mean something with another one switched on.
 function syncDependent() {
   const paid = byId('f-priceType').value === 'paid';
   for (const name of ['currency', 'priceMin', 'priceMax']) {
     byId(`f-${name}`).disabled = !paid;
   }
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
-  byId('f-description').lang = byId('f-descriptionLang').value;
+}
+
+// The two descriptions, both required: [language, text box, form field].
+// The switcher shows one at a time, and marks a language still blank.
+const DESCRIPTIONS = [
+  ['en', byId('f-description'), 'description'],
+  ['zh', byId('f-descriptionZh'), 'descriptionZh'],
+];
+const descriptionSwitch = startLangSwitch(byId('descriptionSwitch'), (lang) => {
+  for (const [boxLang, box] of DESCRIPTIONS) {
+    box.hidden = boxLang !== lang;
+    if (boxLang === lang) {
+      byId('descriptionLabel').htmlFor = box.id;
+    }
+  }
+});
+
+function markMissingDescriptions() {
+  for (const [lang, box] of DESCRIPTIONS) {
+    const button = descriptionSwitch.buttons.find((each) => each.dataset.lang === lang);
+    button.querySelector('.missing-mark').hidden = box.value.trim() !== '';
+  }
+}
+
+for (const [, box] of DESCRIPTIONS) {
+  box.addEventListener('input', markMissingDescriptions);
+}
+
+// Before saving: a blank description is shown, with the reason, rather
+// than sent. Returns true when both are written.
+function descriptionsWritten() {
+  const missing = DESCRIPTIONS.find(([, box]) => box.value.trim() === '');
+  if (!missing) {
+    return true;
+  }
+  const [lang, box, field] = missing;
+  descriptionSwitch.select(lang);
+  box.focus();
+  byId('editorError').textContent = translate('error.invalid_field', { field: translate(`manage.field.${field}`) });
+  return false;
 }
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-descriptionLang'].includes(event.target.id)) {
+  if (['f-priceType', 'f-isOnline'].includes(event.target.id)) {
     syncDependent();
   }
   // A currency typed as a code or a name shows as "SGD — Singapore Dollar".
@@ -341,7 +378,11 @@ function openNew() {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
+  if (!descriptionsWritten()) {
+    return;
+  }
   withBusy(byId('editorSave'), byId('editorError'), async () => {
+
     let body;
     if (editing) {
       body = { action: 'update', id: editing.id, event: readForm() };

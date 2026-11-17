@@ -7,8 +7,6 @@ export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
 export const PRICE_TYPES = ['free', 'paid', 'tba'];
 export const DEFAULT_TIMEZONE = 'Asia/Singapore';
-// The languages a description can be written in, picked next to the field.
-export const DESCRIPTION_LANGS = ['en', 'zh'];
 // What a location is: where the event is, where people meet first, or a
 // label the editor types.
 export const LOCATION_LABELS = ['event', 'meeting', 'custom'];
@@ -319,6 +317,7 @@ function readIdentity(body, fields) {
 const TEXT_FIELDS = [
   ['summary', 'summary', LIMITS.summary],
   ['description', 'description', LIMITS.description],
+  ['descriptionZh', 'description_zh', LIMITS.description],
   ['organiserName', 'organiser_name', LIMITS.organiserName],
   ['priceNote', 'price_note', LIMITS.priceNote],
   ['staffNotes', 'staff_notes', LIMITS.staffNotes],
@@ -339,21 +338,26 @@ function putText(target, column, value, maximumLength) {
   return { ok: true };
 }
 
-// Each free-text field, length-checked, then the description's language
-// (English when the form names none).
+// The descriptions every event must have: [form field, column]. One in
+// English and one in Chinese (migrations/005); the form switches between
+// them.
+const REQUIRED_DESCRIPTIONS = [
+  ['description', 'description'],
+  ['descriptionZh', 'description_zh'],
+];
+
+// Each free-text field, length-checked; then both descriptions, which may
+// not be blank.
 function readTextFields(body, fields) {
   for (const [formField, column, maximumLength] of TEXT_FIELDS) {
     if (!putText(fields, column, body[formField], maximumLength).ok) {
       return formField;
     }
   }
-  if (body.descriptionLang === undefined || body.descriptionLang === null || body.descriptionLang === '') {
-    fields.description_lang = 'en';
-  } else {
-    fields.description_lang = allowedOrNull(DESCRIPTION_LANGS, body.descriptionLang);
-  }
-  if (!fields.description_lang) {
-    return 'descriptionLang';
+  for (const [formField, column] of REQUIRED_DESCRIPTIONS) {
+    if (fields[column] === null) {
+      return formField;
+    }
   }
   return null;
 }

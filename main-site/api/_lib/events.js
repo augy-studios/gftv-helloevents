@@ -13,7 +13,7 @@ export const CARD_COLUMNS =
   'price_hidden, capacity, rsvp_open, gftvevents_attendees(count)';
 
 export const DETAIL_COLUMNS =
-  `${CARD_COLUMNS}, price_note, description, description_lang, venue_address, locations, address_attendees_only, online_url, ` +
+  `${CARD_COLUMNS}, price_note, description, description_zh, venue_address, locations, address_attendees_only, online_url, ` +
   'organiser_name, external_url';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:

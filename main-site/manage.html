@@ -100,14 +100,17 @@
                         </label>
                         <div class="field span-2">
                             <div class="field-head">
-                                <label for="f-description" data-i18n="manage.field.description">Description</label>
-                                <select id="f-descriptionLang" name="descriptionLang" aria-label="Language of the description" data-i18n-attr="aria-label:manage.field.descriptionLang">
-                                    <option value="en" lang="en">English</option>
-                                    <option value="zh" lang="zh">中文</option>
-                                </select>
+                                <label for="f-description" id="descriptionLabel" data-i18n="manage.field.description-both">Description</label>
+                                <div class="lang-switch" id="descriptionSwitch" role="group" aria-label="Language" data-i18n-attr="aria-label:manage.description-switch">
+                                    <button class="lang-switch-btn" type="button" data-lang="en" aria-pressed="true" lang="en">English<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
+                                    <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
+                                </div>
                             </div>
-                            <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en"></textarea>
-                            <span class="field-hint" data-i18n="manage.hint.description">Plain text. Line breaks are kept.</span>
+                            <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en" required aria-labelledby="descriptionEnName"></textarea>
+                            <textarea id="f-descriptionZh" name="descriptionZh" maxlength="8000" rows="6" lang="zh" required aria-labelledby="descriptionZhName" hidden></textarea>
+                            <span class="visually-hidden" id="descriptionEnName" data-i18n="manage.field.description">Description (English)</span>
+                            <span class="visually-hidden" id="descriptionZhName" data-i18n="manage.field.descriptionZh">Description (Chinese)</span>
+                            <span class="field-hint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Plain text. Line breaks are kept.</span>
                         </div>
                         <div class="field span-2 cover-field">
                             <span data-i18n="manage.field.cover">Cover picture</span>

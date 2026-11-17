@@ -293,7 +293,7 @@ test('members cannot manage; editors create and edit; only admins delete', async
     method: 'POST',
     body: {
       action: 'create',
-      event: { title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00', priceType: 'free', staffNotes: 'budget 5k', created_by: 'forged' },
+      event: { title: 'Mega Con', description: 'About the con.', descriptionZh: '关于大会。', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00', priceType: 'free', staffNotes: 'budget 5k', created_by: 'forged' },
     },
   });
   assert.equal(made.status, 200, JSON.stringify(made.json));
@@ -305,7 +305,7 @@ test('members cannot manage; editors create and edit; only admins delete', async
 
   // The same title again gets the next free address, since the form has no
   // address field; an address the caller chose is refused when it is taken.
-  const again = { title: 'Mega Con', kind: 'convention', status: 'draft', startDate: '2030-01-01', priceType: 'free' };
+  const again = { title: 'Mega Con', description: 'About the con.', descriptionZh: '关于大会。', kind: 'convention', status: 'draft', startDate: '2030-01-01', priceType: 'free' };
   const second = await ed.call(manage, { method: 'POST', body: { action: 'create', event: again } });
   assert.equal(second.status, 200, JSON.stringify(second.json));
   assert.equal(second.json.event.slug, 'mega-con-2');

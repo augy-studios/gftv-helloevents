@@ -142,7 +142,7 @@ const CARD_TBA_FREE = [
 const LOCATION = ['label', 'customLabel', 'venueName', 'city', 'country', 'address', 'mapsUrl'];
 // The event page: the card, plus what only the page shows.
 const DETAIL = [
-  ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionLang', 'organiserName', 'externalUrl',
+  ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...nest('viewer', ['signedIn', 'going', 'canManage']),
 ];
@@ -152,7 +152,7 @@ const SUMMARY = ['id', 'slug', 'title', 'kind', 'status', 'released', 'startsAt'
 const EDITOR_LOCATION = ['label', 'customLabel', 'venueName', 'venueAddress', 'city', 'country', 'mapsUrl'];
 const EDITOR = [
   'id', 'slug', 'title', 'kind', 'status', 'datesHidden', 'timezone', 'capacity', 'summary', 'description',
-  'descriptionLang', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
+  'descriptionZh', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'rsvpOpen', 'staffNotes',
 ];
@@ -398,7 +398,7 @@ test('the event list, the edit form, attendees and the cover answer only what /m
     body: {
       action: 'create',
       event: {
-        title: 'Mega Con', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00',
+        title: 'Mega Con', description: 'About the con.', descriptionZh: '关于大会。', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00',
         priceType: 'free', capacity: '50', locations: [{ label: 'event', venueName: 'Expo Hall', city: 'Singapore', country: 'SG' }],
       },
     },
