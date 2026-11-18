@@ -22,6 +22,13 @@ const TEXT_KEYS = ['customLabel', 'venueName', 'venueAddress', 'city', 'mapsUrl'
 
 const byId = (id) => document.getElementById(id);
 const list = () => byId('locationList');
+
+// Tells the edit form the locations changed without a field being left
+// (filled in from a link, or a card removed), so it autosaves them.
+export const LOCATIONS_CHANGED = 'locations-changed';
+function announceChange() {
+  list().dispatchEvent(new CustomEvent(LOCATIONS_CHANGED, { bubbles: true }));
+}
 // Gives each card's link input an id of its own, for its label.
 let cardsMade = 0;
 
@@ -86,6 +93,7 @@ async function fillFromLink(card) {
     card.dataset.lookedUp = place.mapsUrl;
     status.textContent = translate('manage.location-filled');
     status.classList.add('ok');
+    announceChange();
   });
 }
 
@@ -179,6 +187,7 @@ function locationCard(values) {
     } else {
       byId('locationAdd').focus();
     }
+    announceChange();
   });
   return card;
 }

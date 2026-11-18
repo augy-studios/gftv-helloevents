@@ -6,4 +6,7 @@ Disallow: /login
 Disallow: /account
 Disallow: /manage
 Disallow: /api/
+# Event link previews' pictures (api/events/embed-image.js): X's crawler
+# follows this file, and the longer rule wins.
+Allow: /api/events/embed-image
 Disallow: /assets/i18n/

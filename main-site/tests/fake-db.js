@@ -28,6 +28,7 @@ const DEFAULTS = {
     capacity: null, rsvp_open: true, staff_notes: null, created_by: null, updated_by: null, updated_at: now(),
     description_zh: null, start_time_tbc: false, end_time_tbc: false, locations: [],
     cover_image_url: null, cover_image_path: null, announced_at: null,
+    notice_base: null, notice_due_at: null,
   }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
@@ -327,6 +328,11 @@ export function createFakeDb() {
         if (objects.has(key) && !opts.upsert) return { data: null, error: { message: 'The resource already exists' } };
         objects.set(key, { body, contentType: opts.contentType });
         return { data: { path }, error: null };
+      },
+      async download(path) {
+        const object = objects.get(`${bucket}/${path}`);
+        if (!object) return { data: null, error: { message: 'Object not found' } };
+        return { data: new Blob([object.body]), error: null };
       },
       async remove(paths) {
         paths.forEach((p) => objects.delete(`${bucket}/${p}`));

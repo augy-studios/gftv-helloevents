@@ -15,6 +15,9 @@
         },
         "api/manage/events.js": {
             "maxDuration": 60
+        },
+        "api/events/page.js": {
+            "includeFiles": "event.html"
         }
     },
     "crons": [
@@ -30,7 +33,7 @@
     "rewrites": [
         {
             "source": "/e/:slug([a-z0-9-]{3,60})",
-            "destination": "/event.html"
+            "destination": "/api/events/page?slug=:slug"
         }
     ],
     "headers": [

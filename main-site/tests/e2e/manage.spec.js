@@ -1,7 +1,8 @@
 // Manage, for a staff editor: sign in with the authenticator app, create an
 // event, edit it, and see the change on the public page and in the feed;
-// an event with its times to be confirmed and several locations; and the
-// staff tools in their own tabs.
+// an event with its times to be confirmed and several locations; the form
+// saving itself as each field is left; and the event list, the edit form
+// and the staff tools in their own tabs.
 
 import { test, expect, serverOrigin, signInAsStaff } from './fixtures.js';
 import { EVENTS, STAFF } from './seed.js';
@@ -34,6 +35,10 @@ async function openManage(page) {
   await expect(page.locator('#listBox')).toHaveAttribute('aria-busy', 'false');
 }
 
+// The autosave pill at the bottom of the edit form.
+const status = (page) => page.locator('#autosaveStatus');
+const SAVED = 'All changes saved';
+
 // The nth location card's field.
 const locationField = (page, index, key) => page.locator('#locationList .location-card').nth(index).locator(`[data-key="${key}"]`);
 
@@ -51,10 +56,14 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   // Fewer than ten events: one page, no pager.
   await expect(page.locator('#listPager')).toBeHidden();
 
-  // Create. The form takes the list's place; there is no address field.
+  // Create. The form opens in its own tab; there is no address field and no
+  // Save button.
   await page.locator('#newEvent').click();
   await expect(page.locator('#editorTitle')).toHaveText('New event');
+  await expect(page.getByRole('tab', { name: 'Manage event' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#listBox')).toBeHidden();
+  await expect(page.locator('#editorSave')).toHaveCount(0);
+  await expect(status(page)).toHaveText(/^Saves by itself once it has a title/);
   await expect(page.locator('#f-slug')).toHaveCount(0);
   await expect(page.locator('#f-timezone')).toHaveValue('Asia/Singapore');
   await expect(page.locator('#descriptionSwitch [data-lang="en"]')).toHaveAttribute('aria-pressed', 'true');
@@ -80,18 +89,21 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await page.locator('#f-capacity').fill(NEW_EVENT.capacity);
   await page.locator('#f-status').selectOption('published');
   await page.locator('#f-staffNotes').fill(NEW_EVENT.staffNotes);
-  // Both descriptions are required: saving without the Chinese one opens it.
-  await page.locator('#editorSave').click();
-  await expect(page.locator('#editorError')).toHaveText('Check this field: Description (Chinese).');
-  await expect(page.locator('#f-descriptionZh')).toBeVisible();
-  await expect(page.locator('#f-descriptionZh')).toBeFocused();
+  await page.locator('#f-staffNotes').blur();
+  // Both descriptions are needed: without the Chinese one, nothing is saved yet.
+  await expect(status(page)).toHaveText(/^Saves by itself once it has a title/);
+  await expect(page.locator('#editorView')).toBeHidden();
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
   await expect(page.locator('#f-description')).toBeHidden();
   await page.locator('#f-descriptionZh').fill(NEW_EVENT.descriptionZh);
   await expect(page.locator('#descriptionSwitch [data-lang="zh"] .missing-mark')).toBeHidden();
-  await page.locator('#editorSave').click();
+  // Leaving the field creates the event.
+  await page.locator('#f-descriptionZh').blur();
 
-  await expect(page.locator('#manageNotice')).toHaveText('Saved.');
+  await expect(status(page)).toHaveText(SAVED);
   await expect(page.locator('#editorTitle')).toHaveText(`Editing ${NEW_EVENT.title}`);
+  // The open event is kept in the address.
+  await expect(page).toHaveURL(new RegExp(`/manage\\?slug=${NEW_EVENT.slug}#editor$`));
   await expect(page.locator('#editorError')).toHaveText('');
   // The address was made from the title.
   await expect(page.locator('#editorView')).toHaveAttribute('href', `/e/${NEW_EVENT.slug}`);
@@ -100,21 +112,26 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   // An end time with no end date ends on the start date.
   await expect(page.locator('#f-endDate')).toHaveValue(NEW_EVENT.startDate);
   await expect(page.locator('#attendeesTitle')).toHaveText('0 people going');
+  // The list, in its own tab, has the new event.
+  await page.getByRole('tab', { name: 'Event list' }).click();
   const newRow = list.locator('li', { hasText: NEW_EVENT.title });
   await expect(newRow.locator('.chip')).toHaveText('Published');
+  await page.getByRole('tab', { name: 'Manage event' }).click();
+  await expect(page.locator('#eventForm')).toBeVisible();
 
-  // Edit. A new title keeps the address.
+  // Edit. Each field saves as it is left; a new title keeps the address.
   await page.locator('#f-title').fill(EDITED.title);
   await locationField(page, 0, 'venueName').fill(EDITED.venueName);
-  await page.locator('#editorSave').click();
+  await locationField(page, 0, 'venueName').blur();
+  await expect(status(page)).toHaveText(SAVED);
   await expect(page.locator('#editorTitle')).toHaveText(`Editing ${EDITED.title}`);
-  await expect(list.locator('.item-title', { hasText: EDITED.title })).toHaveCount(1);
   await expect(page.locator('#editorView')).toHaveAttribute('href', `/e/${NEW_EVENT.slug}`);
 
   // Opened again from the list, the form holds the saved values.
   await page.locator('#editorClose').click();
   await expect(page.locator('#eventForm')).toBeHidden();
   await expect(page.locator('#listBox')).toBeVisible();
+  await expect(list.locator('.item-title', { hasText: EDITED.title })).toHaveCount(1);
   await page.getByRole('button', { name: `Edit ${EDITED.title}` }).click();
   await expect(page.locator('#editorTitle')).toHaveText(`Editing ${EDITED.title}`);
   await expect(locationField(page, 0, 'venueName')).toHaveValue(EDITED.venueName);
@@ -170,9 +187,9 @@ test('an event with its times to be confirmed, both descriptions and three locat
   await expect(locationField(page, 2, 'customLabel')).toBeVisible();
   await locationField(page, 2, 'customLabel').fill('Dinner');
   await locationField(page, 2, 'venueName').fill('Tepian Tebrau');
+  // A pick from a list saves at once.
   await page.locator('#f-status').selectOption('published');
-  await page.locator('#editorSave').click();
-  await expect(page.locator('#manageNotice')).toHaveText('Saved.');
+  await expect(status(page)).toHaveText(SAVED);
 
   // The times come back blank, as they were left.
   await expect(page.locator('#f-startTime')).toHaveValue('');
@@ -232,26 +249,80 @@ test('the event list shows ten events a page', async ({ page }) => {
   await expect(rows).toHaveCount(10);
 });
 
-test('the staff tools are tabs, and the open tab is kept in the address', async ({ page }) => {
+test('a change saves itself when its field is left, and a refused one says why', async ({ page }) => {
+  const event = EVENTS.furmeet;
+  await openManage(page);
+  await page.getByRole('button', { name: `Edit ${event.title}` }).click();
+  await expect(page.locator('#editorTitle')).toHaveText(`Editing ${event.title}`);
+  await expect(status(page)).toHaveText(SAVED);
+
+  // Typing alone saves nothing; leaving the field does. This event was
+  // written before Chinese descriptions were needed, so it says that first.
+  const summary = 'A walk along the bay, then dinner and dessert.';
+  await page.locator('#f-summary').fill(summary);
+  await expect(status(page)).toHaveText(SAVED);
+  await page.locator('#f-organiserName').click();
+  await expect(status(page)).toHaveText('Not saved: Check this field: Description (Chinese).');
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
+  await page.locator('#f-descriptionZh').fill('在喷泉集合。');
+  await page.locator('#f-organiserName').click();
+  await expect(status(page)).toHaveText(SAVED);
+  // A box ticked saves at once.
+  await page.locator('#f-priceHidden').check();
+  await expect(status(page)).toHaveText(SAVED);
+
+  // A blank title is refused, with the reason, and kept in the form.
+  await page.locator('#f-title').fill('');
+  await page.locator('#f-summary').click();
+  await expect(status(page)).toHaveText('Not saved: Check this field: Title.');
+  await expect(page.locator('#f-title')).toHaveValue('');
+  // Put right, it saves.
+  await page.locator('#f-title').fill(event.title);
+  await page.locator('#f-summary').click();
+  await expect(status(page)).toHaveText(SAVED);
+
+  // A reload opens the same event, from the address, with the saved values.
+  await page.reload();
+  await expect(page.locator('#editorTitle')).toHaveText(`Editing ${event.title}`);
+  await expect(page.locator('#f-summary')).toHaveValue(summary);
+  await expect(page.locator('#f-priceHidden')).toBeChecked();
+
+  // Closed, the Manage event tab says nothing is open.
+  await page.locator('#editorClose').click();
+  await expect(page).toHaveURL(/\/manage#events$/);
+  await page.getByRole('tab', { name: 'Manage event' }).click();
+  await expect(page.locator('#editorEmpty')).toBeVisible();
+  await expect(page.locator('#eventForm')).toBeHidden();
+  await page.locator('#editorEmptyNew').click();
+  await expect(page.locator('#editorTitle')).toHaveText('New event');
+});
+
+test('the event list, the edit form and the staff tools are tabs, and the open tab is kept in the address', async ({ page }) => {
   await openManage(page);
   const tabs = page.getByRole('tablist');
-  await expect(tabs.getByRole('tab')).toHaveText(['Events', 'Venue sign-ups']);
+  await expect(tabs.getByRole('tab')).toHaveText(['Event list', 'Manage event', 'Venue sign-ups']);
   await expect(page.locator('#allowanceBox')).toBeHidden();
+  await expect(page.locator('#editorEmpty')).toBeHidden();
 
   await tabs.getByRole('tab', { name: 'Venue sign-ups' }).click();
   await expect(page.locator('#allowanceBox')).toBeVisible();
   await expect(page.locator('#listBox')).toBeHidden();
   await expect(page).toHaveURL(/#signups$/);
 
-  // The arrow keys move between the tabs.
+  // The arrow keys move between the tabs. With no event open, the edit tab
+  // says so.
   await page.keyboard.press('ArrowLeft');
-  await expect(tabs.getByRole('tab', { name: 'Events' })).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.getByRole('tab', { name: 'Manage event' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#editorEmpty')).toBeVisible();
+  await expect(page.locator('#listBox')).toBeHidden();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.getByRole('tab', { name: 'Event list' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#listBox')).toBeVisible();
 
   // Opened again at #signups, that tab opens.
   await page.goto('/manage#signups');
   await expect(page.locator('#allowanceBox')).toBeVisible();
-  // New event goes back to the Events tab.
+  // New event opens the edit tab.
   await page.locator('#newEvent').click();
   await expect(page.locator('#eventForm')).toBeVisible();
   await expect(page.locator('#allowanceBox')).toBeHidden();

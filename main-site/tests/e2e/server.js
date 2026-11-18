@@ -4,7 +4,7 @@
 //
 // It stands in for Vercel, closely enough for a browser:
 //   - main-site/ is served as static files with vercel.json's cleanUrls,
-//     trailingSlash, rewrites (/e/<slug> -> event.html) and headers, so the
+//     trailingSlash, rewrites (/e/<slug> -> api/events/page.js) and headers, so the
 //     real Content-Security-Policy applies to every page;
 //   - /api/<path> runs the real handler in api/<path>.js, with the request
 //     shaped the way Vercel's Node runtime shapes it (req.query, req.cookies,
@@ -207,7 +207,21 @@ function configured(key) {
   return [];
 }
 
-const REWRITES = configured('rewrites').map((rule) => ({ source: sourceToRegExp(rule.source), destination: rule.destination }));
+const REWRITES = configured('rewrites').map((rule) => ({
+  source: sourceToRegExp(rule.source),
+  names: [...rule.source.matchAll(/:(\w+)/g)].map((match) => match[1]),
+  destination: rule.destination,
+}));
+
+// A rewrite's destination with the source's named parts (":slug") filled in.
+function rewritten(rewrite, pathname) {
+  const values = rewrite.source.exec(pathname).slice(1);
+  let destination = rewrite.destination;
+  rewrite.names.forEach((name, index) => {
+    destination = destination.replaceAll(`:${name}`, encodeURIComponent(values[index]));
+  });
+  return destination;
+}
 const HEADER_RULES = configured('headers').map((rule) => ({ source: sourceToRegExp(rule.source), headers: rule.headers }));
 
 function applyConfiguredHeaders(pathname, response) {
@@ -333,7 +347,13 @@ async function serveStatic(request, response, url) {
   if (!file) {
     for (const rewrite of REWRITES) {
       if (rewrite.source.test(pathname)) {
-        file = await fileFor(rewrite.destination);
+        const destination = rewritten(rewrite, pathname);
+        // A rewrite to a function (/e/<slug>) runs it, as Vercel does.
+        if (destination.startsWith('/api/')) {
+          await serveApi(request, response, new URL(destination, 'http://localhost'));
+          return;
+        }
+        file = await fileFor(destination);
         break;
       }
     }

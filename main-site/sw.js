@@ -12,9 +12,11 @@
 // What is never cached: /api/ (answers are per person and change, and the
 // feed must show new events), and other origins (cover pictures, Google
 // Analytics, Turnstile). Event pages at /e/<slug> are the event.html shell,
-// which fetches the event itself.
+// which fetches the event itself. (The network copy of /e/<slug> carries the
+// event's link-preview tags, api/events/page.js; only apps reading the link
+// need those, and they have no service worker.)
 
-const VERSION = '2026-11-18.2';
+const VERSION = '2026-11-18.3';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 

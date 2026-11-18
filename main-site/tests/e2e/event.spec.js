@@ -1,7 +1,7 @@
-// One event's page, /e/<slug> (served from event.html by vercel.json's
-// rewrite), as someone who is not signed in sees it.
+// One event's page, /e/<slug> (event.html, with the event's preview tags, from
+// api/events/page.js by vercel.json's rewrite), as someone not signed in sees it.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, serverOrigin } from './fixtures.js';
 import { EVENTS } from './seed.js';
 
 test('an event page shows the public details, keeps the attendees-only address back, and offers sign-in to RSVP', async ({ page }) => {
@@ -38,4 +38,19 @@ test('an event page shows the public details, keeps the attendees-only address b
   // What only people going and editors may see is not on the page at all.
   await expect(page.getByText(event.venue_address)).toHaveCount(0);
   await expect(page.getByText(event.staff_notes)).toHaveCount(0);
+});
+
+test('an event link unfurls as the event: the page carries its own preview tags, a draft the site ones', async ({ page }) => {
+  const event = EVENTS.furmeet;
+  const answer = await page.request.get(`/e/${event.slug}`);
+  expect(answer.status()).toBe(200);
+  const html = await answer.text();
+  expect(html).toContain(`<title>${event.title} | GFTV HelloEvents</title>`);
+  expect(html).toContain(`<meta property="og:title" content="${event.title}">`);
+  expect(html).toContain(`<meta property="og:url" content="${serverOrigin()}/e/${event.slug}">`);
+  expect(html).toMatch(new RegExp(`<meta property="og:description" content="Sat, 13 Mar, 2:00 pm SGT · Marina Bay Sands Event Plaza, Singapore\\. ${event.summary}">`));
+
+  const draft = await (await page.request.get(`/e/${EVENTS.draft.slug}`)).text();
+  expect(draft).toContain('<meta property="og:title" content="GFTV HelloEvents">');
+  expect(draft).not.toContain(EVENTS.draft.title);
 });

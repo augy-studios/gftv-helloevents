@@ -1026,8 +1026,39 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 /* manage */
 .manage-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; padding: 1rem 0 1.25rem; }
 .manage-head h1 { font-size: 1.75rem; font-weight: 700; }
-#listBox, .editor { max-width: none; }
+#listBox, #editorEmpty, .editor { max-width: none; }
 .editor { margin-bottom: 1rem; }
+/* Autosave (js/pages/manage.js): a small pill that sticks to the bottom of
+   the screen while the edit form is in view, saying whether the changes are
+   saved. Empty, it takes no room. */
+.autosave-bar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+  pointer-events: none;
+}
+.autosave-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: 0 4px 16px var(--shadow);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  pointer-events: auto;
+}
+.autosave-status:empty { display: none; }
+.autosave-status .spinner { --spinner-size: 0.9rem; }
+.autosave-status.is-saved { color: var(--ok); }
+.autosave-status.is-failed { background: var(--callout-danger-bg); color: var(--danger); border-color: transparent; border-radius: var(--radius-sm); }
 .editor h2 { font-size: 1.25rem; font-weight: 700; }
 .editor fieldset { border: 0; margin-top: 1.25rem; }
 .editor legend {

@@ -62,18 +62,42 @@
         <div class="callout ok" id="manageNotice" role="status"></div>
 
         <div class="tabs" role="tablist" id="manageTabs" aria-label="Manage" data-i18n-attr="aria-label:manage.tabs-label" hidden>
-            <button class="tab" type="button" role="tab" id="tab-events" data-tab="events" aria-controls="panel-events" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="manage.tab.events">Events</span></button>
+            <button class="tab" type="button" role="tab" id="tab-events" data-tab="events" aria-controls="panel-events" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="manage.tab.events">Event list</span></button>
+            <button class="tab" type="button" role="tab" id="tab-editor" data-tab="editor" aria-controls="panel-editor" aria-selected="false" tabindex="-1" hidden><span data-icon="edit"></span><span data-i18n="manage.tab.editor">Manage event</span></button>
             <button class="tab" type="button" role="tab" id="tab-signups" data-tab="signups" aria-controls="panel-signups" aria-selected="false" tabindex="-1" hidden><span data-icon="users"></span><span data-i18n="admin.allowance-title">Venue sign-ups</span></button>
             <button class="tab" type="button" role="tab" id="tab-filter" data-tab="filter" aria-controls="panel-filter" aria-selected="false" tabindex="-1" hidden><span data-icon="alert"></span><span data-i18n="admin.filter-title">Name filter</span></button>
             <button class="tab" type="button" role="tab" id="tab-reset" data-tab="reset" aria-controls="panel-reset" aria-selected="false" tabindex="-1" hidden><span data-icon="key"></span><span data-i18n="manage.tab.reset">Password resets</span></button>
         </div>
 
         <div class="tab-panel" role="tabpanel" id="panel-events" aria-labelledby="tab-events">
+            <section class="glass-card page-card" id="listBox" aria-busy="true">
+                <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
+                <ul class="item-list" id="eventList"></ul>
+                <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
+                <nav class="pager" id="listPager" aria-label="Pages" data-i18n-attr="aria-label:manage.pages" hidden>
+                    <button class="btn btn-small" type="button" id="pagePrev"><span data-i18n="manage.page-prev">Previous</span></button>
+                    <span class="muted small" id="pageInfo" aria-live="polite"></span>
+                    <button class="btn btn-small" type="button" id="pageNext"><span data-i18n="manage.page-next">Next</span></button>
+                </nav>
+            </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-editor" aria-labelledby="tab-editor" hidden>
+            <section class="glass-card page-card" id="editorEmpty">
+                <h2 data-i18n="manage.editor-empty-title">No event open</h2>
+                <p class="muted" data-i18n="manage.editor-empty-lede">Pick an event in the event list to edit it, or make a new one.</p>
+                <div class="actions inline">
+                    <button class="btn" type="button" id="editorToList"><span data-icon="calendar"></span><span data-i18n="manage.editor-to-list">Go to the event list</span></button>
+                    <button class="btn btn-primary" type="button" id="editorEmptyNew"><span data-icon="plus"></span><span data-i18n="manage.new">New event</span></button>
+                </div>
+            </section>
+
             <form id="eventForm" class="glass-card page-card editor" novalidate hidden aria-labelledby="editorTitle">
                 <div class="row between">
                     <h2 id="editorTitle"></h2>
                     <button class="btn btn-small btn-quiet" type="button" id="editorClose"><span data-icon="close"></span><span data-i18n="common.close">Close</span></button>
                 </div>
+                <p class="muted small" data-i18n="manage.autosave-lede">Changes save by themselves as soon as you leave a field.</p>
 
                 <fieldset>
                     <legend data-i18n="manage.section.basics">Basics</legend>
@@ -116,7 +140,7 @@
                             <span data-i18n="manage.field.cover">Cover picture</span>
                             <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
                             <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">A wide picture works best. Your browser turns it into a small WebP before it is uploaded.</p>
-                            <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">Save the event first, then add a picture.</p>
+                            <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">A picture can be added once the event has saved.</p>
                             <div class="actions inline">
                                 <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
                                 <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
@@ -259,7 +283,6 @@
 
                 <div class="callout danger" id="editorError" role="alert"></div>
                 <div class="actions inline">
-                    <button class="btn btn-primary" type="submit" id="editorSave"><span data-icon="check"></span><span data-i18n="manage.save">Save</span></button>
                     <a class="btn" id="editorView" target="_blank" rel="noopener" hidden><span data-icon="external"></span><span data-i18n="manage.view">View page</span></a>
                     <button class="btn btn-danger" type="button" id="editorDelete" hidden><span data-icon="trash"></span><span data-i18n="manage.delete">Delete</span></button>
                 </div>
@@ -268,18 +291,12 @@
                     <h3 id="attendeesTitle" class="section-label"></h3>
                     <ul class="item-list" id="attendeeList"></ul>
                 </section>
-            </form>
 
-            <section class="glass-card page-card" id="listBox" aria-busy="true">
-                <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
-                <ul class="item-list" id="eventList"></ul>
-                <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
-                <nav class="pager" id="listPager" aria-label="Pages" data-i18n-attr="aria-label:manage.pages" hidden>
-                    <button class="btn btn-small" type="button" id="pagePrev"><span data-i18n="manage.page-prev">Previous</span></button>
-                    <span class="muted small" id="pageInfo" aria-live="polite"></span>
-                    <button class="btn btn-small" type="button" id="pageNext"><span data-i18n="manage.page-next">Next</span></button>
-                </nav>
-            </section>
+                <!-- Sticks to the bottom of the screen while the form is in view. -->
+                <div class="autosave-bar">
+                    <p class="autosave-status" id="autosaveStatus" role="status" aria-live="polite"></p>
+                </div>
+            </form>
         </div>
 
         <div class="tab-panel" role="tabpanel" id="panel-signups" aria-labelledby="tab-signups" hidden>

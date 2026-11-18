@@ -169,3 +169,45 @@ export async function deleteCover(path) {
     console.warn('[helloevents] cover delete:', path, error.message);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Link previews (api/events/page.js, api/events/embed-image.js). The cover is
+// stored as WebP, which not every app that unfurls links reads, so previews
+// get it as a JPEG, the whole picture with no cropping.
+// ---------------------------------------------------------------------------
+
+// The longest side of a preview picture: what Discord, Telegram and X show
+// at their largest.
+const EMBED_SIDE = 1200;
+
+// A stored cover's own name ("<random>" of "<event id>/<random>.webp"), which
+// changes with every upload. Preview picture addresses carry it, so an app
+// that cached the old picture fetches the new one. '' when there is none.
+export function coverVersion(path) {
+  if (!path || !COVER_PATH.test(path)) {
+    return '';
+  }
+  return path.slice(path.indexOf('/') + 1, -'.webp'.length);
+}
+
+// The stored cover's bytes, or null when it is gone from the bucket.
+export async function readCover(path) {
+  if (!path || !COVER_PATH.test(path)) {
+    return null;
+  }
+  const { data, error } = await database().storage.from(TABLES.coversBucket).download(path);
+  if (error || !data) {
+    return null;
+  }
+  return Buffer.from(await data.arrayBuffer());
+}
+
+// The cover as a preview picture: a JPEG, its longest side at most
+// EMBED_SIDE, on white where it had transparency.
+export async function embedPicture(bytes) {
+  return sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' })
+    .resize(EMBED_SIDE, EMBED_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 82, mozjpeg: true })
+    .toBuffer();
+}

@@ -50,11 +50,24 @@ the functions with the service role key. No Supabase Auth, no request signing.
   size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
   Supabase Storage bucket `gftvevents_covers`. The event keeps the object's path; the old picture is
   deleted when it is replaced or the event is deleted.
+- **Managing events** at `/manage`: the event list and the edit form are separate tabs (Event list,
+  Manage event). The form saves itself whenever a field is left, a list option picked or a box
+  ticked; a pill at the bottom says "Saving…", "All changes saved" or why a change was refused.
+  A new event is created once it has a title, both descriptions and a start date. The open event
+  is kept in the address (`/manage?slug=...#editor`), so a reload reopens it.
+- **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
+  own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
+  link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
+  Timings' share pages). The cover goes out as a JPEG from `api/events/embed-image.js`, since not
+  every app reads WebP. Drafts and events not released yet get the site's own tags.
 - **Notifications**, chosen on the account page: changes of time or place (or a cancellation) of
   events you are going to, a reminder the day before, and, off by default, new events. They go by
   Web Push to the browsers you switch on (subscriptions stored in Upstash Redis) and, if you choose,
   to your linked Telegram chat. A notice carries only what the public event page shows. Reminders
-  and new-event notices come from the hourly cron `/api/cron/notify`.
+  and new-event notices come from the hourly cron `/api/cron/notify`. Because the edit form
+  autosaves field by field, change notices are batched: they go out about 45 seconds after the
+  editor's last save, once, comparing the event with how it was before the first change
+  (migrations/006); the hourly cron sends any left over.
 
 ## Setup, in order
 
@@ -63,7 +76,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 006) in turn.
+   Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
+   event needs its two columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
@@ -75,7 +90,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    connect it to this project. Vercel sets `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
    Redeploy afterwards.
 4. **Vercel project.** Root directory `main-site`. `vercel.json` sets the region (sin1), the
-   `/e/<slug>` rewrite, security headers, the daily cleanup cron and the hourly notification cron.
+   `/e/<slug>` rewrite to the link-preview function (which bundles `event.html`), security headers, the daily cleanup cron and the hourly notification cron.
 5. **Domain.** Add `events.globalfurry.tv` to the Vercel project. Passkeys are bound to this
    hostname (`SITE_URL`), so they do not work on preview URLs.
 6. **Telegram (optional).** Make a new bot with @BotFather (not the OneLink one: a bot has one

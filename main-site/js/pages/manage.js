@@ -1,7 +1,16 @@
-// Editors: the events in a list, ten to a page, and one form to create or
-// edit an event, in the Events tab; the staff tools in the other tabs
-// (manage-tools.js). The server checks the role on every request; hiding
-// things here is only tidiness.
+// Editors: the events in a list, ten to a page, in the Event list tab; one
+// form to create or edit an event in the Manage event tab; the staff tools in
+// the other tabs (manage-tools.js). The server checks the role on every
+// request; hiding things here is only tidiness.
+//
+// The form saves itself: whenever the editor leaves a field (or picks from a
+// list, ticks a box, removes a location or fills one from a link) and the
+// form differs from what was last saved, the whole form is sent, one save at
+// a time. A new event is created as soon as it has what the server needs (a
+// title, both descriptions, and a start date or "to be announced"). The pill
+// at the bottom of the form says how it stands; a save the server refuses
+// says why there, and is tried again at the next change. The server batches
+// the notices a run of saves sends to people going (api/_lib/notify.js).
 
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
@@ -12,7 +21,7 @@ import { coverToWebp } from '../cover-upload.js';
 import { startTools } from '../manage-tools.js';
 import { startTabs } from '../tabs.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom } from '../choices.js';
-import { setLocations, readLocations, startLocations, relabelLocations } from '../manage-locations.js';
+import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
 
 const byId = (id) => document.getElementById(id);
@@ -52,6 +61,18 @@ let editing = null; // { id, slug } of the event in the form, or null for a new 
 let attendees = [];
 let cover = { url: '', has: false };
 let tabs = null;
+// The list is reloaded when its tab is opened after a save changed it.
+let listStale = false;
+
+// Autosave. lastSaved is the form (readForm, as JSON) as it was last saved or
+// opened; saving is the save on its way, if any; again is set when another
+// change came while it was; failed is the reason the last one was refused,
+// and refused the form it was refused for (not sent again unchanged).
+let lastSaved = '';
+let saving = null;
+let again = false;
+let failed = null;
+let refused = '';
 
 function statusLabel(row) {
   if (row.status === 'published' && !row.released) {
@@ -125,6 +146,7 @@ byId('pageNext').addEventListener('click', () => turnPage(1));
 async function loadList() {
   const data = await api('/api/manage/events');
   events = data.events;
+  listStale = false;
   renderList();
 }
 
@@ -155,6 +177,9 @@ function setForm(values) {
   cover = { url: coverUrl, has: values.hasCover === true };
   renderCover();
   syncDependent();
+  lastSaved = JSON.stringify(readForm());
+  failed = null;
+  refused = '';
 }
 
 // The cover picture is uploaded on its own (api/manage/cover.js), so a new
@@ -254,17 +279,31 @@ for (const [, box] of DESCRIPTIONS) {
   box.addEventListener('input', markMissingDescriptions);
 }
 
-// Before saving: a blank description is shown, with the reason, rather
-// than sent. Returns true when both are written.
-function descriptionsWritten() {
-  const missing = DESCRIPTIONS.find(([, box]) => box.value.trim() === '');
-  if (!missing) {
+// The first field the server needs that is still blank (a title, both
+// descriptions, and a start date unless the dates are to be announced), or
+// null. A new event is created once there is none; an existing one is not
+// sent while there is one, and the pill names it instead.
+function missingField(values) {
+  for (const name of ['title', 'description', 'descriptionZh']) {
+    if (values[name].trim() === '') {
+      return name;
+    }
+  }
+  if (!values.datesHidden && values.startDate === '') {
+    return 'startDate';
+  }
+  return null;
+}
+
+// Inputs that save as soon as they change: a pick from a list, a box ticked.
+// Text, dates, times and numbers save when the editor leaves them.
+function savesOnChange(element) {
+  if (element.tagName === 'SELECT') {
     return true;
   }
-  const [lang, box, field] = missing;
-  descriptionSwitch.select(lang);
-  box.focus();
-  byId('editorError').textContent = translate('error.invalid_field', { field: translate(`manage.field.${field}`) });
+  if (element.type === 'checkbox' || element.type === 'radio') {
+    return true;
+  }
   return false;
 }
 
@@ -279,6 +318,238 @@ form.addEventListener('change', (event) => {
     if (label !== code) {
       event.target.value = label;
     }
+  }
+  if (savesOnChange(event.target)) {
+    autosave();
+  }
+});
+
+// Leaving a field saves it. The cover picture is uploaded on its own.
+form.addEventListener('focusout', (event) => {
+  if (event.target.id === 'coverFile') {
+    return;
+  }
+  autosave();
+});
+form.addEventListener(LOCATIONS_CHANGED, () => autosave());
+
+// Enter in a text field saves at once, rather than sending the form.
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  autosave();
+});
+
+// The pill at the bottom of the form: saving, saved, why a save was refused,
+// or what a new event still needs before it can be saved.
+function renderStatus() {
+  const box = byId('autosaveStatus');
+  box.className = 'autosave-status';
+  box.replaceChildren();
+  if (form.hidden) {
+    return;
+  }
+  if (saving) {
+    box.append(createElement('span', { class: 'spinner' }), createElement('span', { text: translate('manage.autosave.saving') }));
+    return;
+  }
+  if (failed) {
+    box.classList.add('is-failed');
+    box.append(iconNode('alert'), createElement('span', { text: translate('manage.autosave.failed', { reason: failed }) }));
+    return;
+  }
+  if (!editing) {
+    box.append(createElement('span', { text: translate('manage.autosave.new') }));
+    return;
+  }
+  if (isDirty()) {
+    box.append(createElement('span', { text: translate('manage.autosave.unsaved') }));
+    return;
+  }
+  box.classList.add('is-saved');
+  box.append(iconNode('check'), createElement('span', { text: translate('manage.autosave.saved') }));
+}
+
+function isDirty() {
+  return JSON.stringify(readForm()) !== lastSaved;
+}
+
+// After a save, the server's tidied values (a trimmed title, an end date
+// filled in from the start date) go into the fields the editor has not
+// touched since it was sent and is not in. The locations are left as they
+// are, so a card being filled in is never redrawn under the editor.
+function applySaved(saved, sent) {
+  const now = readForm();
+  for (const name of TEXT_FIELDS) {
+    const field = byId(`f-${name}`);
+    let value = saved[name];
+    if (value === null || value === undefined) {
+      value = '';
+    }
+    value = String(value);
+    if (now[name] === sent[name] && document.activeElement !== field && field.value !== value) {
+      field.value = value;
+    }
+  }
+  for (const name of CHECK_FIELDS) {
+    if (now[name] === sent[name]) {
+      byId(`f-${name}`).checked = saved[name] === true;
+    }
+  }
+  if (now.currency === sent.currency && document.activeElement !== byId('f-currency')) {
+    byId('f-currency').value = currencyLabel(saved.currency);
+  }
+  syncDependent();
+  markMissingDescriptions();
+}
+
+// Saves the form if it changed since the last save, one save at a time: a
+// change while one is on its way is saved straight after it. Resolves once
+// nothing is left to save (or a save was refused).
+function autosave() {
+  if (form.hidden) {
+    return Promise.resolve();
+  }
+  if (saving) {
+    again = true;
+    return saving;
+  }
+  const sent = readForm();
+  const body = JSON.stringify(sent);
+  // Nothing new: unchanged since the last save (a refused change undone
+  // counts), or the very change that was just refused.
+  if (body === lastSaved) {
+    failed = null;
+    renderStatus();
+    return Promise.resolve();
+  }
+  if (body === refused) {
+    renderStatus();
+    return Promise.resolve();
+  }
+  const missing = missingField(sent);
+  if (missing && !editing) {
+    failed = null;
+    renderStatus();
+    return Promise.resolve();
+  }
+  if (missing) {
+    failed = translate('error.invalid_field', { field: translate(`manage.field.${missing}`) });
+    refused = body;
+    renderStatus();
+    return Promise.resolve();
+  }
+  saving = saveForm(sent, body).finally(() => {
+    saving = null;
+    renderStatus();
+    if (again) {
+      again = false;
+      return autosave();
+    }
+    return undefined;
+  });
+  renderStatus();
+  return saving;
+}
+
+async function saveForm(sent, body) {
+  let request;
+  if (editing) {
+    request = { action: 'update', id: editing.id, event: sent };
+  } else {
+    request = { action: 'create', event: sent };
+  }
+  let data;
+  try {
+    data = await post('/api/manage/events', request);
+  } catch (error) {
+    failed = errorText(error);
+    refused = body;
+    return;
+  }
+  failed = null;
+  refused = '';
+  const created = !editing;
+  editing = { id: data.event.id, slug: data.event.slug };
+  const untouched = JSON.stringify(readForm()) === body;
+  applySaved(data.event, sent);
+  // Untouched since it was sent, the form now is what is saved, tidied by
+  // the server. Otherwise what was sent is; the editor's newer change is
+  // saved when they leave that field.
+  if (untouched) {
+    lastSaved = JSON.stringify(readForm());
+  } else {
+    lastSaved = body;
+  }
+  byId('editorTitle').textContent = translate('manage.edit-title', { title: data.event.title });
+  listStale = true;
+  if (created) {
+    showSavedControls();
+    rememberOpenEvent();
+  }
+}
+
+// Once an event exists: its page link, the cover picture and attendee
+// list, and Delete for admins.
+function showSavedControls() {
+  let canDelete = false;
+  if (editing && currentUser.role === 'admin') {
+    canDelete = true;
+  }
+  byId('editorDelete').hidden = !canDelete;
+  byId('editorView').hidden = !editing;
+  if (editing) {
+    byId('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
+  }
+  renderCover();
+  renderAttendees();
+}
+
+// The open event is kept in the address (/manage?slug=...#editor), so a
+// reload opens it again.
+function rememberOpenEvent() {
+  let search = '';
+  if (editing) {
+    search = `?slug=${encodeURIComponent(editing.slug)}`;
+  }
+  history.replaceState(null, '', `${location.pathname}${search}${location.hash}`);
+}
+
+// Before the form is closed or another event is opened: anything unsaved is
+// saved, and a change the server refused is only dropped if the editor says
+// so. Resolves true when it is fine to go on.
+async function readyToLeave() {
+  if (form.hidden) {
+    return true;
+  }
+  await autosave();
+  if (saving) {
+    await saving;
+  }
+  if (!isDirty()) {
+    return true;
+  }
+  if (failed) {
+    return window.confirm(translate('manage.autosave.leave-failed', { reason: failed }));
+  }
+  // A new event without enough to be saved yet.
+  return window.confirm(translate('manage.autosave.leave-new'));
+}
+
+// Leaving the page with a change not saved (one the server refused, or one
+// still on its way) asks first. Hiding the page (switching apps on a phone)
+// saves what is there.
+window.addEventListener('beforeunload', (event) => {
+  if (form.hidden) {
+    return;
+  }
+  if (saving || isDirty()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    autosave();
   }
 });
 
@@ -326,25 +597,17 @@ function renderAttendees() {
   byId('attendeeList').replaceChildren(...attendeeRows);
 }
 
-// The form takes the list's place in the Events tab while it is open.
+// The form opens in the Manage event tab, in place of its "No event open"
+// note.
 function showEditor(title) {
   byId('editorTitle').textContent = title;
   byId('editorError').textContent = '';
-  // Only admins delete, and only an event that has been saved.
-  let canDelete = false;
-  if (editing && currentUser.role === 'admin') {
-    canDelete = true;
-  }
-  byId('editorDelete').hidden = !canDelete;
-  byId('editorView').hidden = !editing;
-  if (editing) {
-    byId('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
-  }
-  tabs.open('events');
+  tabs.open('editor');
   form.hidden = false;
-  byId('listBox').hidden = true;
-  renderCover();
-  renderAttendees();
+  byId('editorEmpty').hidden = true;
+  showSavedControls();
+  rememberOpenEvent();
+  renderStatus();
   byId('editorTitle').tabIndex = -1;
   byId('editorTitle').focus();
 }
@@ -352,10 +615,17 @@ function showEditor(title) {
 function hideEditor() {
   form.hidden = true;
   editing = null;
-  byId('listBox').hidden = false;
+  failed = null;
+  byId('editorEmpty').hidden = false;
+  rememberOpenEvent();
+  renderStatus();
 }
 
 async function openEditor(id) {
+  if (!(await readyToLeave())) {
+    tabs.open('editor');
+    return;
+  }
   byId('manageNotice').textContent = '';
   try {
     const data = await api(`/api/manage/events?id=${encodeURIComponent(id)}`);
@@ -368,7 +638,11 @@ async function openEditor(id) {
   }
 }
 
-function openNew() {
+async function openNew() {
+  if (!(await readyToLeave())) {
+    tabs.open('editor');
+    return;
+  }
   editing = null;
   attendees = [];
   byId('manageNotice').textContent = '';
@@ -376,34 +650,12 @@ function openNew() {
   showEditor(translate('manage.new-title'));
 }
 
-form.addEventListener('submit', (event) => {
-  event.preventDefault();
-  if (!descriptionsWritten()) {
-    return;
-  }
-  withBusy(byId('editorSave'), byId('editorError'), async () => {
-
-    let body;
-    if (editing) {
-      body = { action: 'update', id: editing.id, event: readForm() };
-    } else {
-      body = { action: 'create', event: readForm() };
-    }
-    const data = await post('/api/manage/events', body);
-    editing = { id: data.event.id, slug: data.event.slug };
-    setForm(data.event);
-    showEditor(translate('manage.edit-title', { title: data.event.title }));
-    byId('manageNotice').textContent = translate('manage.saved');
-    await loadList();
-  });
-});
-
 async function removeAttendee(username, staff) {
   await withBusy(null, byId('editorError'), async () => {
     const data = await post('/api/manage/events', { action: 'remove-attendee', id: editing.id, username, staff });
     attendees = data.attendees;
     renderAttendees();
-    await loadList();
+    listStale = true;
   });
 }
 
@@ -413,16 +665,24 @@ byId('deleteConfirm').addEventListener('click', () => {
     await post('/api/manage/events', { action: 'delete', id: editing.id });
     closeModal('deleteModal');
     hideEditor();
+    tabs.open('events');
     byId('manageNotice').textContent = translate('manage.deleted');
     await loadList();
   });
 });
 
-byId('editorClose').addEventListener('click', () => {
+byId('editorClose').addEventListener('click', async () => {
+  if (!(await readyToLeave())) {
+    return;
+  }
   hideEditor();
+  // Opening the list reloads it when a save changed it.
+  tabs.open('events');
   byId('newEvent').focus();
 });
 byId('newEvent').addEventListener('click', openNew);
+byId('editorEmptyNew').addEventListener('click', openNew);
+byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
 
 // Signed out: off to sign in, then back here. Signed in without the right to
@@ -441,8 +701,17 @@ async function start() {
     return;
   }
   byId('newEvent').hidden = false;
+  byId('tab-editor').hidden = false;
   fillCurrencyList(byId('currencyList'));
-  tabs = startTabs(byId('manageTabs'));
+  tabs = startTabs(byId('manageTabs'), {
+    onSelect(name) {
+      if (name === 'events' && listStale) {
+        loadList().catch((error) => {
+          byId('manageError').textContent = errorText(error);
+        });
+      }
+    },
+  });
   startTools(currentUser).then(() => tabs.refresh());
   try {
     await loadList();
@@ -467,6 +736,7 @@ onChange(() => {
   }
   if (!form.hidden) {
     renderAttendees();
+    renderStatus();
     relabelLocations();
     fillTimeZoneSelect(byId('f-timezone'), byId('f-timezone').value);
     fillCurrencyList(byId('currencyList'));

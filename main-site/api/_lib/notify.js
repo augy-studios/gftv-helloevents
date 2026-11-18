@@ -2,7 +2,8 @@
 // the account page (gftvevents_accounts.notify_*):
 //
 //   updates    an event you are going to changes when or where it happens,
-//              or is cancelled (sent when an editor saves the change)
+//              or is cancelled (sent shortly after an editor saves the change,
+//              once for a run of saves: queueEventChange below)
 //   reminders  a day before an event you are going to (cron/notify.js,
 //              hourly; once per RSVP)
 //   newEvents  a new event is announced, off by default (cron/notify.js,
@@ -23,7 +24,8 @@ import { siteUrl } from './env.js';
 import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
 import { eventNoticeMessage } from './telegram-messages.js';
-import { isReleased, datesAnnounced, storedLocations } from './event-rules.js';
+import { isReleased, storedLocations } from './event-rules.js';
+import { whenText, placeText } from './event-text.js';
 import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
@@ -57,37 +59,6 @@ export async function settle() {
   while (pending.size) {
     await Promise.all([...pending]);
   }
-}
-
-// When the event starts, in its own time zone, or "Dates to be announced".
-// A start whose time is still to be confirmed shows its date alone.
-function whenText(row) {
-  if (!datesAnnounced(row)) {
-    return 'Dates to be announced';
-  }
-  const options = { timeZone: row.timezone, weekday: 'short', day: 'numeric', month: 'short' };
-  if (!row.start_time_tbc) {
-    Object.assign(options, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-  }
-  let text;
-  try {
-    text = new Intl.DateTimeFormat('en-SG', options).format(new Date(row.starts_at));
-  } catch {
-    text = new Date(row.starts_at).toUTCString();
-  }
-  if (row.start_time_tbc) {
-    return `${text}, time to be confirmed`;
-  }
-  return text;
-}
-
-// The place name and city, and "online" for an online event.
-function placeText(row) {
-  const parts = [row.venue_name, row.city].filter(Boolean);
-  if (row.is_online) {
-    parts.push('online');
-  }
-  return parts.join(', ');
 }
 
 // The notice for one event, from public fields only.
@@ -230,14 +201,113 @@ export function changeKind(before, after) {
   return null;
 }
 
-// After an editor saves an event. Runs in the background.
-export async function notifyEventChange(before, after) {
-  const kind = changeKind(before, after);
+// The edit form on /manage saves each field as the editor leaves it, so one
+// change of when or where (a new date, then a new start time) can come as
+// several saves. People going hear about it once. The first save that moves
+// a released event keeps how the event was (notice_base, migrations/006),
+// and every save while one is waiting sets notice_due_at changeNotice.waitMs
+// ahead. When that passes with no newer save, flushEventChange compares
+// notice_base with the event as it is then, so a change that is put back
+// tells nobody. The wait fits inside api/manage/events.js's maxDuration
+// (vercel.json); the hourly cron sends any that were left over. Tests
+// shorten it.
+export const changeNotice = { waitMs: 45_000, graceMs: 1_000 };
+
+// The columns changeKind reads, as kept in notice_base.
+const NOTICE_BASE_COLUMNS = [
+  'status', 'publish_at', 'starts_at', 'ends_at', 'start_time_tbc', 'end_time_tbc', 'timezone', 'dates_hidden',
+  'venue_name', 'venue_address', 'city', 'country', 'is_online', 'locations',
+];
+
+// What flushEventChange reads: the columns above, and what a notice says.
+const NOTICE_ROW_COLUMNS = `id, slug, title, ${NOTICE_BASE_COLUMNS.join(', ')}, notice_base, notice_due_at`;
+
+function noticeBase(row) {
+  const base = {};
+  for (const column of NOTICE_BASE_COLUMNS) {
+    let value = row[column];
+    if (value === undefined) {
+      value = null;
+    }
+    base[column] = value;
+  }
+  return base;
+}
+
+// Before an editor's save: the notice columns to save with it. changes are
+// the columns about to be written over before (which carries notice_base).
+// Empty when there is nothing for the people going to hear about.
+export function queueEventChange(before, changes, now = Date.now()) {
+  let base = before.notice_base;
+  if (!base) {
+    if (!changeKind(before, { ...before, ...changes })) {
+      return {};
+    }
+    base = noticeBase(before);
+  }
+  return { notice_base: base, notice_due_at: new Date(now + changeNotice.waitMs).toISOString() };
+}
+
+// After a save that queued a notice, in the background: waits until it is
+// due, then sends it (or leaves it to a newer save's wait).
+export async function sendEventChangeWhenDue(eventId) {
+  await new Promise((resolve) => {
+    setTimeout(resolve, changeNotice.waitMs + changeNotice.graceMs);
+  });
+  return flushEventChange(eventId);
+}
+
+// Tells the people going about an event's queued change, once it is due.
+// It is claimed first, by clearing both columns only while notice_due_at is
+// still the one read, so a newer save's wait, or two runs at once, never
+// send it twice. Returns how many accounts were reached.
+export async function flushEventChange(eventId, now = Date.now()) {
+  const { data: row, error } = await database().from(TABLES.events).select(NOTICE_ROW_COLUMNS).eq('id', eventId).maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!row || !row.notice_base || !row.notice_due_at) {
+    return 0;
+  }
+  if (new Date(row.notice_due_at).getTime() > now) {
+    return 0;
+  }
+  const { data: claimed, error: claimError } = await database()
+    .from(TABLES.events)
+    .update({ notice_base: null, notice_due_at: null })
+    .eq('id', eventId)
+    .eq('notice_due_at', row.notice_due_at)
+    .select('id');
+  if (claimError) {
+    throw claimError;
+  }
+  if (rowsOf(claimed).length !== 1) {
+    return 0;
+  }
+  const kind = changeKind(row.notice_base, row);
   if (!kind) {
     return 0;
   }
-  const accounts = await attendeeAccounts(after.id, 'notify_updates');
-  return deliver(accounts, noticeFor(kind, after));
+  const accounts = await attendeeAccounts(eventId, 'notify_updates');
+  return deliver(accounts, noticeFor(kind, row));
+}
+
+// Hourly (cron/notify.js): queued changes whose background send never ran,
+// say because the function was stopped first.
+export async function flushDueChanges(now = Date.now()) {
+  const { data, error } = await database()
+    .from(TABLES.events)
+    .select('id')
+    .lte('notice_due_at', new Date(now).toISOString())
+    .limit(100);
+  if (error) {
+    throw error;
+  }
+  let reached = 0;
+  for (const row of rowsOf(data)) {
+    reached += await flushEventChange(row.id, now);
+  }
+  return reached;
 }
 
 // Hourly: reminders for events starting within the next day, once per RSVP.

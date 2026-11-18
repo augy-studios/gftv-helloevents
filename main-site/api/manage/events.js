@@ -9,7 +9,8 @@
 // POST { action: "remove-attendee", id, username, staff } take someone off
 //
 // Saving a change to when or where a released event happens, or cancelling
-// it, tells the people going (notify.js), in the background.
+// it, tells the people going (notify.js), in the background, once for a run
+// of autosaves.
 //
 // event is the edit form's fields (event-rules.js validateEvent picks what it
 // knows and ignores the rest). Answers are built by serialize.js, never rows.
@@ -23,7 +24,7 @@ import { validateEvent } from '../_lib/event-rules.js';
 import { MANAGE_COLUMNS } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
-import { background, notifyEventChange } from '../_lib/notify.js';
+import { background, queueEventChange, sendEventChangeWhenDue } from '../_lib/notify.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -37,8 +38,8 @@ function isUuid(value) {
   return UUID_PATTERN.test(text);
 }
 
-async function loadEvent(eventId) {
-  const { data, error } = await database().from(TABLES.events).select(MANAGE_COLUMNS).eq('id', eventId).maybeSingle();
+async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
+  const { data, error } = await database().from(TABLES.events).select(columns).eq('id', eventId).maybeSingle();
   if (error) {
     throw error;
   }
@@ -155,14 +156,14 @@ async function createEvent(request, response, fields, user, { numberSlug }) {
   return ok(response, { event: managedEvent(data) });
 }
 
-// "update": saves the checked fields over an existing event, then tells the
-// people going about a change of when or where (or a cancellation), in the
-// background.
+// "update": saves the checked fields over an existing event. A change of
+// when or where (or a cancellation) is queued for the people going and sent
+// in the background once the editor stops saving (notify.js).
 async function updateEvent(request, response, body, fields, user) {
   if (!isUuid(body.id)) {
     return fail(response, 400, 'bad_request');
   }
-  const before = await loadEvent(body.id);
+  const before = await loadEvent(body.id, `${MANAGE_COLUMNS}, notice_base`);
   if (!before) {
     return fail(response, 404, 'not_found');
   }
@@ -172,6 +173,7 @@ async function updateEvent(request, response, body, fields, user) {
   if (!slugGiven(body.event)) {
     changes.slug = before.slug;
   }
+  Object.assign(changes, queueEventChange(before, changes));
   const { data, error } = await database()
     .from(TABLES.events)
     .update(changes)
@@ -185,7 +187,9 @@ async function updateEvent(request, response, body, fields, user) {
     return fail(response, 404, 'not_found');
   }
   await audit(request, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
-  background(notifyEventChange(before, data));
+  if (changes.notice_due_at) {
+    background(sendEventChangeWhenDue(data.id));
+  }
   return ok(response, { event: managedEvent(data) });
 }
 

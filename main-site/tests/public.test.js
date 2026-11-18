@@ -21,7 +21,11 @@ process.env.SUPABASE_URL = 'https://project.supabase.co';
 const { useTestClient } = await import('../api/_lib/supabase.js');
 const { useTestRedis } = await import('../api/_lib/redis.js');
 const { useTestPushSender } = await import('../api/_lib/push.js');
-const { settle } = await import('../api/_lib/notify.js');
+const { settle, changeNotice, flushDueChanges } = await import('../api/_lib/notify.js');
+// Change notices go out as soon as the save's background work runs; the
+// batching test below sets its own short wait.
+changeNotice.waitMs = 0;
+changeNotice.graceMs = 0;
 const { totpAt } = await import('../api/_lib/totp.js');
 const route = async (path) => (await import(`../api/${path}.js`)).default;
 const signup = await route('auth/signup');
@@ -362,6 +366,59 @@ test('changing when or where an event happens tells the people going, by push an
 
   await settle();
   assert.equal(pushes[0].payload.title, 'Event cancelled: Moving Meet');
+});
+
+test('autosaving one change field by field tells the people going once, and a change put back tells nobody', async () => {
+  const event = addEvent({ slug: 'autosaved-meet', description: 'A meet.', description_zh: '聚会。', venue_name: 'Old Hall' });
+  const m = await member();
+  await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
+  await m.call(rsvp, { method: 'POST', body: { slug: 'autosaved-meet', going: true } });
+  const ed = await staff('editor', { is_editor: true });
+  const current = (await ed.call(manage, { query: { id: event.id } })).json.event;
+  const save = (changes) => ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, ...changes } } });
+
+  changeNotice.waitMs = 60;
+  try {
+    // A new place, then a new start time, then the title: three saves, one notice.
+    const moved = [{ ...current.locations[0], venueName: 'New Hall' }];
+    await save({ locations: moved });
+    await save({ locations: moved, startTime: '15:00' });
+    await save({ locations: moved, startTime: '15:00', title: 'Autosaved Meet' });
+    assert.equal(pushes.length, 0, 'nothing before the wait is over');
+    await settle();
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0].payload.title, 'Event updated: Autosaved Meet');
+    assert.match(pushes[0].payload.body, /New Hall/);
+    const row = db.table('gftvevents_events').find((r) => r.id === event.id);
+    assert.equal(row.notice_base, null);
+    assert.equal(row.notice_due_at, null);
+
+    // Moved and moved back before the wait is over: nobody hears.
+    pushes = [];
+    const now = (await ed.call(manage, { query: { id: event.id } })).json.event;
+    await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...now, startTime: '18:00' } } });
+    await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: now } });
+    await settle();
+    assert.equal(pushes.length, 0);
+  } finally {
+    changeNotice.waitMs = 0;
+  }
+});
+
+test('the hourly cron sends a queued change notice that was left over', async () => {
+  const event = addEvent({ slug: 'left-over-meet', description: 'A meet.', description_zh: '聚会。', venue_name: 'Old Hall' });
+  const m = await member();
+  await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
+  await m.call(rsvp, { method: 'POST', body: { slug: 'left-over-meet', going: true } });
+  const row = db.table('gftvevents_events').find((r) => r.id === event.id);
+  // As a save leaves it when its background send was stopped.
+  row.notice_base = { ...row, venue_name: 'Older Hall' };
+  row.notice_due_at = new Date(Date.now() - 60_000).toISOString();
+  const run = await browser().call(cronNotify, { headers: { authorization: 'Bearer cron-test' } });
+  assert.equal(run.json.changed, 1);
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].payload.title, 'Event updated: ' + row.title);
+  assert.equal(await flushDueChanges(), 0, 'sent once');
 });
 
 test('a gone push subscription is forgotten', async () => {
