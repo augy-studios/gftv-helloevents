@@ -34,7 +34,8 @@ import { sendRichTelegram, telegramConfigured } from './telegram.js';
 import { eventNoticeMessage, reminderMessage } from './telegram-messages.js';
 import { reminderHoursFrom } from './users.js';
 import { isReleased, storedLocations, storedMeals } from './event-rules.js';
-import { whenText, endText, placeText, countryText, untilText } from './event-text.js';
+import { whenText, endText, placeText, countryText, untilText, startDateText, startTimeText } from './event-text.js';
+import { embedImageUrl } from './covers.js';
 import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
@@ -74,17 +75,29 @@ export async function settle() {
   }
 }
 
-// The notice for one event, from public fields only.
+// The notice for one event, from public fields only. lines are its push
+// notification's body (when and where, on one line); details are the date,
+// time and place, each on a line of its own in the Telegram message, with
+// the cover picture (image, a JPEG address, or null) under the link.
 export function noticeFor(kind, row) {
   const url = `${siteUrl()}/e/${row.slug}`;
   const lines = [whenText(row), placeText(row)].filter(Boolean);
+  const details = [['Date', startDateText(row)]];
+  const time = startTimeText(row);
+  if (time) {
+    details.push(['Time', time]);
+  }
+  details.push(['Location', placeText(row) || 'To be announced']);
+  const notice = { title: row.title, lines, intro: '', details, url, image: embedImageUrl(row) };
   if (kind === 'cancelled') {
-    return { heading: 'Event cancelled', title: row.title, lines: ['This event will not go ahead.'], url, tag: `event-${row.slug}` };
+    const message = 'This event will not go ahead.';
+    return { ...notice, heading: 'Event cancelled', lines: [message], intro: message, tag: `event-${row.slug}` };
   }
   if (kind === 'updated') {
-    return { heading: 'Event updated', title: row.title, lines: ['The time or place changed. Now:', ...lines], url, tag: `event-${row.slug}` };
+    const message = 'The time or place changed. Now:';
+    return { ...notice, heading: 'Event updated', lines: [message, ...lines], intro: message, tag: `event-${row.slug}` };
   }
-  return { heading: 'New event', title: row.title, lines, url, tag: `new-${row.slug}` };
+  return { ...notice, heading: 'New event', tag: `new-${row.slug}` };
 }
 
 // The linked Telegram chat of each account that has one, as a Map of
@@ -259,7 +272,7 @@ const NOTICE_BASE_COLUMNS = [
 ];
 
 // What flushEventChange reads: the columns above, and what a notice says.
-const NOTICE_ROW_COLUMNS = `id, slug, title, ${NOTICE_BASE_COLUMNS.join(', ')}, notice_base, notice_due_at`;
+const NOTICE_ROW_COLUMNS = `id, slug, title, cover_image_path, ${NOTICE_BASE_COLUMNS.join(', ')}, notice_base, notice_due_at`;
 
 function noticeBase(row) {
   const base = {};
@@ -576,7 +589,7 @@ export async function sendReminders(now = Date.now()) {
 export async function announceNewEvents(now = Date.now()) {
   const { data: events, error } = await database()
     .from(TABLES.events)
-    .select('id, slug, title, status, publish_at, starts_at, ends_at, start_time_tbc, timezone, dates_hidden, venue_name, city, is_online, last_at')
+    .select('id, slug, title, cover_image_path, status, publish_at, starts_at, ends_at, start_time_tbc, timezone, dates_hidden, venue_name, city, is_online, last_at')
     .eq('status', 'published')
     .is('announced_at', null)
     .limit(20);

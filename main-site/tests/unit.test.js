@@ -744,6 +744,28 @@ test('a notice carries public fields only', () => {
   assert.ok(notify.noticeFor('new', row({ dates_hidden: true })).lines.includes('Dates to be announced'));
 });
 
+test('a Telegram event notice puts the date, time and place on lines of their own, with the cover under the link', () => {
+  const cover = '11111111-1111-4111-8111-111111111111/AbCdEfGhIjKlMnOpQrStUv.webp';
+  const r = row({ starts_at: '2032-08-06T10:00:00.000Z', timezone: 'Asia/Singapore', venue_name: 'Hall', city: 'Singapore', is_online: false, cover_image_path: cover });
+  const { markdown, fallback } = msgs.eventNoticeMessage(notify.noticeFor('new', r));
+  const image = 'https://events.globalfurry.tv/api/events/embed-image?slug=sg-furmeet&v=AbCdEfGhIjKlMnOpQrStUv';
+  assert.equal(
+    markdown,
+    '## New event\n\n**SG Furmeet**\n\n**Date:** Fri, 6 Aug 2032\n\n**Time:** 6:00 pm SGT\n\n**Location:** Hall, Singapore\n\n' +
+      `https://events.globalfurry.tv/e/sg-furmeet\n\n![](${image})`
+  );
+  assert.ok(fallback.includes('Date: Fri, 6 Aug 2032\nTime: 6:00 pm SGT\nLocation: Hall, Singapore'));
+
+  // No cover, no picture; a time to be confirmed says so; dates to be
+  // announced have no time line.
+  const plain = msgs.eventNoticeMessage(notify.noticeFor('cancelled', row({ start_time_tbc: true, cover_image_path: null })));
+  assert.equal(plain.markdown.includes('!['), false);
+  assert.ok(plain.markdown.includes('This event will not go ahead.\n\n**Date:**'));
+  assert.ok(plain.markdown.includes('**Time:** To be confirmed'));
+  const tba = notify.noticeFor('new', row({ dates_hidden: true }));
+  assert.deepEqual(tba.details.map(([label]) => label), ['Date', 'Location']);
+});
+
 test('a reminder goes at the closest time picked that has come, once, and not to someone who has just said they are going', () => {
   const hour = 3_600_000;
   const start = Date.parse('2032-08-06T10:00:00Z');

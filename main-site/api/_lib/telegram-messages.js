@@ -80,20 +80,40 @@ export function helpMessage() {
 }
 
 // An event notice, for people who switched Telegram notices on. notice is
-// built by notify.js from public event fields only: { heading, title, lines,
-// url }.
+// built by notify.js noticeFor from public event fields only: { heading,
+// title, intro, details: [[label, value]], url, image }.
+//
+//   ## New event
+//   **Title**
+//   (intro: "This event will not go ahead.", for a cancelled one)
+//   **Date:** Fri, 6 Aug 2032
+//   **Time:** 6:00 pm SGT
+//   **Location:** Hall, Singapore
+//   the event page link
+//   the cover picture
+//
+// Rich Markdown joins lines that touch into one paragraph, so every line is
+// a paragraph of its own. The cover is a media block (a JPEG address on this
+// site, so it needs no escaping); if Telegram cannot fetch it, the rich send
+// fails and the plain fallback goes instead.
 export function eventNoticeMessage(notice) {
-  const markdown = [
-    `## ${escapeMd(notice.heading)}`,
-    '',
-    `**${escapeMd(notice.title)}**`,
-    '',
-    ...notice.lines.map((line) => escapeMd(line)),
-    '',
-    escapeMd(notice.url),
-  ].join('\n');
-  const fallback = [notice.heading, '', notice.title, ...notice.lines, '', notice.url].join('\n');
-  return { markdown, fallback };
+  const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`];
+  const fallback = [notice.heading, '', notice.title];
+  if (notice.intro) {
+    markdown.push('', escapeMd(notice.intro));
+    fallback.push('', notice.intro);
+  }
+  fallback.push('');
+  for (const [label, value] of notice.details) {
+    markdown.push('', `**${escapeMd(label)}:** ${escapeMd(value)}`);
+    fallback.push(`${label}: ${value}`);
+  }
+  markdown.push('', escapeMd(notice.url));
+  fallback.push('', notice.url);
+  if (notice.image) {
+    markdown.push('', `![](${notice.image})`);
+  }
+  return { markdown: markdown.join('\n'), fallback: fallback.join('\n') };
 }
 
 // A reminder before an event, for someone going (notify.js reminderNotice):

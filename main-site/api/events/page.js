@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises';
 import { route, guard, query, errorDetail } from '../_lib/http.js';
 import { siteUrl } from '../_lib/env.js';
 import { releasedEventBySlug } from '../_lib/events.js';
-import { coverVersion } from '../_lib/covers.js';
+import { embedImageUrl } from '../_lib/covers.js';
 import { whenText, placeText } from '../_lib/event-text.js';
 
 const SITE_NAME = 'GFTV HelloEvents';
@@ -87,12 +87,7 @@ export function previewTags(row) {
     title = `Cancelled: ${title}`;
   }
   const url = `${siteUrl()}/e/${row.slug}`;
-  const version = coverVersion(row.cover_image_path);
-  let image = null;
-  if (version) {
-    image = `${siteUrl()}/api/events/embed-image?slug=${encodeURIComponent(row.slug)}&v=${encodeURIComponent(version)}`;
-  }
-  return { title, description: previewDescription(row), url, image, imageAlt: row.title };
+  return { title, description: previewDescription(row), url, image: embedImageUrl(row), imageAlt: row.title };
 }
 
 // Writes one tag's content into the page. A tag that is not there leaves the

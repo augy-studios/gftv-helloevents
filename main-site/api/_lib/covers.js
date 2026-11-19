@@ -14,7 +14,7 @@
 
 import sharp from 'sharp';
 import { database, TABLES } from './supabase.js';
-import { optionalEnv } from './env.js';
+import { optionalEnv, siteUrl } from './env.js';
 import { randomToken } from './crypto.js';
 import { errorDetail } from './http.js';
 
@@ -188,6 +188,18 @@ export function coverVersion(path) {
     return '';
   }
   return path.slice(path.indexOf('/') + 1, -'.webp'.length);
+}
+
+// The cover as a JPEG (api/events/embed-image.js), for link previews and the
+// picture in a Telegram event notice, or null for an event with no cover.
+// Covers are stored as WebP, which neither every link unfurler nor Telegram
+// takes as a photo.
+export function embedImageUrl(row) {
+  const version = coverVersion(row.cover_image_path);
+  if (!version) {
+    return null;
+  }
+  return `${siteUrl()}/api/events/embed-image?slug=${encodeURIComponent(row.slug)}&v=${encodeURIComponent(version)}`;
 }
 
 // The stored cover's bytes, or null when it is gone from the bucket.

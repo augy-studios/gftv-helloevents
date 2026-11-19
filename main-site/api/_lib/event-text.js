@@ -32,6 +32,34 @@ export function whenText(row) {
   return momentText(row.starts_at, row.timezone, row.start_time_tbc === true);
 }
 
+// The start's date and its time apart, for a notice that gives each a line
+// of its own: "Fri, 6 Aug" and "10:00 am SGT". Dates to be announced: the
+// date says so and there is no time (''); a time to be confirmed says so.
+function formatIn(iso, timezone, options) {
+  try {
+    return new Intl.DateTimeFormat('en-SG', { timeZone: timezone, ...options }).format(new Date(iso));
+  } catch {
+    return new Date(iso).toUTCString();
+  }
+}
+
+export function startDateText(row) {
+  if (!datesAnnounced(row)) {
+    return 'To be announced';
+  }
+  return formatIn(row.starts_at, row.timezone, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+export function startTimeText(row) {
+  if (!datesAnnounced(row)) {
+    return '';
+  }
+  if (row.start_time_tbc === true) {
+    return 'To be confirmed';
+  }
+  return formatIn(row.starts_at, row.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+}
+
 // When the event ends, the same way, or '' when it has no end or its dates
 // are to be announced.
 export function endText(row) {
