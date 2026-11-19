@@ -10,6 +10,7 @@
 //
 //   inkfox      a GFTV staff editor (gftvhello_users), with the shared
 //               authenticator app secret staff sign in with
+//   greywolf    a GFTV staff admin, who may delete events; same secret
 //   riverotter  a public account with no second step: the password is the
 //               whole sign-in
 //   keyfox      a public account with 2FA: two passkeys (one used, with a
@@ -40,6 +41,15 @@ export const STAFF = {
   username: 'inkfox',
   displayName: 'Ink Fox',
   email: 'inkfox@example.org',
+};
+
+// A staff admin, who may also delete events. Same password and
+// authenticator secret as STAFF.
+export const ADMIN = {
+  id: '00000000-0000-4000-8000-000000000002',
+  username: 'greywolf',
+  displayName: 'Grey Wolf',
+  email: 'greywolf@example.org',
 };
 
 export const MEMBER = {
@@ -180,6 +190,17 @@ export async function seedDatabase(db) {
     is_approved: true,
     is_editor: true,
     is_admin: false,
+    totp_secret: STAFF_TOTP_SECRET,
+  });
+  await insert('gftvhello_users', {
+    id: ADMIN.id,
+    username: ADMIN.username,
+    display_name: ADMIN.displayName,
+    email: ADMIN.email,
+    password_hash: passwordHash,
+    is_approved: true,
+    is_editor: true,
+    is_admin: true,
     totp_secret: STAFF_TOTP_SECRET,
   });
 

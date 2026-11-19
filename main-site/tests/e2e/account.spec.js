@@ -30,7 +30,25 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(page).toHaveURL(/\/account#notifications$/);
   await expect(page.locator('#panel-going')).toBeHidden();
   await expect(page.locator('#prefUpdates')).toBeChecked();
-  await expect(page.locator('#prefReminders')).toBeChecked();
+  // Reminders: a day before to start with; more than one time can be picked,
+  // each saving at once, and kept.
+  const remind = (name) => page.locator('#prefReminders').getByLabel(name);
+  await expect(remind('1 day before')).toBeChecked();
+  for (const name of ['1 hour before', '2 hours before', '3 hours before', '1 week before']) {
+    await expect(remind(name)).not.toBeChecked();
+  }
+  let saved = page.waitForResponse('**/api/me/notifications');
+  await remind('1 hour before').check();
+  await saved;
+  saved = page.waitForResponse('**/api/me/notifications');
+  await remind('1 week before').check();
+  await saved;
+  await page.reload();
+  await page.getByRole('tab', { name: 'Notifications' }).click();
+  for (const name of ['1 hour before', '1 day before', '1 week before']) {
+    await expect(remind(name)).toBeChecked();
+  }
+  await expect(remind('2 hours before')).not.toBeChecked();
   await expect(page.locator('#prefNewEvents')).not.toBeChecked();
   await expect(page.locator('#pushState')).toHaveText('Notifications are off for this device.');
   await expect(page.locator('#pushOn')).toBeVisible();

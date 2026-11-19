@@ -299,19 +299,23 @@ test('someone can come only for the meals an event offers, change their choice, 
   const editor = browser();
   await signIn(editor, 'boss');
   const managed = await editor.call(manage, { query: { id: event.id } });
-  assert.deepEqual(managed.json.event.meals, [{ id: 'lunch', label: '', limit: '' }, { id: 'dinner', label: '', limit: '' }, { id: 'm-tea123', label: 'High tea', limit: '' }]);
+  assert.deepEqual(managed.json.event.meals, [
+    { id: 'lunch', label: '', limit: '', locations: [] },
+    { id: 'dinner', label: '', limit: '', locations: [] },
+    { id: 'm-tea123', label: 'High tea', limit: '', locations: [] },
+  ]);
   assert.deepEqual(managed.json.attendees.map((a) => [a.username, a.meals]), [['diner', ['lunch']]]);
 
   // Lunch is no longer offered: the attendee's choice is kept, but not shown.
   const saved = await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...managed.json.event, meals: [{ id: 'dinner' }] } } });
   assert.equal(saved.status, 200, JSON.stringify(saved.json));
-  assert.deepEqual(saved.json.event.meals, [{ id: 'dinner', label: '', limit: '' }]);
+  assert.deepEqual(saved.json.event.meals, [{ id: 'dinner', label: '', limit: '', locations: [] }]);
   assert.deepEqual((await editor.call(manage, { query: { id: event.id } })).json.attendees[0].meals, []);
   assert.deepEqual((await b.call(detail, { query: { slug: 'meal-meet' } })).json.event.viewer.meals, []);
   // A save from a page that knows nothing about meals leaves them as they are.
   const { meals: _meals, ...withoutMeals } = saved.json.event;
   const untouched = await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: withoutMeals } });
-  assert.deepEqual(untouched.json.event.meals, [{ id: 'dinner', label: '', limit: '' }]);
+  assert.deepEqual(untouched.json.event.meals, [{ id: 'dinner', label: '', limit: '', locations: [] }]);
 });
 
 test('each meal has its own limit, and a full event still takes people just for a meal', async () => {

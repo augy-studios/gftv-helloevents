@@ -229,6 +229,9 @@ async function saveEvent(request, response, body, user) {
     if (check.tier !== undefined) {
       detail.tier = check.tier;
     }
+    if (check.meal !== undefined) {
+      detail.meal = check.meal;
+    }
     return fail(response, 400, check.error, detail);
   }
   const fields = { ...check.fields, updated_by: user.id };

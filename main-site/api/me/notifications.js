@@ -1,7 +1,10 @@
 // The signed-in person's notifications.
 //
 // GET                                   -> { prefs, push, telegram }
-// POST { action: "prefs", updates?, reminders?, newEvents?, telegram? }
+// POST { action: "prefs", updates?, reminderHours?, newEvents?, telegram? }
+//        reminderHours: when reminders come, hours before the start, any of
+//        1, 2, 3, 24 and 168 ([] for none). reminders (true or false, from a
+//        page before reminder times) is still taken: a day before, or none.
 // POST { action: "subscribe", subscription }   this browser, from PushManager
 // POST { action: "unsubscribe", endpoint }
 // POST { action: "test" }                       a test notice to every device
@@ -14,7 +17,7 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
-import { loadAccount } from '../_lib/users.js';
+import { loadAccount, REMINDER_HOURS, reminderHoursFrom } from '../_lib/users.js';
 import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
 import { pushConfigured, vapidPublicKey, deviceCount, checkSubscription, saveSubscription, removeSubscription } from '../_lib/push.js';
 import { deliver } from '../_lib/notify.js';
@@ -46,13 +49,40 @@ async function summary(user) {
   };
 }
 
-// Each choice in a "prefs" request and the accounts column it is saved in.
+// Each on/off choice in a "prefs" request and the accounts column it is
+// saved in. The reminder times are read on their own (readReminderHours).
 const PREFERENCE_COLUMNS = {
   updates: 'notify_updates',
-  reminders: 'notify_reminders',
   newEvents: 'notify_new_events',
   telegram: 'notify_telegram',
 };
+
+// The reminder times in a "prefs" request, into fields: reminder_hours, and
+// notify_reminders kept as "any picked" (migrations/011). False when they
+// are not a list of allowed times; nothing is added when neither is sent.
+function readReminderHours(body, fields) {
+  let hours;
+  if ('reminderHours' in body) {
+    const list = body.reminderHours;
+    if (!Array.isArray(list) || list.length > REMINDER_HOURS.length || !list.every((each) => REMINDER_HOURS.includes(each))) {
+      return false;
+    }
+    hours = reminderHoursFrom(list);
+  } else if ('reminders' in body) {
+    if (typeof body.reminders !== 'boolean') {
+      return false;
+    }
+    hours = [];
+    if (body.reminders) {
+      hours = [24];
+    }
+  } else {
+    return true;
+  }
+  fields.reminder_hours = hours;
+  fields.notify_reminders = hours.length > 0;
+  return true;
+}
 
 // GET answers with the summary. POST changes the choices, adds or removes
 // this browser's push subscription, or sends a test notice.
@@ -88,6 +118,9 @@ export default route('me/notifications', async (request, response) => {
         }
         fields[column] = body[key];
       }
+    }
+    if (!readReminderHours(body, fields)) {
+      return fail(response, 400, 'bad_request');
     }
     if (Object.keys(fields).length === 0) {
       return fail(response, 400, 'bad_request');

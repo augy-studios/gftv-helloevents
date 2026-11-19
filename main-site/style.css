@@ -1015,6 +1015,13 @@ main.wide > .page-card { margin-inline: auto; }
 /* The choice of the whole event or only some of its meals. */
 .rsvp-meals { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0.35rem; }
 .rsvp-meals .check { margin-bottom: 0; }
+
+/* account: the reminder times, any of them */
+.remind-times { border: 0; padding: 0; margin: 0.25rem 0 0.75rem; min-width: 0; }
+.remind-times legend { font-weight: 600; margin-bottom: 0.4rem; padding: 0; }
+.remind-options { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+.remind-options .check { margin-bottom: 0.25rem; }
+.remind-times .field-hint { margin: 0.25rem 0 0; }
 .rsvp-meal-list { display: grid; gap: 0.35rem; padding-inline-start: 1.6rem; }
 #rsvpMealChecks { display: grid; gap: 0.35rem; }
 .event-aside .actions { margin-top: 0; }
@@ -1178,6 +1185,30 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .tab[aria-selected="true"] { background: var(--brand-dark); color: var(--brand-on); border-color: transparent; }
 .tab-panel > .admin-tools:first-child { margin-top: 0; }
 
+/* manage: the edit form's sections as tabs, stuck under the page header
+   while the form scrolls (--header-height is set by js/pages/manage.js) */
+.editor-tabs {
+  position: sticky;
+  top: var(--header-height, 0px);
+  z-index: 6;
+  margin: 1rem 0 0;
+  padding: 0.6rem 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+}
+.editor-tabs .tab { min-height: 36px; padding: 0.35rem 0.75rem; }
+.tab-mark { color: var(--danger); font-weight: 700; }
+.tab[aria-selected="true"] .tab-mark { color: inherit; }
+.editor-panel > fieldset:first-child { margin-top: 0.75rem; }
+/* on a phone the tabs scroll sideways in one row rather than taking half
+   the screen */
+@media (max-width: 640px) {
+  .editor-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .editor-tabs::-webkit-scrollbar { display: none; }
+  .editor-tabs .tab { flex: none; }
+}
+
 /* manage: the event list's pager */
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.75rem; }
 
@@ -1246,6 +1277,13 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .meal-custom-list:empty { display: none; }
 .meal-custom .field.grow { flex: 1 1 14rem; margin-bottom: 0; }
 .meal-custom { align-items: flex-end; }
+.meal-custom-item { display: grid; gap: 0.35rem; }
+/* where a meal is held, when it is not at the event's place */
+.meal-place { padding-inline-start: 1.6rem; }
+.meal-place > .check { margin-bottom: 0; font-size: 0.875rem; }
+.meal-place-panel { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
+.meal-place-panel .field-hint { margin: 0; }
+.meal-place-panel .actions.inline { margin: 0; }
 
 /* event page: a location's label above its place */
 .location-heading { font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); margin-top: 0.35rem; }

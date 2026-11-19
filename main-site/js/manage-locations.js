@@ -7,6 +7,9 @@
 // them before saving. The server checks every field again
 // (api/_lib/event-rules.js readLocations), and the first location labelled
 // as the event's is the one the feed cards show.
+//
+// The same cards, in a list of their own, are a meal's places when it is
+// held somewhere other than the event (manage-meals.js, createLocationList).
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { post } from './api.js';
@@ -21,13 +24,12 @@ const MAPS_LINK = /(?:maps\.app\.goo\.gl\/|goo\.gl\/maps\/|google\.[a-z.]{2,6}\/
 const TEXT_KEYS = ['customLabel', 'venueName', 'venueAddress', 'city', 'mapsUrl'];
 
 const byId = (id) => document.getElementById(id);
-const list = () => byId('locationList');
 
 // Tells the edit form the locations changed without a field being left
 // (filled in from a link, or a card removed), so it autosaves them.
 export const LOCATIONS_CHANGED = 'locations-changed';
-function announceChange() {
-  list().dispatchEvent(new CustomEvent(LOCATIONS_CHANGED, { bubbles: true }));
+function announceChange(element) {
+  element.dispatchEvent(new CustomEvent(LOCATIONS_CHANGED, { bubbles: true }));
 }
 // Gives each card's link input an id of its own, for its label.
 let cardsMade = 0;
@@ -52,19 +54,6 @@ function input(card, key) {
 // Shows the custom label's field only while the card is labelled "custom".
 function syncCustomLabel(card) {
   card.querySelector('[data-field="customLabel"]').hidden = input(card, 'label').value !== 'custom';
-}
-
-// Numbers the cards ("Location 1", ...), names their Remove buttons, and
-// hides Add once the list is full.
-function renumber() {
-  const cards = [...list().children];
-  cards.forEach((card, index) => {
-    const number = index + 1;
-    card.querySelector('.location-title').textContent = translate('manage.location-number', { number });
-    card.querySelector('.location-remove').setAttribute('aria-label', translate('manage.location-remove-named', { number }));
-  });
-  byId('locationAdd').hidden = cards.length >= MAX_LOCATIONS;
-  byId('locationsEmpty').hidden = cards.length > 0;
 }
 
 // Reads the Google Maps link in a card and fills in the card from it. Fields
@@ -93,141 +82,198 @@ async function fillFromLink(card) {
     card.dataset.lookedUp = place.mapsUrl;
     status.textContent = translate('manage.location-filled');
     status.classList.add('ok');
-    announceChange();
+    announceChange(card);
   });
 }
 
-// One location's card, filled with values (a location as the server sends
-// it, or a new one's defaults).
-function locationCard(values) {
-  cardsMade += 1;
-  const linkId = `location-link-${cardsMade}`;
-  const labelSelect = createElement(
-    'select',
-    { 'data-key': 'label' },
-    LABELS.map((label) => createElement('option', { value: label, i18n: `location.${label}` }))
-  );
-  const countrySelect = createElement('select', { 'data-key': 'country' });
-  const fillButton = createElement('button', { class: 'btn location-fill', type: 'button' }, [
-    iconNode('map'),
-    createElement('span', { i18n: 'manage.location-fill' }),
-  ]);
-  const removeButton = createElement('button', { class: 'btn btn-small btn-quiet location-remove', type: 'button' }, [
-    iconNode('trash'),
-    createElement('span', { class: 'btn-label', i18n: 'security.remove' }),
-  ]);
+// A list of location cards in the element list, with an Add button
+// (addButton) and a note shown while it is empty (emptyNote, optional).
+// labels: what a card can be labelled, the first being a new list's first
+// card and the second every card after it. max: how many cards at most.
+// title(number) and removeLabel(number): a card's heading and its Remove
+// button's name. Returns { set, read, add, count, retitle, relabel }.
+export function createLocationList({ list, addButton, emptyNote = null, labels, max, title, removeLabel }) {
+  // Numbers the cards, names their Remove buttons, and hides Add once the
+  // list is full.
+  function renumber() {
+    const cards = [...list.children];
+    cards.forEach((card, index) => {
+      const number = index + 1;
+      card.querySelector('.location-title').textContent = title(number);
+      card.querySelector('.location-remove').setAttribute('aria-label', removeLabel(number));
+    });
+    addButton.hidden = cards.length >= max;
+    if (emptyNote) {
+      emptyNote.hidden = cards.length > 0;
+    }
+  }
 
-  const card = createElement('div', { class: 'location-card' }, [
-    createElement('div', { class: 'row between' }, [createElement('h3', { class: 'section-label location-title' }), removeButton]),
-    createElement('div', { class: 'form-grid' }, [
-      createElement('label', { class: 'field' }, [createElement('span', { i18n: 'manage.field.locationLabel' }), labelSelect]),
-      textField('customLabel', 'manage.field.customLabel', { maxLength: 60 }),
-      createElement('div', { class: 'field span-2' }, [
-        createElement('label', { class: 'field-label', for: linkId, i18n: 'manage.field.mapsUrl' }),
-        createElement('div', { class: 'row' }, [
-          createElement('input', {
-            id: linkId,
-            class: 'grow',
-            type: 'text',
-            inputmode: 'url',
-            'data-key': 'mapsUrl',
-            maxlength: 500,
-            autocomplete: 'off',
-            spellcheck: 'false',
-            placeholder: 'https://maps.app.goo.gl/...',
-          }),
-          fillButton,
+  // One location's card, filled with values (a location as the server sends
+  // it, or a new one's defaults).
+  function locationCard(values) {
+    cardsMade += 1;
+    const linkId = `location-link-${cardsMade}`;
+    const labelSelect = createElement(
+      'select',
+      { 'data-key': 'label' },
+      labels.map((label) => createElement('option', { value: label, i18n: `location.${label}` }))
+    );
+    const countrySelect = createElement('select', { 'data-key': 'country' });
+    const fillButton = createElement('button', { class: 'btn location-fill', type: 'button' }, [
+      iconNode('map'),
+      createElement('span', { i18n: 'manage.location-fill' }),
+    ]);
+    const removeButton = createElement('button', { class: 'btn btn-small btn-quiet location-remove', type: 'button' }, [
+      iconNode('trash'),
+      createElement('span', { class: 'btn-label', i18n: 'security.remove' }),
+    ]);
+
+    const card = createElement('div', { class: 'location-card' }, [
+      createElement('div', { class: 'row between' }, [createElement('h3', { class: 'section-label location-title' }), removeButton]),
+      createElement('div', { class: 'form-grid' }, [
+        createElement('label', { class: 'field' }, [createElement('span', { i18n: 'manage.field.locationLabel' }), labelSelect]),
+        textField('customLabel', 'manage.field.customLabel', { maxLength: 60 }),
+        createElement('div', { class: 'field span-2' }, [
+          createElement('label', { class: 'field-label', for: linkId, i18n: 'manage.field.mapsUrl' }),
+          createElement('div', { class: 'row' }, [
+            createElement('input', {
+              id: linkId,
+              class: 'grow',
+              type: 'text',
+              inputmode: 'url',
+              'data-key': 'mapsUrl',
+              maxlength: 500,
+              autocomplete: 'off',
+              spellcheck: 'false',
+              placeholder: 'https://maps.app.goo.gl/...',
+            }),
+            fillButton,
+          ]),
+          createElement('span', { class: 'field-hint', i18n: 'manage.hint.mapsUrl' }),
+          createElement('p', { class: 'field-status location-status', role: 'status' }),
+          createElement('div', { class: 'callout danger location-error', role: 'alert' }),
         ]),
-        createElement('span', { class: 'field-hint', i18n: 'manage.hint.mapsUrl' }),
-        createElement('p', { class: 'field-status location-status', role: 'status' }),
-        createElement('div', { class: 'callout danger location-error', role: 'alert' }),
+        textField('venueName', 'manage.field.venueName', { maxLength: 160 }),
+        textField('city', 'manage.field.city', { maxLength: 80 }),
+        textField('venueAddress', 'manage.field.venueAddress', { maxLength: 300, wide: true }),
+        createElement('label', { class: 'field' }, [createElement('span', { i18n: 'manage.field.country' }), countrySelect]),
       ]),
-      textField('venueName', 'manage.field.venueName', { maxLength: 160 }),
-      textField('city', 'manage.field.city', { maxLength: 80 }),
-      textField('venueAddress', 'manage.field.venueAddress', { maxLength: 300, wide: true }),
-      createElement('label', { class: 'field' }, [createElement('span', { i18n: 'manage.field.country' }), countrySelect]),
-    ]),
-  ]);
+    ]);
 
-  let label = values.label;
-  if (!LABELS.includes(label)) {
-    label = 'event';
-  }
-  labelSelect.value = label;
-  for (const key of TEXT_KEYS) {
-    let value = values[key];
-    if (value === null || value === undefined) {
-      value = '';
+    let label = values.label;
+    if (!labels.includes(label)) {
+      label = labels[0];
     }
-    input(card, key).value = value;
-  }
-  fillCountrySelect(countrySelect, values.country);
-  card.dataset.lookedUp = input(card, 'mapsUrl').value;
-  syncCustomLabel(card);
+    labelSelect.value = label;
+    for (const key of TEXT_KEYS) {
+      let value = values[key];
+      if (value === null || value === undefined) {
+        value = '';
+      }
+      input(card, key).value = value;
+    }
+    fillCountrySelect(countrySelect, values.country);
+    card.dataset.lookedUp = input(card, 'mapsUrl').value;
+    syncCustomLabel(card);
 
-  labelSelect.addEventListener('change', () => syncCustomLabel(card));
-  fillButton.addEventListener('click', () => fillFromLink(card));
-  const linkInput = input(card, 'mapsUrl');
-  // A link pasted or typed in is read straight away; Fill in reads it again.
-  linkInput.addEventListener('paste', () => setTimeout(() => fillFromLink(card), 0));
-  linkInput.addEventListener('change', () => {
-    if (linkInput.value.trim() !== card.dataset.lookedUp) {
-      fillFromLink(card);
-    }
-  });
-  removeButton.addEventListener('click', () => {
-    let next = card.nextElementSibling;
-    if (!next) {
-      next = card.previousElementSibling;
-    }
-    card.remove();
+    labelSelect.addEventListener('change', () => syncCustomLabel(card));
+    fillButton.addEventListener('click', () => fillFromLink(card));
+    const linkInput = input(card, 'mapsUrl');
+    // A link pasted or typed in is read straight away; Fill in reads it again.
+    linkInput.addEventListener('paste', () => setTimeout(() => fillFromLink(card), 0));
+    linkInput.addEventListener('change', () => {
+      if (linkInput.value.trim() !== card.dataset.lookedUp) {
+        fillFromLink(card);
+      }
+    });
+    removeButton.addEventListener('click', () => {
+      let next = card.nextElementSibling;
+      if (!next) {
+        next = card.previousElementSibling;
+      }
+      card.remove();
+      renumber();
+      if (next) {
+        next.querySelector('select').focus();
+      } else {
+        addButton.focus();
+      }
+      announceChange(list);
+    });
+    return card;
+  }
+
+  // Replaces the cards with these locations (as the server sends them).
+  function set(locations) {
+    list.replaceChildren(...locations.map((location) => locationCard(location)));
     renumber();
-    if (next) {
-      next.querySelector('select').focus();
-    } else {
-      byId('locationAdd').focus();
+  }
+
+  // The cards' values, in order, as the server takes them.
+  function read() {
+    return [...list.children].map((card) => {
+      const location = { label: input(card, 'label').value, country: input(card, 'country').value };
+      for (const key of TEXT_KEYS) {
+        location[key] = input(card, key).value;
+      }
+      return location;
+    });
+  }
+
+  // A new, empty card, ready to paste a link into.
+  function add() {
+    let label = labels[1];
+    if (list.children.length === 0) {
+      label = labels[0];
     }
-    announceChange();
-  });
-  return card;
+    const card = locationCard({ label });
+    list.append(card);
+    renumber();
+    input(card, 'mapsUrl').focus();
+  }
+
+  addButton.addEventListener('click', add);
+
+  return {
+    set,
+    read,
+    add,
+    count: () => list.children.length,
+    // Titles the cards and names their Remove buttons again (a meal renamed).
+    retitle: renumber,
+    // Redraws the cards in the reader's language, keeping what was typed.
+    relabel: () => set(read()),
+  };
 }
+
+// The event's own places, in "Where".
+let eventPlaces = null;
 
 // Replaces the cards with these locations (as the server sends them).
 export function setLocations(locations) {
-  list().replaceChildren(...locations.map((location) => locationCard(location)));
-  renumber();
+  eventPlaces.set(locations);
 }
 
 // The cards' values, in order, as the server takes them.
 export function readLocations() {
-  return [...list().children].map((card) => {
-    const location = { label: input(card, 'label').value, country: input(card, 'country').value };
-    for (const key of TEXT_KEYS) {
-      location[key] = input(card, key).value;
-    }
-    return location;
-  });
+  return eventPlaces.read();
 }
 
-// A new, empty card: the event's location when it is the first, the meeting
-// location after that.
-function addLocation() {
-  let label = 'meeting';
-  if (list().children.length === 0) {
-    label = 'event';
-  }
-  const card = locationCard({ label });
-  list().append(card);
-  renumber();
-  input(card, 'mapsUrl').focus();
-}
-
-// Wires the Add button once.
+// Sets up "Where" once: a new card is the event's location when it is the
+// first, the meeting location after that.
 export function startLocations() {
-  byId('locationAdd').addEventListener('click', addLocation);
+  eventPlaces = createLocationList({
+    list: byId('locationList'),
+    addButton: byId('locationAdd'),
+    emptyNote: byId('locationsEmpty'),
+    labels: LABELS,
+    max: MAX_LOCATIONS,
+    title: (number) => translate('manage.location-number', { number }),
+    removeLabel: (number) => translate('manage.location-remove-named', { number }),
+  });
 }
 
 // Redraws the cards in the reader's language, keeping what was typed.
 export function relabelLocations() {
-  setLocations(readLocations());
+  eventPlaces.relabel();
 }

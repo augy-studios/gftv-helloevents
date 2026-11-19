@@ -140,3 +140,11 @@ export async function signInWithBackupCode(page, username, backupCode) {
   await page.locator('#code').fill(backupCode);
   await page.locator('#codeSubmit').click();
 }
+
+// Opens one of the edit form's section tabs on /manage ("Basics", "When and
+// where", "Price and RSVP", "Meals", "Attendees and notes").
+export async function openSection(page, name) {
+  const tab = page.locator('#editorTabs').getByRole('tab', { name, exact: false });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+}

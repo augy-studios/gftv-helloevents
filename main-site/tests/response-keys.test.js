@@ -145,7 +145,7 @@ const DETAIL = [
   ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier']),
-  ...listOf('meals', ['id', 'label', 'limit', 'left']),
+  ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
   ...nest('viewer', ['signedIn', 'going', 'meals', 'canManage']),
 ];
 
@@ -158,7 +158,7 @@ const EDITOR = [
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
   ...listOf('ticketTiers', ['name', 'price', 'benefits', 'includesPrevious', 'previousDisplay']), 'rsvpOpen',
-  ...listOf('meals', ['id', 'label', 'limit']), 'staffNotes',
+  ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]), 'staffNotes',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
 const ATTENDEE = ['username', 'displayName', 'staff', 'meals', 'rsvpAt'];
@@ -175,7 +175,7 @@ const SECURITY = [
 ];
 const PASSKEY = ['id', 'label', 'createdAt', 'lastUsedAt'];
 const NOTIFY = [
-  ...nest('prefs', ['updates', 'reminders', 'newEvents', 'telegram']),
+  ...nest('prefs', ['updates', 'reminderHours', 'newEvents', 'telegram']),
   ...nest('push', ['available', 'publicKey', 'devices']),
   ...nest('telegram', ['available', 'linked']),
 ];
@@ -379,7 +379,10 @@ test('a reset for a public account lists its ways back in, and each step answers
 test('event cards, the event page and an RSVP carry only what those pages show', async () => {
   addEvent({
     slug: 'paid-meet',
-    meal_options: [{ id: 'lunch', label: null }, { id: 'm-tea123', label: 'High tea' }],
+    meal_options: [
+      { id: 'lunch', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat', venue_address: '18 Raffles Quay', city: 'Singapore', country: 'SG', maps_url: null }] },
+      { id: 'm-tea123', label: 'High tea' },
+    ],
     tiers_enabled: true,
     ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
   });
@@ -410,7 +413,7 @@ test('the event list, the edit form, attendees and the cover answer only what /m
       event: {
         title: 'Mega Con', description: 'About the con.', descriptionZh: '关于大会。', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00',
         priceType: 'free', capacity: '50', locations: [{ label: 'event', venueName: 'Expo Hall', city: 'Singapore', country: 'SG' }],
-        meals: [{ id: 'lunch' }, { id: 'm-tea123', label: 'High tea' }],
+        meals: [{ id: 'lunch', locations: [{ label: 'meal', venueName: 'Lau Pa Sat', city: 'Singapore' }] }, { id: 'm-tea123', label: 'High tea' }],
         ticketTiers: [{ name: 'Basic', price: '0', benefits: 'Entry' }],
       },
     },

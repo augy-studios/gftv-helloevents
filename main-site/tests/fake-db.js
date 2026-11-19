@@ -11,7 +11,7 @@ const now = () => new Date().toISOString();
 const DEFAULTS = {
   gftvevents_accounts: () => ({
     staff_user_id: null, username: null, display_name: null, email: null, password_hash: null, terms_accepted_at: null,
-    email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true,
+    email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true, reminder_hours: [24],
     notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null,
   }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
@@ -30,7 +30,7 @@ const DEFAULTS = {
     cover_image_url: null, cover_image_path: null, announced_at: null,
     notice_base: null, notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
   }),
-  gftvevents_attendees: () => ({ meals: [] }),
+  gftvevents_attendees: () => ({ meals: [], reminders_sent: [] }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
   gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
@@ -335,7 +335,7 @@ export function createFakeDb() {
         mine.meals = [...meals];
         return 'changed';
       }
-      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals] });
+      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], reminders_sent: [] });
       return 'ok';
     },
     gftvevents_meal_counts({ p_event_id }) {

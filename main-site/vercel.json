@@ -27,7 +27,7 @@
         },
         {
             "path": "/api/cron/notify",
-            "schedule": "5 * * * *"
+            "schedule": "*/10 * * * *"
         }
     ],
     "rewrites": [

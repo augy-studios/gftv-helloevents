@@ -428,25 +428,114 @@ test('a gone push subscription is forgotten', async () => {
   assert.equal((await m.call(notifications)).json.push.devices, 0);
 });
 
-test('the hourly cron sends each reminder once, and announces new events once to those who asked', async () => {
-  const soon = addEvent({ slug: 'tomorrow-meet', starts_at: new Date(Math.floor((Date.now() + 20 * 3600_000) / 60_000) * 60_000).toISOString() });
-  addEvent({ slug: 'later-meet', starts_at: new Date(Date.now() + 5 * 86400_000).toISOString() });
+test('reminder times are any of 1, 2 or 3 hours, a day or a week before, and nothing else', async () => {
+  const m = await member();
+  assert.deepEqual((await m.call(notifications)).json.prefs.reminderHours, [24], 'a day before to start with');
+  const picked = await m.call(notifications, { method: 'POST', body: { action: 'prefs', reminderHours: [1, 168, 24, 1] } });
+  assert.deepEqual(picked.json.prefs.reminderHours, [168, 24, 1], 'each once, soonest last');
+  const account = () => db.table('gftvevents_accounts').find((a) => a.username === 'otter');
+  assert.deepEqual(account().reminder_hours, [168, 24, 1]);
+  assert.equal(account().notify_reminders, true);
+  for (const bad of [[5], [24, 'x'], '24', [1, 2, 3, 24, 168, 1]]) {
+    const refused = await m.call(notifications, { method: 'POST', body: { action: 'prefs', reminderHours: bad } });
+    assert.equal(refused.status, 400, JSON.stringify(bad));
+  }
+  const none = await m.call(notifications, { method: 'POST', body: { action: 'prefs', reminderHours: [] } });
+  assert.deepEqual(none.json.prefs.reminderHours, []);
+  assert.equal(account().notify_reminders, false);
+  // A page from before reminder times sends reminders: true or false.
+  assert.deepEqual((await m.call(notifications, { method: 'POST', body: { action: 'prefs', reminders: true } })).json.prefs.reminderHours, [24]);
+});
+
+test('the cron reminds people going at the times they picked, once each, with every place on Telegram', async () => {
+  // A little over the minutes, so the heading rounds to them.
+  const at = (minutes) => new Date(Date.now() + minutes * 60_000 + 20_000).toISOString();
+  const soon = addEvent({
+    slug: 'harbour-meet', title: 'Harbour Meet', starts_at: at(50), ends_at: at(290),
+    description: 'A walk.', description_zh: '散步。',
+    venue_name: 'Marina Barrage', venue_address: '8 Marina Gardens Drive', city: 'Singapore', country: 'SG', address_attendees_only: true,
+    is_online: true, online_url: 'https://meet.example.com/harbour',
+    locations: [
+      { label: 'event', venue_name: 'Marina Barrage', venue_address: '8 Marina Gardens Drive', city: 'Singapore', country: 'SG', maps_url: 'https://maps.app.goo.gl/barrage' },
+      { label: 'meeting', venue_name: 'Bayfront MRT, Exit B', city: 'Singapore', country: 'SG' },
+    ],
+    meal_options: [
+      { id: 'lunch', label: null, limit: null, locations: [] },
+      { id: 'dinner', label: null, limit: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat', venue_address: '18 Raffles Quay', city: 'Singapore', country: 'SG', maps_url: null }] },
+    ],
+  });
+  addEvent({ slug: 'later-meet', title: 'Later Meet', starts_at: at(5 * 24 * 60), venue_name: 'Hall' });
+  addEvent({ slug: 'far-meet', title: 'Far Meet', starts_at: at(10 * 24 * 60) });
+
   const m = await member();
   await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
-  await m.call(rsvp, { method: 'POST', body: { slug: 'tomorrow-meet', going: true } });
-  await m.call(rsvp, { method: 'POST', body: { slug: 'later-meet', going: true } });
-  await m.call(notifications, { method: 'POST', body: { action: 'prefs', newEvents: true } });
+  await linkTelegram(m);
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true, reminderHours: [1, 24, 168] } });
+  for (const slug of ['harbour-meet', 'later-meet', 'far-meet']) {
+    await m.call(rsvp, { method: 'POST', body: { slug, going: true } });
+  }
+  // Someone with no reminder times, and someone else who says they are going
+  // only now, after the hour-before mark.
+  const quiet = await member(browser(), { username: 'quiet', email: 'quiet@example.com' });
+  await quiet.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription('https://fcm.googleapis.com/fcm/send/quiet') } });
+  await quiet.call(notifications, { method: 'POST', body: { action: 'prefs', reminderHours: [] } });
+  await quiet.call(rsvp, { method: 'POST', body: { slug: 'harbour-meet', going: true } });
+  const late = await member(browser(), { username: 'late', email: 'late@example.com' });
+  await late.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription('https://fcm.googleapis.com/fcm/send/late') } });
+  await late.call(notifications, { method: 'POST', body: { action: 'prefs', reminderHours: [1] } });
+  // The first two said they were going days ago.
+  const otter = db.table('gftvevents_accounts').find((a) => a.username === 'otter');
+  const quietId = db.table('gftvevents_accounts').find((a) => a.username === 'quiet').id;
+  for (const row of db.table('gftvevents_attendees')) {
+    if (row.user_id === otter.id || row.user_id === quietId) {
+      row.created_at = new Date(Date.now() - 20 * 86400_000).toISOString();
+    }
+  }
+  await late.call(rsvp, { method: 'POST', body: { slug: 'harbour-meet', going: true } });
+  sent = [];
 
   assert.equal((await browser().call(cronNotify, { headers: {} })).status, 401);
   const run = () => browser().call(cronNotify, { headers: { authorization: 'Bearer cron-test' } });
   const first = await run();
-  assert.equal(first.json.reminded, 1);
-  assert.equal(pushes[0].payload.title, 'Tomorrow: Furmeet');
-  assert.ok(db.table('gftvevents_attendees').find((a) => a.event_id === soon.id).reminded_at);
+  assert.equal(first.json.reminded, 2, 'the hour before Harbour Meet, and the week before Later Meet');
+  assert.deepEqual(pushes.map((p) => p.payload.title).sort(), ['Starting in 5 days: Later Meet', 'Starting in 50 minutes: Harbour Meet']);
+  assert.ok(pushes.every((p) => p.endpoint.endsWith('device-1')), 'nobody else');
+  // The push, which can show on a locked screen, keeps to the public when
+  // and where.
+  const harbourPush = pushes.find((p) => p.payload.title.includes('Harbour'));
+  assert.equal(JSON.stringify(harbourPush).includes('Marina Gardens'), false);
+  assert.equal(JSON.stringify(harbourPush).includes('meet.example.com'), false);
+
+  // Telegram, in the chat of someone going: every place, the meal held
+  // somewhere else, and the online link.
+  const message = sent.filter((s) => s.url.endsWith('/sendRichMessage')).map((s) => s.body).find((body) => body.rich_message.markdown.includes('Harbour Meet'));
+  assert.equal(message.chat_id, 777);
+  const markdown = message.rich_message.markdown;
+  assert.match(markdown, /^## Starting in 50 minutes\n\n\*\*Harbour Meet\*\*/);
+  for (const part of ['| When |', '| Ends |', '| Coming for | The whole event |', '| Online link | https://meet.example.com/harbour |',
+    '## Where', '### Event location', '| Address | 8 Marina Gardens Drive |', '| Country | Singapore |', '| Map | https://maps.app.goo.gl/barrage |',
+    '### Meeting location', '| Venue | Bayfront MRT, Exit B |', '## Meals held elsewhere', '### Dinner', '| Venue | Lau Pa Sat |', '| Address | 18 Raffles Quay |',
+    'https://events.globalfurry.tv/e/harbour-meet']) {
+    assert.ok(markdown.includes(part), `${part} in\n${markdown}`);
+  }
+  assert.equal(markdown.includes('### Lunch'), false, 'lunch is at the event');
+  assert.equal(markdown.includes('## Event updated'), false);
+
+  // Marked: the week and day before Harbour Meet with its hour, as they were
+  // overtaken; the late one marked without a reminder.
+  const sentFor = (slug, userId) => db.table('gftvevents_attendees').find((a) => a.event_id === db.table('gftvevents_events').find((e) => e.slug === slug).id && a.user_id === userId).reminders_sent;
+  assert.deepEqual(sentFor('harbour-meet', otter.id), [168, 24, 1]);
+  assert.deepEqual(sentFor('later-meet', otter.id), [168]);
+  assert.deepEqual(sentFor('far-meet', otter.id), []);
+  assert.deepEqual(sentFor('harbour-meet', db.table('gftvevents_accounts').find((a) => a.username === 'late').id), [1]);
+  assert.deepEqual(sentFor('harbour-meet', quietId), []);
+
   pushes = [];
   assert.equal((await run()).json.reminded, 0, 'not twice');
+  assert.equal(soon.slug, 'harbour-meet');
 
   // A new event: announced once. A draft and a future release are not.
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', newEvents: true } });
   addEvent({ slug: 'brand-new', title: 'Brand New Meet', announced_at: null });
   addEvent({ slug: 'secret-draft', status: 'draft', announced_at: null });
   addEvent({ slug: 'not-yet', publish_at: new Date(Date.now() + 86400_000).toISOString(), announced_at: null });

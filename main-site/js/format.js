@@ -133,16 +133,28 @@ export function locationText(place) {
 }
 
 // What a location is, as the event page heads it: "Event location",
-// "Meeting location", or the editor's own label.
+// "Meeting location", "Meal location" (one of a meal's own places), or the
+// editor's own label.
 export function locationLabel(location) {
   if (location.label === 'custom' && location.customLabel) {
     return location.customLabel;
   }
   let label = location.label;
-  if (!['event', 'meeting'].includes(label)) {
+  if (!['event', 'meeting', 'meal'].includes(label)) {
     label = 'event';
   }
   return translate(`location.${label}`);
+}
+
+// How the event page heads one of a meal's own places: the meal's name for
+// where the meal itself is ("Dinner"), and with the label for any other
+// ("Dinner · Meeting location").
+export function mealLocationLabel(meal, location) {
+  const name = mealLabel(meal);
+  if (location.label === 'meal') {
+    return name;
+  }
+  return translate('event.meal-location', { meal: name, label: locationLabel(location) });
 }
 
 // A meal people can come to on its own: the editor's name for it, or

@@ -11,6 +11,12 @@
 // at the bottom of the form says how it stands; a save the server refuses
 // says why there, and is tried again at the next change. The server batches
 // the notices a run of saves sends to people going (api/_lib/notify.js).
+//
+// The form's sections are tabs of their own (Basics, When and where, Price
+// and RSVP, Meals, Attendees and notes), so a section is a click away rather
+// than a long scroll; the tab holding a field the pill asks about is marked.
+// A picture pasted anywhere in the open form (Ctrl+V, or Cmd+V) is used as
+// the cover, exactly as if it had been chosen with "Choose a picture".
 
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
@@ -24,7 +30,7 @@ import { startTabs } from '../tabs.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
-import { setMeals, readMeals, startMeals, relabelMeals, MEALS_CHANGED } from '../manage-meals.js';
+import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANGED } from '../manage-meals.js';
 import { setTiers, readTiers, startTiers, relabelTiers, addTier, TIERS_CHANGED } from '../manage-tiers.js';
 import { mealLabel } from '../format.js';
 
@@ -73,6 +79,8 @@ let cover = { url: '', has: false };
 // it was uploaded with, so "Adjust crop" can crop it again: { bitmap, crop }.
 let coverSource = null;
 let tabs = null;
+// The edit form's own section tabs.
+let editorTabs = null;
 // The list is reloaded when its tab is opened after a save changed it.
 let listStale = false;
 
@@ -85,6 +93,9 @@ let saving = null;
 let again = false;
 let againForced = false;
 let failed = null;
+// The form field the pill's refusal is about, and where it is ({ field,
+// detail }), so its tab can be marked; null when the refusal names none.
+let problem = null;
 let refused = '';
 
 function statusLabel(row) {
@@ -219,6 +230,7 @@ function renderCover() {
     box.append(iconNode('image'));
   }
   byId('coverPick').hidden = !editing;
+  byId('coverPasteHint').hidden = !editing;
   byId('coverSaveFirst').hidden = Boolean(editing);
   let canRemove = false;
   if (editing && cover.has) {
@@ -269,15 +281,9 @@ byId('coverAdjust').addEventListener('click', () => {
   }
 });
 
-// A picture chosen is read, then cropped to the cards' 16:9 in the crop
-// dialog (starting on its middle), then uploaded.
-byId('coverFile').addEventListener('change', async () => {
-  const files = byId('coverFile').files;
-  let file;
-  if (files !== null && files !== undefined) {
-    file = files[0];
-  }
-  byId('coverFile').value = '';
+// A picture chosen or pasted is read, then cropped to the cards' 16:9 in the
+// crop dialog (starting on its middle), then uploaded.
+async function useCoverFile(file) {
   if (!file || !editing) {
     return;
   }
@@ -289,6 +295,67 @@ byId('coverFile').addEventListener('change', async () => {
   if (!uploaded && (!coverSource || coverSource.bitmap !== bitmap)) {
     bitmap.close();
   }
+}
+
+byId('coverFile').addEventListener('change', () => {
+  const files = byId('coverFile').files;
+  let file;
+  if (files !== null && files !== undefined) {
+    file = files[0];
+  }
+  byId('coverFile').value = '';
+  useCoverFile(file);
+});
+
+// The picture on the clipboard of a paste, as a File, or null. Pasting into
+// a text field keeps its text: a picture there is taken only when the
+// clipboard has no text with it (an image copied from a web page often
+// carries its address as text too, and is then left alone in a field).
+function pastedPicture(event) {
+  const data = event.clipboardData;
+  if (!data) {
+    return null;
+  }
+  const item = [...data.items].find((each) => {
+    if (each.kind !== 'file') {
+      return false;
+    }
+    return each.type.startsWith('image/');
+  });
+  if (!item) {
+    return null;
+  }
+  let inField = false;
+  if (event.target instanceof HTMLElement) {
+    inField = event.target.matches('input, textarea, select, [contenteditable="true"]');
+  }
+  if (inField && data.types.includes('text/plain')) {
+    return null;
+  }
+  return item.getAsFile();
+}
+
+// Ctrl+V (or Cmd+V) with a picture on the clipboard, anywhere in the open
+// form, does what "Choose a picture" does with it. Basics opens, so the
+// cover can be seen; before the event has saved, it says a picture can be
+// added once it has. Not while a dialog (the crop dialog) is open.
+document.addEventListener('paste', (event) => {
+  if (form.hidden || byId('panel-editor').hidden || document.querySelector('.modal-backdrop:not(.hidden)')) {
+    return;
+  }
+  const file = pastedPicture(event);
+  if (!file) {
+    return;
+  }
+  event.preventDefault();
+  editorTabs.open('basics');
+  if (!editing) {
+    byId('coverError').textContent = translate('manage.hint.cover-save-first');
+    byId('coverSaveFirst').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+  byId('coverError').textContent = '';
+  useCoverFile(file);
 });
 
 byId('coverRemove').addEventListener('click', () => {
@@ -512,6 +579,11 @@ byId('slugEdit').addEventListener('click', () => {
 // The pill at the bottom of the form: saving, saved, why a save was refused,
 // or what a new event still needs before it can be saved.
 function renderStatus() {
+  let shownProblem = null;
+  if (failed) {
+    shownProblem = problem;
+  }
+  markProblemTab(shownProblem);
   const box = byId('autosaveStatus');
   box.className = 'autosave-status';
   box.replaceChildren();
@@ -537,6 +609,47 @@ function renderStatus() {
   }
   box.classList.add('is-saved');
   box.append(iconNode('check'), createElement('span', { text: translate('manage.autosave.saved') }));
+}
+
+// Fields that are not one input of their own, by the section tab they are in.
+const FIELD_TABS = {
+  locations: 'when', locationLabel: 'when', customLabel: 'when', venueName: 'when', venueAddress: 'when', city: 'when', country: 'when', mapsUrl: 'when',
+  ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price',
+  meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
+};
+
+// The section tab a refused field is in: a meal's place is under Meals, a
+// ticket tier's field under Price, a location's under When and where, and
+// any other field wherever its input is.
+function tabOfField({ field, detail }) {
+  if (typeof detail.meal === 'string') {
+    return 'meals';
+  }
+  if (Number.isInteger(detail.tier)) {
+    return 'price';
+  }
+  if (Number.isInteger(detail.location)) {
+    return 'when';
+  }
+  const input = byId(`f-${field}`);
+  if (input && input.closest('.editor-panel')) {
+    return input.closest('.editor-panel').id.replace(/^epanel-/, '');
+  }
+  if (FIELD_TABS[field]) {
+    return FIELD_TABS[field];
+  }
+  return null;
+}
+
+// Marks the tab with the field the pill asks about (none: no marks).
+function markProblemTab(shown) {
+  let name = null;
+  if (shown) {
+    name = tabOfField(shown);
+  }
+  for (const tab of byId('editorTabs').querySelectorAll('[role="tab"]')) {
+    tab.querySelector('.tab-mark').hidden = tab.dataset.tab !== name;
+  }
 }
 
 function isDirty() {
@@ -613,6 +726,7 @@ function autosave({ force = false } = {}) {
   }
   if (missing) {
     failed = translate('error.invalid_field', { field: translate(`manage.field.${missing}`) });
+    problem = { field: missing, detail: {} };
     refused = body;
     renderStatus();
     return Promise.resolve();
@@ -648,6 +762,7 @@ async function saveForm(sent, body) {
     }
     if (!check.free) {
       failed = translate('error.slug_taken');
+      problem = { field: 'slug', detail: {} };
       refused = body;
       showSlugTaken(sent.slug);
       return;
@@ -663,7 +778,15 @@ async function saveForm(sent, body) {
   try {
     data = await post('/api/manage/events', request);
   } catch (error) {
+    // A refused field in one of a meal's places is said with the meal's name.
+    if (error.detail && typeof error.detail.meal === 'string') {
+      error.detail.mealName = mealNameFor(error.detail.meal);
+    }
     failed = errorText(error);
+    problem = null;
+    if (error.detail && error.detail.field) {
+      problem = { field: error.detail.field, detail: error.detail };
+    }
     refused = body;
     if (error.code === 'slug_taken') {
       showSlugTaken(sent.slug);
@@ -903,6 +1026,7 @@ async function openNew() {
   attendees = [];
   byId('manageNotice').textContent = '';
   setForm(BLANK);
+  editorTabs.open('basics');
   showEditor(translate('manage.new-title'));
 }
 
@@ -915,7 +1039,29 @@ async function removeAttendee(username, staff) {
   });
 }
 
-byId('editorDelete').addEventListener('click', () => openModal('deleteModal'));
+// Delete asks first, and offers to cancel the event instead (unless it is
+// already cancelled), which keeps it and its RSVPs and tells the people
+// going.
+byId('editorDelete').addEventListener('click', () => {
+  const cancelled = byId('f-status').value === 'cancelled';
+  byId('cancelInstead').hidden = cancelled;
+  byId('cancelInsteadHint').hidden = cancelled;
+  openModal('deleteModal');
+});
+byId('cancelInstead').addEventListener('click', async () => {
+  closeModal('deleteModal');
+  byId('manageNotice').textContent = '';
+  byId('f-status').value = 'cancelled';
+  editorTabs.open('price');
+  await autosave({ force: true });
+  // A save already on its way when this was asked saves this straight after.
+  while (saving) {
+    await saving;
+  }
+  if (!failed && !isDirty()) {
+    byId('manageNotice').textContent = translate('manage.cancelled-instead');
+  }
+});
 byId('deleteConfirm').addEventListener('click', () => {
   withBusy(byId('deleteConfirm'), byId('editorError'), async () => {
     await post('/api/manage/events', { action: 'delete', id: editing.id });
@@ -942,6 +1088,34 @@ byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
 startMeals();
 startTiers();
+
+// The edit form's section tabs, kept out of the address (it already says
+// #editor). A tab picked with the tab bar stuck under the page header (the
+// form scrolled down) starts at its top, not partway down.
+editorTabs = startTabs(byId('editorTabs'), {
+  useHash: false,
+  onSelect(name) {
+    const bar = byId('editorTabs');
+    if (form.hidden) {
+      return;
+    }
+    const stuckAt = parseFloat(getComputedStyle(bar).top);
+    if (!(bar.getBoundingClientRect().top <= stuckAt + 1)) {
+      return;
+    }
+    const panel = byId(`epanel-${name}`);
+    const top = window.scrollY + panel.getBoundingClientRect().top - stuckAt - bar.offsetHeight - 8;
+    window.scrollTo({ top: Math.max(0, top) });
+  },
+});
+
+// The page header's height, for the tab bar to stick just under it.
+const header = document.querySelector('.site-header');
+if (header) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--header-height', `${header.offsetHeight}px`);
+  }).observe(header);
+}
 
 // Signed out: off to sign in, then back here. Signed in without the right to
 // manage: a message instead of the list. Otherwise the list and the staff

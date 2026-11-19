@@ -22,7 +22,24 @@ import { database, TABLES } from './supabase.js';
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
 const ACCOUNT_COLUMNS =
-  'id, kind, username, display_name, status, notify_updates, notify_reminders, notify_new_events, notify_telegram';
+  'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram';
+
+// When reminders can come, in hours before an event starts (migrations/011):
+// 1, 2 and 3 hours, a day and a week. An account picks any of them.
+export const REMINDER_HOURS = [1, 2, 3, 24, 168];
+// What an account has before it picks (and a staff member with no accounts
+// row yet): a day before.
+const DEFAULT_REMINDER_HOURS = [24];
+
+// The reminder times in a stored or sent list: the allowed ones, each once,
+// soonest last ([168, 24, 1] for a week, a day and an hour). Anything else is
+// left out.
+export function reminderHoursFrom(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return REMINDER_HOURS.filter((hours) => list.some((each) => Number(each) === hours)).reverse();
+}
 const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash`;
 
 // For a session lookup: the account row with its staff record embedded.
@@ -76,17 +93,24 @@ function fromPublic(account) {
   return normalised;
 }
 
-// The account's notification choices. Updates and reminders are on unless
-// switched off; new events and Telegram are off unless switched on. A staff
+// The account's notification choices. Updates are on unless switched off;
+// reminders come at the times picked (a day before until something else is
+// picked); new events and Telegram are off unless switched on. A staff
 // member with no accounts row yet (account null) has the defaults.
 function notificationPreferences(account) {
   let row = account;
   if (row === null || row === undefined) {
     row = {};
   }
+  let reminderHours = DEFAULT_REMINDER_HOURS;
+  if (Array.isArray(row.reminder_hours)) {
+    reminderHours = reminderHoursFrom(row.reminder_hours);
+  } else if (row.notify_reminders === false) {
+    reminderHours = [];
+  }
   return {
     updates: row.notify_updates !== false,
-    reminders: row.notify_reminders !== false,
+    reminderHours,
     newEvents: row.notify_new_events === true,
     telegram: row.notify_telegram === true,
   };

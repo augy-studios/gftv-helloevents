@@ -95,3 +95,50 @@ export function eventNoticeMessage(notice) {
   const fallback = [notice.heading, '', notice.title, ...notice.lines, '', notice.url].join('\n');
   return { markdown, fallback };
 }
+
+// A reminder before an event, for someone going (notify.js reminderNotice):
+//
+//   ## Starting in 1 hour
+//   **Title**
+//   | | Detail |      When, Ends, Coming for, Online link
+//   ## Where
+//   ### Event location
+//   | | Detail |      Venue, Address, City, Country, Map
+//   ### Meeting location
+//   ...
+//   ## Meals held elsewhere (or "Your meals", for someone coming just for
+//   ### Dinner                some meals)
+//   ...
+//   the event page link
+//
+// notice: { heading, title, url, details: [[label, value]], places and
+// mealPlaces: [{ heading, rows: [[label, value]] }], online (an online-only
+// event, with no places), mealsHeading }.
+export function reminderMessage(notice) {
+  const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`, '', richTable(['Detail'], notice.details)];
+  const fallback = [notice.heading, '', notice.title, '', ...notice.details.map(([label, value]) => `${label}: ${value}`)];
+
+  // One section of places: its heading, then each place's own heading and
+  // details.
+  const section = (heading, places) => {
+    markdown.push('', `## ${escapeMd(heading)}`);
+    fallback.push('', heading.toUpperCase());
+    for (const place of places) {
+      markdown.push('', `### ${escapeMd(place.heading)}`, '', richTable(['Detail'], place.rows));
+      fallback.push('', place.heading, ...place.rows.map(([label, value]) => `${label}: ${value}`));
+    }
+  };
+  if (notice.places.length) {
+    section('Where', notice.places);
+  } else if (notice.online) {
+    markdown.push('', '## Where', '', 'Online');
+    fallback.push('', 'WHERE', 'Online');
+  }
+  if (notice.mealPlaces.length) {
+    section(notice.mealsHeading, notice.mealPlaces);
+  }
+
+  markdown.push('', escapeMd(notice.url));
+  fallback.push('', notice.url);
+  return { markdown: markdown.join('\n'), fallback: fallback.join('\n') };
+}

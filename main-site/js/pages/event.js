@@ -5,7 +5,7 @@ import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
-import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealsText, mealPlacesText, tierPriceText } from '../format.js';
+import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 
 const byId = (id) => document.getElementById(id);
@@ -57,29 +57,47 @@ function addressLines(location) {
   return lines;
 }
 
+// One labelled place: its heading, "Venue, City, Country" (or "Place to be
+// announced"), then its address and map link when this viewer may see them.
+function labelledPlace(heading, location) {
+  let name = locationText(location);
+  if (!name) {
+    name = translate('event.place-tba');
+  }
+  return [
+    createElement('span', { class: 'location-heading', text: heading }),
+    createElement('span', { text: name }),
+    ...addressLines(location),
+  ];
+}
+
 // The place lines: one place on its own reads as before ("Venue, City,
 // Country", and online); several, or one labelled other than the event's
-// location, each get their label, then "Online too" when it is.
-function placeLines(where) {
+// location, each get their label, then "Online too" when it is. A meal held
+// somewhere else follows, headed with the meal's name ("Dinner"), so the
+// event's own place is then labelled too.
+function placeLines(where, meals) {
   const locations = where.locations;
-  if (locations.length === 0) {
-    return [createElement('span', { text: placeText(where) })];
+  const mealPlaces = [];
+  for (const meal of meals) {
+    for (const location of meal.locations) {
+      mealPlaces.push(...labelledPlace(mealLocationLabel(meal, location), location));
+    }
   }
-  if (locations.length === 1 && locations[0].label === 'event') {
+  if (locations.length === 0) {
+    return [createElement('span', { text: placeText(where) }), ...mealPlaces];
+  }
+  if (locations.length === 1 && locations[0].label === 'event' && mealPlaces.length === 0) {
     return [createElement('span', { text: placeText(where) }), ...addressLines(locations[0])];
   }
   const lines = [];
   for (const location of locations) {
-    lines.push(createElement('span', { class: 'location-heading', text: locationLabel(location) }));
-    let name = locationText(location);
-    if (!name) {
-      name = translate('event.place-tba');
-    }
-    lines.push(createElement('span', { text: name }), ...addressLines(location));
+    lines.push(...labelledPlace(locationLabel(location), location));
   }
   if (where.online) {
     lines.push(createElement('span', { text: translate('event.online-too') }));
   }
+  lines.push(...mealPlaces);
   return lines;
 }
 
@@ -88,7 +106,7 @@ function placeLines(where) {
 function renderWhere() {
   const whereElement = byId('factWhere');
   const where = event.where;
-  const lines = placeLines(where);
+  const lines = placeLines(where, event.meals);
   if (where.addressForAttendees) {
     lines.push(createElement('span', { class: 'muted small', text: translate('event.address-for-attendees') }));
   }

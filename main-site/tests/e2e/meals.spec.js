@@ -2,10 +2,13 @@
 // event and changes their mind while going; an editor changes which meals
 // are offered and sees who is coming for which.
 
-import { test, expect, serverOrigin, enterPassword, signInAsStaff } from './fixtures.js';
+import { test, expect, serverOrigin, enterPassword, signInAsStaff, openSection } from './fixtures.js';
 import { EVENTS, MEMBER, STAFF } from './seed.js';
 
 const event = EVENTS.convention;
+// Leaves the field being typed in (focus moves to the form's title), which
+// saves it.
+const leaveField = (page) => page.locator('#editorTitle').click();
 
 test('a member RSVPs only for lunch, adds high tea, then comes to the whole event', async ({ page }) => {
   await page.goto(`/e/${event.slug}`);
@@ -74,12 +77,15 @@ test('an editor changes the meals offered and sees who is coming for which', asy
   await expect(page.locator('#editorTitle')).toHaveText(`Editing ${event.title}`);
   const status = page.locator('#autosaveStatus');
   await expect(status).toHaveText('All changes saved');
+  await openSection(page, 'Meals');
   await expect(page.locator('#f-meal-breakfast')).not.toBeChecked();
   await expect(page.locator('#f-meal-lunch')).toBeChecked();
   await expect(page.locator('#f-meal-dinner')).toBeChecked();
   await expect(page.locator('#mealCustomList input[data-meal-id]')).toHaveValue('High tea');
+  await openSection(page, 'Attendees and notes');
   await expect(page.locator('#attendeesMeals')).toHaveText('Just for a meal: Dinner 1');
   await expect(page.locator('#attendeeList')).toContainText('Just for: Dinner');
+  await openSection(page, 'Meals');
 
   // Breakfast on, lunch off: each saves as it is ticked.
   await page.locator('#f-meal-breakfast').check();
@@ -90,7 +96,7 @@ test('an editor changes the meals offered and sees who is coming for which', asy
   await page.locator('#mealCustomList input[data-meal-id]').fill('Afternoon tea');
   await page.locator('#mealAdd').click();
   await page.locator('#mealCustomList input[data-meal-id]').nth(1).fill('Supper');
-  await page.locator('#f-staffNotes').click();
+  await leaveField(page);
   await expect(status).toHaveText('All changes saved');
   // The second one's Remove button saves at once.
   await page.getByRole('button', { name: 'Remove meal 2' }).click();
@@ -98,11 +104,14 @@ test('an editor changes the meals offered and sees who is coming for which', asy
   // Lunch is off, so its places are too; dinner gets one place.
   await expect(page.locator('#f-meal-lunch-limit')).toBeDisabled();
   await page.getByLabel('Places for Dinner (blank for no limit)').fill('1');
-  await page.locator('#f-staffNotes').click();
+  await leaveField(page);
   await expect(status).toHaveText('All changes saved');
+  await openSection(page, 'Attendees and notes');
   await expect(page.locator('#attendeesMeals')).toHaveText('Just for a meal: Dinner 1 of 1');
 
   await page.reload();
+  // The section open before the reload is not kept: the form opens on Basics.
+  await openSection(page, 'Meals');
   await expect(page.locator('#f-meal-breakfast')).toBeChecked();
   await expect(page.locator('#f-meal-lunch')).not.toBeChecked();
   await expect(page.locator('#mealCustomList input[data-meal-id]')).toHaveCount(1);
@@ -114,4 +123,73 @@ test('an editor changes the meals offered and sees who is coming for which', asy
   // Dinner is full, but the editor already has a place at it.
   await expect(page.getByLabel('Dinner (full)')).toBeChecked();
   await expect(page.getByLabel('Dinner (full)')).toBeEnabled();
+});
+
+test('an editor holds dinner somewhere else, and the event page says where', async ({ page }) => {
+  await page.goto('/login?next=/manage');
+  await signInAsStaff(page, STAFF.username);
+  await page.waitForURL(`${serverOrigin()}/manage`);
+  await page.goto(`/manage?slug=${event.slug}#editor`);
+  await expect(page.locator('#editorTitle')).toHaveText(`Editing ${event.title}`);
+  const status = page.locator('#autosaveStatus');
+  await expect(status).toHaveText('All changes saved');
+  await openSection(page, 'Meals');
+
+  // Breakfast is not offered, so it has no "held somewhere else"; dinner does.
+  await expect(page.getByLabel('Breakfast is held somewhere else')).toBeHidden();
+  const dinnerAway = page.getByLabel('Dinner is held somewhere else');
+  await expect(dinnerAway).not.toBeChecked();
+
+  // Ticking it opens a first card, labelled as the meal's location.
+  await dinnerAway.check();
+  const dinnerPlace = page.locator('.meal-place').filter({ has: dinnerAway });
+  const card = dinnerPlace.locator('.location-card');
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('.location-title')).toHaveText('Dinner: location 1');
+  await expect(card.locator('[data-key="label"]')).toHaveValue('meal');
+  await expect(card.locator('[data-key="mapsUrl"]')).toBeFocused();
+  await card.locator('[data-key="venueName"]').fill('Lau Pa Sat');
+  await card.locator('[data-key="venueAddress"]').fill('18 Raffles Quay');
+  await leaveField(page);
+  await expect(status).toHaveText('All changes saved');
+
+  // A meeting point for dinner too.
+  await dinnerPlace.getByRole('button', { name: 'Add a place' }).click();
+  await expect(card).toHaveCount(2);
+  await expect(card.nth(1).locator('[data-key="label"]')).toHaveValue('meeting');
+  await card.nth(1).locator('[data-key="venueName"]').fill('Raffles Place MRT, Exit H');
+  await leaveField(page);
+  await expect(status).toHaveText('All changes saved');
+
+  await page.reload();
+  await openSection(page, 'Meals');
+  await expect(page.getByLabel('Dinner is held somewhere else')).toBeChecked();
+  await expect(page.getByLabel('Lunch is held somewhere else')).not.toBeChecked();
+  await expect(card.nth(0).locator('[data-key="venueName"]')).toHaveValue('Lau Pa Sat');
+  await expect(card.nth(1).locator('[data-key="venueName"]')).toHaveValue('Raffles Place MRT, Exit H');
+
+  // The event page lists the event's own place, then dinner's.
+  await page.goto(`/e/${event.slug}`);
+  const where = page.locator('#factWhere');
+  await expect(where).toContainText('Event location');
+  await expect(where).toContainText('Suntec Convention Centre');
+  await expect(where.locator('.location-heading')).toHaveText(['Event location', 'Dinner', 'Dinner · Meeting location']);
+  await expect(where).toContainText('Lau Pa Sat');
+  await expect(where).toContainText('18 Raffles Quay');
+  await expect(where).toContainText('Raffles Place MRT, Exit H');
+
+  // Unticked, dinner is back at the event, and its cards are not saved.
+  await page.goto(`/manage?slug=${event.slug}#editor`);
+  await expect(status).toHaveText('All changes saved');
+  await openSection(page, 'Meals');
+  await page.getByLabel('Dinner is held somewhere else').uncheck();
+  await expect(card.first()).toBeHidden();
+  await expect(status).toHaveText('All changes saved');
+  await page.reload();
+  await openSection(page, 'Meals');
+  await expect(page.getByLabel('Dinner is held somewhere else')).not.toBeChecked();
+  await expect(card).toHaveCount(0);
+  await page.goto(`/e/${event.slug}`);
+  await expect(page.locator('#factWhere')).not.toContainText('Lau Pa Sat');
+  await expect(page.locator('#factWhere .location-heading')).toHaveCount(0);
 });

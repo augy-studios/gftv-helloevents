@@ -1,9 +1,9 @@
 // The edit form's own event link (and what happens when another event has
-// it), ticket tiers shown on the event page, and cropping a cover picture
-// to the cards' 16:9.
+// it), ticket tiers shown on the event page, cropping a cover picture to the
+// cards' 16:9, and pasting one in.
 
 import sharp from 'sharp';
-import { test, expect, serverOrigin, signInAsStaff } from './fixtures.js';
+import { test, expect, serverOrigin, signInAsStaff, openSection } from './fixtures.js';
 import { EVENTS, STAFF } from './seed.js';
 
 const event = EVENTS.convention;
@@ -58,6 +58,7 @@ test('a custom link is tidied and saved; a taken one says so and can get a rando
 
 test('ticket tiers, each including the one before, show on the event page', async ({ page }) => {
   await openEvent(page);
+  await openSection(page, 'Price and RSVP');
   await expect(page.locator('#tierSection')).toBeHidden();
   await page.locator('#f-tiersEnabled').check();
   // A first card to fill in; the From and Up to prices now come from tiers.
@@ -92,6 +93,7 @@ test('ticket tiers, each including the one before, show on the event page', asyn
   await expect(page.locator('#f-priceMax')).toHaveValue('120');
 
   await page.reload();
+  await openSection(page, 'Price and RSVP');
   await expect(cards).toHaveCount(3);
   await expect(field(2, 'previousDisplay')).toHaveValue('full');
 
@@ -178,4 +180,49 @@ test('a portrait cover is cropped to 16:9, from the middle, and can be cropped a
   await page.keyboard.press('Escape');
   await expect(page.locator('#cropModal')).toBeHidden();
   expect(sent).toBe(false);
+});
+
+// Pastes a picture into the page the way Ctrl+V does: a paste event whose
+// clipboard holds the file (and, with text, some text too) on target.
+async function pastePicture(page, target, buffer, { text = null } = {}) {
+  await page.locator(target).evaluate((element, { bytes, withText }) => {
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array(bytes)], 'pasted.png', { type: 'image/png' }));
+    if (withText !== null) {
+      data.setData('text/plain', withText);
+    }
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, { bytes: [...buffer], withText: text });
+}
+
+test('a picture pasted into the form becomes the cover, as if it had been chosen', async ({ page }) => {
+  await openEvent(page);
+  await expect(page.locator('#coverPasteHint')).toHaveText('Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).');
+  const picture = await portraitPng();
+
+  // Pasted into a text field together with text, the text is pasted and
+  // the picture left alone.
+  await pastePicture(page, '#f-summary', picture, { text: 'https://example.org/cat.png' });
+  await expect(page.locator('#cropModal')).toBeHidden();
+
+  // Pasted from another section: Basics opens, then the crop dialog.
+  await openSection(page, 'Meals');
+  await pastePicture(page, '#epanel-meals', picture);
+  await expect(page.locator('#cropModal')).toBeVisible();
+  await expect(page.locator('#etab-basics')).toHaveAttribute('aria-selected', 'true');
+  const upload = page.waitForRequest('**/api/manage/cover');
+  await page.locator('#cropUse').click();
+  const cover = await uploaded(await upload);
+  expect(cover.width).toBe(600);
+  expect(cover.middle[1]).toBeGreaterThan(200);
+  await expect(page.locator('#cropModal')).toBeHidden();
+  await expect(page.locator('#coverAdjust')).toBeVisible();
+
+  // A new event cannot take one until it has saved, and says so.
+  await page.locator('#newEvent').click();
+  await expect(page.locator('#editorTitle')).toHaveText('New event');
+  await expect(page.locator('#coverPasteHint')).toBeHidden();
+  await pastePicture(page, '#eventForm', picture);
+  await expect(page.locator('#cropModal')).toBeHidden();
+  await expect(page.locator('#coverError')).toHaveText('A picture can be added once the event has saved.');
 });

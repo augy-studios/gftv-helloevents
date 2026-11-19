@@ -49,7 +49,10 @@ the functions with the service role key. No Supabase Auth, no request signing.
   (`js/cover-crop.js`) with a frame the shape of the cards' 16:9 thumbnail, starting on the
   middle of the picture, with the strips the wider 21:9 banner on the event page leaves out shaded
   and edged with dashed lines; the editor drags and zooms (slider, wheel, pinch or keyboard) to pick
-  the part to show, and "Adjust crop" re-crops the picture chosen in that visit. The browser
+  the part to show, and "Adjust crop" re-crops the picture chosen in that visit. Besides "Choose
+  a picture", a picture copied to the clipboard can be pasted anywhere in the open form (Ctrl+V,
+  Cmd+V on a Mac) and goes through exactly the same crop and upload; pasted into a text field
+  along with text (an image copied from a web page), the text is pasted instead. The browser
   then converts the part kept to a compressed 16:9 WebP (at most 1600 px wide and 1 MB); the server checks it really is a still WebP within the
   size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
   Supabase Storage bucket `gftvevents_covers`. The event keeps the object's path; the old picture is
@@ -58,7 +61,11 @@ the functions with the service role key. No Supabase Auth, no request signing.
   Manage event). The form saves itself whenever a field is left, a list option picked or a box
   ticked; a pill at the bottom says "Saving…", "All changes saved" or why a change was refused.
   A new event is created once it has a title, both descriptions and a start date. The open event
-  is kept in the address (`/manage?slug=...#editor`), so a reload reopens it.
+  is kept in the address (`/manage?slug=...#editor`), so a reload reopens it. The form's sections
+  are tabs of their own, stuck under the page header while it scrolls: Basics, When and where,
+  Price and RSVP, Meals, and Attendees and notes. When a change is refused, the tab holding the
+  field is marked with a dot. Delete (admins only) asks first, and offers "Set to Cancelled
+  instead", which keeps the event and its RSVP list and tells the people going.
 - **Event links.** The form's "Event link" field is the event's address (`/e/<link>`), made from
   the title when left blank. A typed link is tidied (lowercase, hyphens) and checked
   (`GET /api/manage/events?checkSlug=`) before it is saved; one another event has is not saved,
@@ -83,6 +90,16 @@ the functions with the service role key. No Supabase Auth, no request signing.
   which would take a space. A cancelled or finished event takes no changes. A
   meal the editor stops offering drops out of everyone's choice (kept in the database, so ticking
   it again brings it back); someone left with none counts as coming to the whole event.
+- **A meal held somewhere else.** Under each meal offered, "Held somewhere else" opens up to three
+  location cards like the ones in "Where" (a Google Maps link fills them in), each labelled as the
+  meal's location, the meeting location, or the editor's own label: dinner at a restaurant after
+  the meet, with a meeting point to walk over from. They are kept in that meal's entry in
+  `meal_options` as `locations` (the same shape as the event's own, migrations/004), so no
+  migration is needed; none means the meal is at the event's place, and unticking the box saves
+  none. The event page lists them under "Where" after the event's own places, headed with the
+  meal's name ("Dinner", "Dinner · Meeting location"). "Show the street addresses and map links
+  only to people going" covers them too. Moving a meal's place, or bringing it back to the event,
+  tells the people going, like any change of place.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
@@ -92,13 +109,24 @@ the functions with the service role key. No Supabase Auth, no request signing.
   Notifications, Security, and (public accounts only) Profile, to rename or delete the account.
   The open tab is kept in the address (`/account#security`).
 - **Notifications**, chosen on the account page: changes of time or place (or a cancellation) of
-  events you are going to, a reminder the day before, and, off by default, new events. They go by
+  events you are going to, reminders before them, and, off by default, new events. They go by
   Web Push to the browsers you switch on (subscriptions stored in Upstash Redis) and, if you choose,
   to your linked Telegram chat. A notice carries only what the public event page shows. Reminders
-  and new-event notices come from the hourly cron `/api/cron/notify`. Because the edit form
-  autosaves field by field, change notices are batched: they go out about 45 seconds after the
+  and new-event notices come from the cron `/api/cron/notify`, every ten minutes. Because the edit
+  form autosaves field by field, change notices are batched: they go out about 45 seconds after the
   editor's last save, once, comparing the event with how it was before the first change
-  (migrations/006); the hourly cron sends any left over.
+  (migrations/006); the cron sends any left over.
+- **Reminders** (migrations/011). Each account ticks any of 1 hour, 2 hours, 3 hours, 1 day and
+  1 week before (a day before to start with). Each time goes at most once per RSVP, within five
+  minutes of it; if two have come at once (a cron that was down), only the closer one goes. A time
+  that came before someone said they were going is skipped, and an event whose start time is to
+  be confirmed gets only the day and week reminders. The push notification, which can show on a
+  locked screen, says only when and where. The Telegram reminder is a rich message (headings and
+  tables, with a plain-text fallback) with everything someone going sees on the event page: when it
+  starts and ends, the whole event or which meals they are coming for, the online link, every
+  place (event location, meeting location, custom ones) with its street address, country and map
+  link, and each meal held somewhere else with its own places (just their meals, for someone
+  coming only for some), then the event link.
 
 ## Setup, in order
 
@@ -107,14 +135,16 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 010) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 011) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
    `008_ticket_tiers.sql` before deploying ticket tiers: saving an event writes its columns. Run
    `009_meal_limits.sql` before deploying meal limits: the feed and event pages count spaces
    through its view, and it replaces the RSVP function again. `010_meal_changes_after_close.sql`
-   replaces it once more, so people going can change their meals after RSVPs close.
+   replaces it once more, so people going can change their meals after RSVPs close. Run
+   `011_reminder_times.sql` before deploying reminder times: the account page and the cron read
+   its columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
@@ -126,7 +156,8 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    connect it to this project. Vercel sets `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
    Redeploy afterwards.
 4. **Vercel project.** Root directory `main-site`. `vercel.json` sets the region (sin1), the
-   `/e/<slug>` rewrite to the link-preview function (which bundles `event.html`), security headers, the daily cleanup cron and the hourly notification cron.
+   `/e/<slug>` rewrite to the link-preview function (which bundles `event.html`), security headers, the daily cleanup cron and the notification cron (every ten minutes, so an hour-before reminder
+   is on time; Vercel's Hobby plan runs crons only once a day, so this needs Pro).
 5. **Domain.** Add `events.globalfurry.tv` to the Vercel project. Passkeys are bound to this
    hostname (`SITE_URL`), so they do not work on preview URLs.
 6. **Telegram (optional).** Make a new bot with @BotFather (not the OneLink one: a bot has one

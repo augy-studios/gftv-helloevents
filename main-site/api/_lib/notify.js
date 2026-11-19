@@ -4,8 +4,9 @@
 //   updates    an event you are going to changes when or where it happens,
 //              or is cancelled (sent shortly after an editor saves the change,
 //              once for a run of saves: queueEventChange below)
-//   reminders  a day before an event you are going to (cron/notify.js,
-//              hourly; once per RSVP)
+//   reminders  before an event you are going to, at the times the account
+//              picked: 1, 2 or 3 hours, a day, a week (cron/notify.js, every
+//              ten minutes; each time once per RSVP: sendReminders)
 //   newEvents  a new event is announced, off by default (cron/notify.js,
 //              once per event, when it is released)
 //
@@ -17,21 +18,33 @@
 // the public event page shows: title, when (unless to be announced), the
 // place name and the page link. Never an online link or an attendees-only
 // address; those stay on the event page for people going.
+//
+// The one exception is a reminder's Telegram message, which goes only to
+// someone going, in their own linked chat: it carries what the event page
+// shows them as someone going, every place with its street address and map
+// link (the meeting point, a meal held somewhere else), and the online link.
+// Its push notification, which can show on a locked screen, stays to the
+// public when and where.
 
 import { waitUntil } from '@vercel/functions';
 import { database, TABLES } from './supabase.js';
 import { siteUrl } from './env.js';
 import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
-import { eventNoticeMessage } from './telegram-messages.js';
-import { isReleased, storedLocations } from './event-rules.js';
-import { whenText, placeText } from './event-text.js';
+import { eventNoticeMessage, reminderMessage } from './telegram-messages.js';
+import { reminderHoursFrom } from './users.js';
+import { isReleased, storedLocations, storedMeals } from './event-rules.js';
+import { whenText, endText, placeText, countryText, untilText } from './event-text.js';
 import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
 // The most accounts one "new event" run tells, so one cron run stays short.
 export const MAX_ANNOUNCE = 2000;
-export const REMIND_WITHIN_HOURS = 24;
+// The furthest ahead a reminder can be (a week), and how early one may go:
+// the cron runs every ten minutes (vercel.json), so a reminder goes between
+// five minutes early and five minutes late.
+export const REMIND_WITHIN_HOURS = 168;
+export const REMINDER_LEAD_MS = 5 * 60_000;
 
 // A query's rows, or an empty list when it gave back none (null).
 function rowsOf(data) {
@@ -71,9 +84,6 @@ export function noticeFor(kind, row) {
   if (kind === 'updated') {
     return { heading: 'Event updated', title: row.title, lines: ['The time or place changed. Now:', ...lines], url, tag: `event-${row.slug}` };
   }
-  if (kind === 'reminder') {
-    return { heading: 'Tomorrow', title: row.title, lines, url, tag: `reminder-${row.slug}` };
-  }
   return { heading: 'New event', title: row.title, lines, url, tag: `new-${row.slug}` };
 }
 
@@ -106,7 +116,11 @@ export async function deliver(accounts, notice) {
       let reachedAccount = (await pushToAccount(account.id, payload)) > 0;
       const chat = chats.get(account.id);
       if (chat) {
-        const message = eventNoticeMessage(notice);
+        // A reminder brings its own, fuller message (reminderNotice).
+        let message = notice.rich;
+        if (!message) {
+          message = eventNoticeMessage(notice);
+        }
         try {
           await sendRichTelegram(chat, message);
           reachedAccount = true;
@@ -175,6 +189,31 @@ function locationsChanged(before, after) {
   return JSON.stringify(storedLocations(before)) !== JSON.stringify(storedLocations(after));
 }
 
+// Whether a meal's own places changed (one moved, or a meal now held
+// somewhere other than the event, or back at it). A meal added, removed or
+// with a new limit is not a move. A notice_base kept before meal places
+// existed has no meal_options, and is taken as unchanged.
+function mealPlacesChanged(before, after) {
+  if (!('meal_options' in before) || !('meal_options' in after)) {
+    return false;
+  }
+  const placesOf = (row) => {
+    const places = {};
+    for (const meal of storedMeals(row)) {
+      places[meal.id] = meal.locations;
+    }
+    return places;
+  };
+  const old = placesOf(before);
+  const now = placesOf(after);
+  return Object.keys(now).some((id) => {
+    if (!(id in old)) {
+      return false;
+    }
+    return JSON.stringify(old[id]) !== JSON.stringify(now[id]);
+  });
+}
+
 // What changed between two versions of an event that people going should
 // hear about: "cancelled", "updated" or null.
 export function changeKind(before, after) {
@@ -192,7 +231,7 @@ export function changeKind(before, after) {
     'venue_name', 'venue_address', 'city', 'country', 'is_online',
   ];
   let moved = fields.some((field) => fieldChanged(field, before, after));
-  if (locationsChanged(before, after)) {
+  if (locationsChanged(before, after) || mealPlacesChanged(before, after)) {
     moved = true;
   }
   if (moved && isReleased(before)) {
@@ -209,14 +248,14 @@ export function changeKind(before, after) {
 // ahead. When that passes with no newer save, flushEventChange compares
 // notice_base with the event as it is then, so a change that is put back
 // tells nobody. The wait fits inside api/manage/events.js's maxDuration
-// (vercel.json); the hourly cron sends any that were left over. Tests
+// (vercel.json); the notification cron sends any that were left over. Tests
 // shorten it.
 export const changeNotice = { waitMs: 45_000, graceMs: 1_000 };
 
 // The columns changeKind reads, as kept in notice_base.
 const NOTICE_BASE_COLUMNS = [
   'status', 'publish_at', 'starts_at', 'ends_at', 'start_time_tbc', 'end_time_tbc', 'timezone', 'dates_hidden',
-  'venue_name', 'venue_address', 'city', 'country', 'is_online', 'locations',
+  'venue_name', 'venue_address', 'city', 'country', 'is_online', 'locations', 'meal_options',
 ];
 
 // What flushEventChange reads: the columns above, and what a notice says.
@@ -310,20 +349,167 @@ export async function flushDueChanges(now = Date.now()) {
   return reached;
 }
 
-// Hourly: reminders for events starting within the next day, once per RSVP.
-// Each RSVP is marked as reminded before anything is sent, so a slow or
-// failing send is never repeated in the next hour's run.
+// ---------------------------------------------------------------------------
+// Reminders
+// ---------------------------------------------------------------------------
+
+// Which reminder is due for one RSVP, if any: { hours, send, mark }, or null
+// when nothing is to be done.
+//
+//   chosen  the account's reminder times (hours before the start)
+//   sent    the times already dealt with for this RSVP (reminders_sent)
+//   rsvpAt  when they said they were going
+//
+// A time is passed once the start is that close (REMINDER_LEAD_MS early).
+// Only the closest time passed goes out, so a cron that was down, or a week
+// and a day both passed, never sends two at once; the ones it overtook are
+// marked with it (mark: every time passed, to save as reminders_sent). A time
+// that came before someone said they were going is marked but not sent: they
+// have just seen the event. An event whose start time is to be confirmed
+// gets the day and week reminders only.
+export function dueReminder({ startsAt, timeTbc = false, chosen, sent, rsvpAt = null, now = Date.now() }) {
+  const start = Date.parse(startsAt);
+  if (!(start > now)) {
+    return null;
+  }
+  let hours = reminderHoursFrom(chosen);
+  if (timeTbc) {
+    hours = hours.filter((each) => each >= 24);
+  }
+  const done = reminderHoursFrom(sent);
+  const passed = hours.filter((each) => now + REMINDER_LEAD_MS >= start - each * 3_600_000);
+  if (!passed.some((each) => !done.includes(each))) {
+    return null;
+  }
+  const closest = Math.min(...passed);
+  let send = !done.includes(closest);
+  if (send && rsvpAt && Date.parse(rsvpAt) > start - closest * 3_600_000) {
+    send = false;
+  }
+  return { hours: closest, send, mark: reminderHoursFrom([...done, ...passed]) };
+}
+
+// A meal by name: the editor's, or breakfast, lunch or dinner.
+function mealName(meal) {
+  if (meal.label) {
+    return meal.label;
+  }
+  return meal.id.charAt(0).toUpperCase() + meal.id.slice(1);
+}
+
+// What a place is: "Event location", "Meeting location" or the editor's
+// own label; for one of a meal's places, the meal's name, with the label
+// when it is not where the meal itself is ("Dinner · Meeting location").
+function placeHeading(location, meal = null) {
+  let label = 'Event location';
+  if (location.label === 'meeting') {
+    label = 'Meeting location';
+  } else if (location.label === 'custom' && location.custom_label) {
+    label = location.custom_label;
+  }
+  if (!meal) {
+    return label;
+  }
+  if (location.label === 'meal') {
+    return mealName(meal);
+  }
+  return `${mealName(meal)} · ${label}`;
+}
+
+// A place's details, as [label, value] rows, blanks left out.
+function placeRows(location) {
+  const rows = [
+    ['Venue', location.venue_name],
+    ['Address', location.venue_address],
+    ['City', location.city],
+    ['Country', countryText(location.country)],
+    ['Map', location.maps_url],
+  ].filter(([, value]) => value);
+  if (rows.length === 0) {
+    return [['Place', 'To be announced']];
+  }
+  return rows;
+}
+
+// The reminder for someone going to an event (row: the event, with its
+// locations and meals), coming for the whole event (chosen empty) or just
+// for those meals. It is a notice (heading, title, lines, url, tag) whose
+// push notification says only when and where, plus details, places and meal
+// places for its Telegram message (rich, reminderMessage): when it starts
+// and ends, what they are coming for, the online link, every place of the
+// event with its address and map link, and each meal held somewhere else
+// (just their meals, when they are coming only for those).
+export function reminderNotice(row, chosen = [], now = Date.now()) {
+  const url = `${siteUrl()}/e/${row.slug}`;
+  const meals = storedMeals(row);
+  let picked = [];
+  if (Array.isArray(chosen)) {
+    picked = meals.filter((meal) => chosen.includes(meal.id));
+  }
+  const details = [['When', whenText(row)]];
+  const ends = endText(row);
+  if (ends) {
+    details.push(['Ends', ends]);
+  }
+  if (picked.length) {
+    details.push(['Coming for', `${picked.map(mealName).join(', ')} only`]);
+  } else if (meals.length) {
+    details.push(['Coming for', 'The whole event']);
+  }
+  if (row.is_online && row.online_url) {
+    details.push(['Online link', row.online_url]);
+  }
+  const places = storedLocations(row).map((location) => ({ heading: placeHeading(location), rows: placeRows(location) }));
+  let mealsShown = meals;
+  let mealsHeading = 'Meals held elsewhere';
+  if (picked.length) {
+    mealsShown = picked;
+    mealsHeading = 'Your meals';
+  }
+  const mealPlaces = mealsShown.flatMap((meal) => meal.locations.map((location) => ({
+    heading: placeHeading(location, meal),
+    rows: placeRows(location),
+  })));
+  const notice = {
+    heading: `Starting in ${untilText(Date.parse(row.starts_at) - now)}`,
+    title: row.title,
+    lines: [whenText(row), placeText(row)].filter(Boolean),
+    url,
+    tag: `reminder-${row.slug}`,
+    details,
+    places,
+    online: false,
+    mealsHeading,
+    mealPlaces,
+  };
+  if (row.is_online === true && places.length === 0) {
+    notice.online = true;
+  }
+  notice.rich = reminderMessage(notice);
+  return notice;
+}
+
+// What sendReminders reads of an event: the reminder's when and where.
+const REMINDER_EVENT_COLUMNS =
+  'id, slug, title, status, publish_at, starts_at, ends_at, start_time_tbc, end_time_tbc, timezone, dates_hidden, ' +
+  'venue_name, venue_address, city, country, is_online, online_url, locations, meal_options';
+
+// Every ten minutes: for each RSVP to an event starting within the week, the
+// reminder due at the times its account picked (dueReminder). Each RSVP's
+// times are marked as dealt with before anything is sent, so a slow or
+// failing send is never repeated in the next run. Returns how many accounts
+// were reached.
 export async function sendReminders(now = Date.now()) {
   const windowStart = new Date(now).toISOString();
-  const windowEnd = new Date(now + REMIND_WITHIN_HOURS * 3600_000).toISOString();
+  const windowEnd = new Date(now + REMIND_WITHIN_HOURS * 3_600_000 + REMINDER_LEAD_MS).toISOString();
   const { data: events, error } = await database()
     .from(TABLES.events)
-    .select('id, slug, title, status, publish_at, starts_at, ends_at, start_time_tbc, timezone, dates_hidden, venue_name, city, is_online')
+    .select(REMINDER_EVENT_COLUMNS)
     .eq('status', 'published')
     .eq('dates_hidden', false)
-    .gte('starts_at', windowStart)
+    .gt('starts_at', windowStart)
     .lte('starts_at', windowEnd)
-    .limit(200);
+    .limit(500);
   if (error) {
     throw error;
   }
@@ -332,34 +518,59 @@ export async function sendReminders(now = Date.now()) {
   for (const event of releasedEvents) {
     const { data: rows, error: rowsError } = await database()
       .from(TABLES.attendees)
-      .select(`user_id, account:${TABLES.accounts} ( id, status, notify_reminders, notify_telegram )`)
-      .eq('event_id', event.id)
-      .is('reminded_at', null);
+      .select(`user_id, created_at, meals, reminders_sent, account:${TABLES.accounts} ( id, status, reminder_hours, notify_telegram )`)
+      .eq('event_id', event.id);
     if (rowsError) {
       throw rowsError;
     }
-    const due = rowsOf(rows)
-      .map((row) => row.account)
-      .filter(Boolean);
-    if (due.length === 0) {
-      continue;
+    // The accounts to remind now, by the meals they are coming for (each
+    // group gets one notice).
+    const groups = new Map();
+    for (const row of rowsOf(rows)) {
+      const account = row.account;
+      if (!account || account.status !== 'active') {
+        continue;
+      }
+      const due = dueReminder({
+        startsAt: event.starts_at,
+        timeTbc: event.start_time_tbc === true,
+        chosen: account.reminder_hours,
+        sent: row.reminders_sent,
+        rsvpAt: row.created_at,
+        now,
+      });
+      if (!due) {
+        continue;
+      }
+      const { error: markError } = await database()
+        .from(TABLES.attendees)
+        .update({ reminders_sent: due.mark })
+        .eq('event_id', event.id)
+        .eq('user_id', row.user_id);
+      if (markError) {
+        throw markError;
+      }
+      if (!due.send) {
+        continue;
+      }
+      let meals = [];
+      if (Array.isArray(row.meals)) {
+        meals = row.meals;
+      }
+      const key = JSON.stringify(meals);
+      if (!groups.has(key)) {
+        groups.set(key, { meals, accounts: [] });
+      }
+      groups.get(key).accounts.push(account);
     }
-    // Marked first, so a slow or failing send is never repeated next hour.
-    const { error: markError } = await database()
-      .from(TABLES.attendees)
-      .update({ reminded_at: new Date(now).toISOString() })
-      .eq('event_id', event.id)
-      .is('reminded_at', null);
-    if (markError) {
-      throw markError;
+    for (const group of groups.values()) {
+      sent += await deliver(group.accounts, reminderNotice(event, group.meals, now));
     }
-    const wanted = due.filter((account) => wantsNotice(account, 'notify_reminders'));
-    sent += await deliver(wanted, noticeFor('reminder', event));
   }
   return sent;
 }
 
-// Hourly: one "new event" notice per newly released event, to the accounts
+// Each cron run: one "new event" notice per newly released event, to the accounts
 // that asked for them. Each event is marked as announced before its notice
 // goes out, and one that is already over is marked without a notice.
 export async function announceNewEvents(now = Date.now()) {

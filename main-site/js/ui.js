@@ -225,6 +225,15 @@ export function errorText(error) {
   if (field) {
     placeholders = { field: translate(`manage.field.${field}`) };
   }
+  // A field of one of a meal's places says which meal (mealName, put in by
+  // the edit form from the meal id the server names) and which place.
+  if (field && typeof error.detail.mealName === 'string') {
+    const meal = { ...placeholders, meal: error.detail.mealName };
+    if (Number.isInteger(error.detail.location)) {
+      return translate('error.invalid_meal_location_field', { ...meal, number: error.detail.location + 1 });
+    }
+    return translate('error.invalid_meal_field', meal);
+  }
   // A field of one of an event's locations also says which location.
   if (field && Number.isInteger(error.detail.location)) {
     return translate('error.invalid_location_field', { ...placeholders, number: error.detail.location + 1 });

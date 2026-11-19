@@ -89,7 +89,17 @@
                 <h2 id="notifyTitle" data-i18n="notify.title">Notifications</h2>
                 <p class="muted small" data-i18n="notify.lede">Only about events. Nothing else is ever sent.</p>
                 <label class="check u-mt-1"><input type="checkbox" id="prefUpdates"><span data-i18n="notify.updates">When an event I am going to changes time or place, or is cancelled</span></label>
-                <label class="check"><input type="checkbox" id="prefReminders"><span data-i18n="notify.reminders">A reminder the day before an event I am going to</span></label>
+                <fieldset class="remind-times" id="prefReminders">
+                    <legend data-i18n="notify.reminders-legend">Remind me before an event I am going to</legend>
+                    <div class="remind-options">
+                        <label class="check"><input type="checkbox" data-remind-hours="1"><span data-i18n="notify.remind-1h">1 hour before</span></label>
+                        <label class="check"><input type="checkbox" data-remind-hours="2"><span data-i18n="notify.remind-2h">2 hours before</span></label>
+                        <label class="check"><input type="checkbox" data-remind-hours="3"><span data-i18n="notify.remind-3h">3 hours before</span></label>
+                        <label class="check"><input type="checkbox" data-remind-hours="24"><span data-i18n="notify.remind-1d">1 day before</span></label>
+                        <label class="check"><input type="checkbox" data-remind-hours="168"><span data-i18n="notify.remind-1w">1 week before</span></label>
+                    </div>
+                    <p class="field-hint" data-i18n="notify.reminders-hint">Pick as many as you like, or none. A reminder on Telegram lists every place: the event, the meeting point, and any meal held somewhere else.</p>
+                </fieldset>
                 <label class="check"><input type="checkbox" id="prefNewEvents"><span data-i18n="notify.new-events">When a new event is announced</span></label>
 
                 <h3 class="section-label" data-i18n="notify.this-device">This device</h3>

@@ -16,6 +16,12 @@ export const MAX_LOCATIONS = 10;
 // MAX_CUSTOM_MEALS the editor names.
 export const BUILT_IN_MEALS = ['breakfast', 'lunch', 'dinner'];
 export const MAX_CUSTOM_MEALS = 5;
+// A meal held somewhere other than the event itself has its own places, at
+// most MAX_MEAL_LOCATIONS: where the meal is, where people meet first for
+// it, or a label the editor types. None means the meal is at the event's
+// own place.
+export const MEAL_LOCATION_LABELS = ['meal', 'meeting', 'custom'];
+export const MAX_MEAL_LOCATIONS = 3;
 // Ticket tiers on a paid event (migrations/008): at most MAX_TIERS, each with
 // at most MAX_TIER_BENEFITS benefits. A tier that includes the one before it
 // shows those benefits again in full, or names the tier ("reference").
@@ -490,12 +496,13 @@ const LOCATION_TEXT_FIELDS = [
 
 // One location from the form as { ok: true, location } (location null when
 // every field of it is blank, so an untouched row is dropped), or
-// { ok: false, field }.
-function readLocation(entry) {
+// { ok: false, field }. labels: the labels it may have (the event's own
+// places, or a meal's).
+function readLocation(entry, labels = LOCATION_LABELS) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
     return { ok: false, field: 'locations' };
   }
-  const location = { label: allowedOrNull(LOCATION_LABELS, entry.label) };
+  const location = { label: allowedOrNull(labels, entry.label) };
   if (!location.label) {
     return { ok: false, field: 'locationLabel' };
   }
@@ -542,16 +549,36 @@ export function storedLocations(row) {
   } else if (row.venue_name || row.venue_address || row.city || row.country) {
     locations = [{ label: 'event', venue_name: row.venue_name, venue_address: row.venue_address, city: row.city, country: row.country }];
   }
-  return locations.map((location) => {
-    const tidy = {};
-    for (const key of LOCATION_KEYS) {
-      tidy[key] = null;
-      if (location[key] !== undefined && location[key] !== null && location[key] !== '') {
-        tidy[key] = location[key];
-      }
+  return locations.map(tidyLocation);
+}
+
+// A stored location with every key, a blank one null.
+function tidyLocation(location) {
+  const tidy = {};
+  for (const key of LOCATION_KEYS) {
+    tidy[key] = null;
+    if (location && location[key] !== undefined && location[key] !== null && location[key] !== '') {
+      tidy[key] = location[key];
     }
-    return tidy;
-  });
+  }
+  return tidy;
+}
+
+// A meal's own places as stored, each with every key, skipping anything
+// malformed; empty when the meal is at the event's own place.
+function storedMealLocations(locations) {
+  if (!Array.isArray(locations)) {
+    return [];
+  }
+  return locations
+    .filter((location) => {
+      if (!location) {
+        return false;
+      }
+      return MEAL_LOCATION_LABELS.includes(location.label);
+    })
+    .slice(0, MAX_MEAL_LOCATIONS)
+    .map(tidyLocation);
 }
 
 // The main location: the first labelled as the event's own, or else the
@@ -712,8 +739,9 @@ function isMealId(id) {
 }
 
 // An event's meals as stored (migrations/007 and 009), each { id, label,
-// limit } (label null for breakfast, lunch and dinner; limit null for no
-// limit), skipping anything malformed.
+// limit, locations } (label null for breakfast, lunch and dinner; limit null
+// for no limit; locations the meal's own places, empty when it is at the
+// event's), skipping anything malformed.
 export function storedMeals(row) {
   if (!row || !Array.isArray(row.meal_options)) {
     return [];
@@ -724,10 +752,11 @@ export function storedMeals(row) {
       continue;
     }
     const limit = storedLimit(meal.limit);
+    const locations = storedMealLocations(meal.locations);
     if (BUILT_IN_MEALS.includes(meal.id)) {
-      meals.push({ id: meal.id, label: null, limit });
+      meals.push({ id: meal.id, label: null, limit, locations });
     } else if (typeof meal.label === 'string' && meal.label !== '') {
-      meals.push({ id: meal.id, label: meal.label, limit });
+      meals.push({ id: meal.id, label: meal.label, limit, locations });
     }
   }
   return meals;
@@ -775,13 +804,44 @@ export function chooseMeals(row, chosen) {
   return { ok: true, meals: offered.filter((id) => chosen.includes(id)) };
 }
 
-// The meals people can come to on their own: [{ id, label, limit }] from
-// the form, breakfast, lunch and dinner by id (and limit), a named meal with
-// its id and name. A limit is how many can come for that meal alone (blank:
-// no limit); people coming to the whole event do not count against it. They are stored with the three first, in that order, then the named
-// ones as given. A named meal left blank is dropped, like an untouched
-// location. With no meals field at all the stored ones are kept, so a page
-// from before meal-only RSVPs cannot wipe what another editor set.
+// A meal's own places from the form ([] or missing: the meal is at the
+// event's place), at most MAX_MEAL_LOCATIONS, each checked like one of the
+// event's and an untouched one dropped: { ok: true, locations } or
+// { ok: false, field, location } (that location's place in the list).
+function readMealLocations(entries) {
+  if (entries === undefined || entries === null) {
+    return { ok: true, locations: [] };
+  }
+  if (!Array.isArray(entries) || entries.length > MAX_MEAL_LOCATIONS) {
+    return { ok: false, field: 'mealLocations' };
+  }
+  const locations = [];
+  for (const [index, entry] of entries.entries()) {
+    const check = readLocation(entry, MEAL_LOCATION_LABELS);
+    if (!check.ok) {
+      return { ok: false, field: check.field, location: index };
+    }
+    if (check.location) {
+      locations.push(check.location);
+    }
+  }
+  return { ok: true, locations };
+}
+
+// The meals people can come to on their own: [{ id, label, limit,
+// locations }] from the form, breakfast, lunch and dinner by id (and limit),
+// a named meal with its id and name. A limit is how many can come for that
+// meal alone (blank: no limit); people coming to the whole event do not
+// count against it. locations are the meal's own places when it is held
+// somewhere other than the event (readMealLocations; none: at the event's).
+// They are stored with the three first, in that order, then the named ones
+// as given. A named meal left blank is dropped, like an untouched location.
+// With no meals field at all the stored ones are kept, so a page from before
+// meal-only RSVPs cannot wipe what another editor set.
+//
+// A problem in one of a meal's places sets fields.badMeal to the meal's id
+// and fields.badLocation to the place's position, so the answer can say
+// which (validateEvent).
 function readMeals(body, fields) {
   if (body.meals === undefined) {
     return null;
@@ -809,8 +869,16 @@ function readMeals(body, fields) {
     if (!limit.ok) {
       return 'mealLimit';
     }
+    const places = readMealLocations(entry.locations);
+    if (!places.ok) {
+      fields.badMeal = id;
+      if (places.location !== undefined) {
+        fields.badLocation = places.location;
+      }
+      return places.field;
+    }
     if (BUILT_IN_MEALS.includes(id)) {
-      ticked.set(id, limit.limit);
+      ticked.set(id, { limit: limit.limit, locations: places.locations });
       continue;
     }
     const label = cleanText(entry.label, LIMITS.mealLabel);
@@ -818,14 +886,14 @@ function readMeals(body, fields) {
       return 'mealLabel';
     }
     if (label !== '') {
-      named.push({ id, label, limit: limit.limit });
+      named.push({ id, label, limit: limit.limit, locations: places.locations });
     }
   }
   if (named.length > MAX_CUSTOM_MEALS) {
     return 'meals';
   }
   fields.meal_options = [
-    ...BUILT_IN_MEALS.filter((id) => ticked.has(id)).map((id) => ({ id, label: null, limit: ticked.get(id) })),
+    ...BUILT_IN_MEALS.filter((id) => ticked.has(id)).map((id) => ({ id, label: null, ...ticked.get(id) })),
     ...named,
   ];
   return null;
@@ -987,7 +1055,8 @@ const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
 // that is wrong, plus location (its place in the list, from 0) when that
-// field is one location's, or tier when it is one ticket tier's.
+// field is one location's, tier when it is one ticket tier's, and meal (its
+// id) when it is one of a meal's places or the list of them.
 export function validateEvent(input) {
   let body = {};
   if (input && typeof input === 'object') {
@@ -1003,6 +1072,9 @@ export function validateEvent(input) {
       }
       if (fields.badTier !== undefined) {
         problem.tier = fields.badTier;
+      }
+      if (fields.badMeal !== undefined) {
+        problem.meal = fields.badMeal;
       }
       return problem;
     }

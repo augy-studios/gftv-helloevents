@@ -5,8 +5,11 @@
 //
 // A tab is hidden with its button's hidden attribute (a section this role
 // may not use); the list itself hides while only one tab is left.
+//
+// useHash: false leaves the address alone, for tabs inside a tab (the edit
+// form's sections inside /manage#editor).
 
-export function startTabs(tablist, { onSelect } = {}) {
+export function startTabs(tablist, { onSelect, useHash = true } = {}) {
   const tabs = () => [...tablist.querySelectorAll('[role="tab"]')];
   const shown = () => tabs().filter((tab) => !tab.hidden);
   const panelOf = (tab) => document.getElementById(tab.getAttribute('aria-controls'));
@@ -24,7 +27,7 @@ export function startTabs(tablist, { onSelect } = {}) {
     if (focus) {
       tab.focus();
     }
-    if (remember) {
+    if (remember && useHash) {
       history.replaceState(null, '', `#${tab.dataset.tab}`);
     }
     if (onSelect) {
@@ -69,7 +72,10 @@ export function startTabs(tablist, { onSelect } = {}) {
   function refresh() {
     const visible = shown();
     tablist.hidden = visible.length < 2;
-    let wanted = byName(location.hash.slice(1));
+    let wanted;
+    if (useHash) {
+      wanted = byName(location.hash.slice(1));
+    }
     if (!wanted) {
       wanted = visible.find((tab) => tab.getAttribute('aria-selected') === 'true');
     }
@@ -82,12 +88,14 @@ export function startTabs(tablist, { onSelect } = {}) {
   }
 
   // A link to another tab on the same page (/manage#signups) opens it.
-  window.addEventListener('hashchange', () => {
-    const tab = byName(location.hash.slice(1));
-    if (tab) {
-      select(tab, { remember: false });
-    }
-  });
+  if (useHash) {
+    window.addEventListener('hashchange', () => {
+      const tab = byName(location.hash.slice(1));
+      if (tab) {
+        select(tab, { remember: false });
+      }
+    });
+  }
 
   refresh();
   return {
@@ -97,6 +105,14 @@ export function startTabs(tablist, { onSelect } = {}) {
       if (tab) {
         select(tab);
       }
+    },
+    // The open tab's name.
+    current() {
+      const tab = shown().find((each) => each.getAttribute('aria-selected') === 'true');
+      if (tab) {
+        return tab.dataset.tab;
+      }
+      return null;
     },
   };
 }

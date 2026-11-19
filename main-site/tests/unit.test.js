@@ -314,9 +314,9 @@ test('meals offered are checked, put in order, and blank named ones dropped', ()
   const ok = meals([{ id: 'dinner', limit: '40' }, { id: 'm-tea123', label: '  High tea ', limit: ' ' }, { id: 'breakfast', label: 'ignored' }, { id: 'm-blank1', label: '   ' }]);
   assert.equal(ok.ok, true);
   assert.deepEqual(ok.fields.meal_options, [
-    { id: 'breakfast', label: null, limit: null },
-    { id: 'dinner', label: null, limit: 40 },
-    { id: 'm-tea123', label: 'High tea', limit: null },
+    { id: 'breakfast', label: null, limit: null, locations: [] },
+    { id: 'dinner', label: null, limit: 40, locations: [] },
+    { id: 'm-tea123', label: 'High tea', limit: null, locations: [] },
   ]);
   assert.equal(meals([{ id: 'lunch', limit: '0' }]).field, 'mealLimit');
   assert.equal(meals([{ id: 'lunch', limit: '2.5' }]).field, 'mealLimit');
@@ -344,15 +344,83 @@ test('a meal choice must be meals the event offers, and leaves out ones no longe
 
   const page = ser.publicEventDetail(event, { signedIn: true, going: true, meals: ['dinner', 'breakfast'] }, now);
   assert.deepEqual(page.meals, [
-    { id: 'lunch', label: null, limit: 10, left: 6 },
-    { id: 'dinner', label: null, limit: null, left: null },
-    { id: 'm-tea123', label: 'High tea', limit: null, left: null },
+    { id: 'lunch', label: null, limit: 10, left: 6, locations: [] },
+    { id: 'dinner', label: null, limit: null, left: null, locations: [] },
+    { id: 'm-tea123', label: 'High tea', limit: null, left: null, locations: [] },
   ]);
   assert.deepEqual(page.viewer.meals, ['dinner'], 'breakfast is no longer offered');
   assert.deepEqual(ser.publicEventDetail(event, { signedIn: true, going: false, meals: ['lunch'] }, now).viewer.meals, []);
   const attendee = ser.attendeeView({ created_at: 'x', meals: ['breakfast'], account: { kind: 'public', username: 'otter' } }, event);
   assert.deepEqual(attendee.meals, [], 'left with none: the whole event');
-  assert.deepEqual(ser.managedEvent(event).meals, [{ id: 'lunch', label: '', limit: '10' }, { id: 'dinner', label: '', limit: '' }, { id: 'm-tea123', label: 'High tea', limit: '' }]);
+  assert.deepEqual(ser.managedEvent(event).meals, [
+    { id: 'lunch', label: '', limit: '10', locations: [] },
+    { id: 'dinner', label: '', limit: '', locations: [] },
+    { id: 'm-tea123', label: 'High tea', limit: '', locations: [] },
+  ]);
+});
+
+test('a meal can be held somewhere else, with its own places checked like the event\'s', () => {
+  const meals = (list) => rules.validateEvent(form({ meals: list }));
+  const ok = meals([
+    {
+      id: 'dinner',
+      locations: [
+        { label: 'meal', venueName: ' Lau Pa Sat ', venueAddress: '18 Raffles Quay', city: 'Singapore', country: 'sg', mapsUrl: 'https://maps.app.goo.gl/abc' },
+        { label: 'meeting', customLabel: 'dropped', venueName: 'Exit A, Raffles Place MRT' },
+        { label: 'custom', venueName: '', city: '' },
+      ],
+    },
+    { id: 'm-tea123', label: 'High tea', locations: [{ label: 'custom', customLabel: 'Tea room', venueName: 'Level 2' }] },
+    { id: 'lunch', locations: [] },
+  ]);
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.deepEqual(ok.fields.meal_options, [
+    { id: 'lunch', label: null, limit: null, locations: [] },
+    {
+      id: 'dinner',
+      label: null,
+      limit: null,
+      locations: [
+        { label: 'meal', custom_label: null, venue_name: 'Lau Pa Sat', venue_address: '18 Raffles Quay', city: 'Singapore', country: 'SG', maps_url: 'https://maps.app.goo.gl/abc' },
+        { label: 'meeting', custom_label: null, venue_name: 'Exit A, Raffles Place MRT', venue_address: null, city: null, country: null, maps_url: null },
+      ],
+    },
+    {
+      id: 'm-tea123',
+      label: 'High tea',
+      limit: null,
+      locations: [{ label: 'custom', custom_label: 'Tea room', venue_name: 'Level 2', venue_address: null, city: null, country: null, maps_url: null }],
+    },
+  ]);
+  assert.deepEqual(ok.fields.locations, rules.validateEvent(form()).fields.locations, "the event's own places are untouched");
+
+  const bad = meals([{ id: 'lunch' }, { id: 'dinner', locations: [{ label: 'meal', venueName: 'A' }, { label: 'meal', mapsUrl: 'http://maps.example' }] }]);
+  assert.deepEqual(bad, { ok: false, error: 'invalid_field', field: 'mapsUrl', location: 1, meal: 'dinner' });
+  assert.deepEqual(meals([{ id: 'lunch', locations: [{ label: 'event', venueName: 'A' }] }]), { ok: false, error: 'invalid_field', field: 'locationLabel', location: 0, meal: 'lunch' });
+  assert.equal(meals([{ id: 'lunch', locations: [{ label: 'custom', venueName: 'A' }] }]).field, 'customLabel');
+  const four = Array.from({ length: 4 }, () => ({ label: 'meal', venueName: 'A' }));
+  assert.deepEqual(meals([{ id: 'lunch', locations: four }]), { ok: false, error: 'invalid_field', field: 'mealLocations', meal: 'lunch' });
+  assert.equal(meals([{ id: 'lunch', locations: 'Lau Pa Sat' }]).field, 'mealLocations');
+
+  // On the event page, an attendees-only address keeps a meal's street
+  // address and map link from people not going, like the event's own.
+  const stored = row({
+    address_attendees_only: true,
+    meal_options: ok.fields.meal_options,
+    meal_taken: {},
+  });
+  const outsider = ser.publicEventDetail(stored, { signedIn: true, going: false }, now);
+  const dinner = outsider.meals.find((meal) => meal.id === 'dinner');
+  assert.deepEqual(dinner.locations[0], { label: 'meal', customLabel: null, venueName: 'Lau Pa Sat', city: 'Singapore', country: 'SG', address: null, mapsUrl: null });
+  assert.equal(outsider.where.addressForAttendees, true, 'a meal address alone is enough for the note');
+  const insider = ser.publicEventDetail(stored, { signedIn: true, going: true, meals: [] }, now);
+  assert.equal(insider.meals.find((meal) => meal.id === 'dinner').locations[0].address, '18 Raffles Quay');
+  assert.equal(insider.meals.find((meal) => meal.id === 'dinner').locations[0].mapsUrl, 'https://maps.app.goo.gl/abc');
+  assert.deepEqual(ser.managedEvent(stored).meals[1].locations[0], {
+    label: 'meal', customLabel: '', venueName: 'Lau Pa Sat', venueAddress: '18 Raffles Quay', city: 'Singapore', country: 'SG', mapsUrl: 'https://maps.app.goo.gl/abc',
+  });
+  // A stored place with a label meals cannot have is skipped.
+  assert.deepEqual(rules.storedMeals({ meal_options: [{ id: 'lunch', locations: [{ label: 'event', venue_name: 'X' }, null] }] })[0].locations, []);
 });
 
 test('ticket tiers are checked, set the price range, and are only on for a paid event', () => {
@@ -648,11 +716,24 @@ test('only a change of time or place, or a cancellation, of a released event is 
   assert.equal(notify.changeKind(live, { ...live, ...saved, start_time_tbc: true }), 'updated', 'the time no longer set');
   const meeting = { label: 'meeting', venue_name: 'Exit B', custom_label: null, venue_address: null, city: null, country: null, maps_url: null };
   assert.equal(notify.changeKind(live, { ...live, ...saved, locations: [...saved.locations, meeting] }), 'updated', 'a meeting point added');
+
+  // A meal moving somewhere else (or back) is a change of place; a meal
+  // added, dropped or given a limit is not. A notice_base kept before meal
+  // places has no meal_options, and tells nobody about them.
+  const atEvent = { ...live, meal_options: [{ id: 'dinner', label: null, limit: null, locations: [] }] };
+  const restaurant = { label: 'meal', custom_label: null, venue_name: 'Lau Pa Sat', venue_address: null, city: null, country: null, maps_url: null };
+  const away = { ...live, meal_options: [{ id: 'dinner', label: null, limit: null, locations: [restaurant] }] };
+  assert.equal(notify.changeKind(atEvent, away), 'updated', 'dinner moved to a restaurant');
+  assert.equal(notify.changeKind(away, atEvent), 'updated', 'dinner back at the event');
+  assert.equal(notify.changeKind(away, { ...away, meal_options: [{ ...away.meal_options[0], limit: 20 }] }), null, 'a limit only');
+  assert.equal(notify.changeKind(atEvent, { ...live, meal_options: [...atEvent.meal_options, { id: 'm-tea123', label: 'Tea', locations: [restaurant] }] }), null, 'a meal added');
+  const { meal_options: _dropped, ...oldBase } = atEvent;
+  assert.equal(notify.changeKind(oldBase, away), null, 'a base from before meal places');
 });
 
 test('a notice carries public fields only', () => {
   const r = row({ is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
-  for (const kind of ['updated', 'cancelled', 'reminder', 'new']) {
+  for (const kind of ['updated', 'cancelled', 'new']) {
     const n = notify.noticeFor(kind, r);
     const text = JSON.stringify(n);
     assert.equal(text.includes('meet.example.com'), false, kind);
@@ -660,7 +741,60 @@ test('a notice carries public fields only', () => {
     assert.equal(text.includes('internal only'), false, kind);
     assert.equal(n.url, 'https://events.globalfurry.tv/e/sg-furmeet');
   }
-  assert.ok(notify.noticeFor('reminder', row({ dates_hidden: true })).lines.includes('Dates to be announced'));
+  assert.ok(notify.noticeFor('new', row({ dates_hidden: true })).lines.includes('Dates to be announced'));
+});
+
+test('a reminder goes at the closest time picked that has come, once, and not to someone who has just said they are going', () => {
+  const hour = 3_600_000;
+  const start = Date.parse('2032-08-06T10:00:00Z');
+  const due = (over) => notify.dueReminder({ startsAt: '2032-08-06T10:00:00Z', chosen: [1, 24, 168], sent: [], rsvpAt: '2032-07-01T00:00:00Z', ...over });
+  assert.equal(due({ now: start - 8 * 24 * hour }), null, 'more than a week away');
+  assert.deepEqual(due({ now: start - 7 * 24 * hour + 60_000 }), { hours: 168, send: true, mark: [168] });
+  assert.equal(due({ now: start - 3 * 24 * hour, sent: [168] }), null, 'the week one went');
+  assert.deepEqual(due({ now: start - 24 * hour - 4 * 60_000, sent: [168] }), { hours: 24, send: true, mark: [168, 24] }, 'up to five minutes early');
+  assert.equal(due({ now: start - 24 * hour - 6 * 60_000, sent: [168] }), null, 'not six minutes early');
+  // A cron down all day: only the hour before goes, the day before marked.
+  assert.deepEqual(due({ now: start - 50 * 60_000, sent: [168] }), { hours: 1, send: true, mark: [168, 24, 1] });
+  assert.equal(due({ now: start + 60_000 }), null, 'started');
+  // Said they were going after the time came: marked, not sent.
+  assert.deepEqual(due({ now: start - 30 * 60_000, chosen: [1], rsvpAt: new Date(start - 40 * 60_000).toISOString() }), { hours: 1, send: false, mark: [1] });
+  assert.equal(due({ now: start - 30 * 60_000, chosen: [] }), null, 'no times picked');
+  assert.equal(due({ now: start - 30 * 60_000, chosen: [5, 'x'] }), null, 'only the allowed times');
+  // A start time to be confirmed: the hour reminders mean nothing.
+  assert.equal(due({ now: start - 30 * 60_000, chosen: [1, 2, 3], timeTbc: true }), null);
+  assert.equal(due({ now: start - 23 * hour, chosen: [1, 24], timeTbc: true }).hours, 24);
+});
+
+test('a reminder for someone coming just for dinner names it and where it is, and keeps the push to the public when and where', () => {
+  const event = row({
+    starts_at: '2032-08-06T10:00:00.000Z',
+    venue_address: '1 Secret Road',
+    address_attendees_only: true,
+    locations: [{ label: 'event', venue_name: 'Hall', venue_address: '1 Secret Road', city: 'Singapore', country: 'SG' }],
+    meal_options: [
+      { id: 'lunch', label: null, locations: [{ label: 'meal', venue_name: 'Food Court' }] },
+      { id: 'dinner', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat' }, { label: 'meeting', venue_name: 'Exit H' }] },
+      { id: 'm-tea123', label: 'High tea', locations: [{ label: 'custom', custom_label: 'Tea room', venue_name: 'Level 2' }] },
+    ],
+  });
+  const reminder = notify.reminderNotice(event, ['dinner'], Date.parse('2032-08-05T10:00:00.000Z'));
+  assert.equal(reminder.heading, 'Starting in 1 day');
+  assert.deepEqual(reminder.details.find(([label]) => label === 'Coming for'), ['Coming for', 'Dinner only']);
+  assert.equal(reminder.mealsHeading, 'Your meals');
+  assert.deepEqual(reminder.mealPlaces.map((place) => place.heading), ['Dinner', 'Dinner · Meeting location']);
+  assert.equal(JSON.stringify(reminder.lines).includes('Secret Road'), false);
+  assert.ok(reminder.rich.markdown.includes('| Address | 1 Secret Road |'));
+  assert.ok(reminder.rich.fallback.includes('YOUR MEALS\n\nDinner\nVenue: Lau Pa Sat'));
+  assert.ok(reminder.rich.fallback.includes('Address: 1 Secret Road'));
+
+  const whole = notify.reminderNotice(event, [], Date.parse('2032-08-06T09:00:00.000Z'));
+  assert.equal(whole.heading, 'Starting in 1 hour');
+  assert.equal(whole.mealsHeading, 'Meals held elsewhere');
+  assert.deepEqual(whole.mealPlaces.map((place) => place.heading), ['Lunch', 'Dinner', 'Dinner · Meeting location', 'High tea · Tea room']);
+  // Data is escaped for Rich Markdown.
+  const tricky = notify.reminderNotice(row({ title: 'Paws | *Claws*', starts_at: '2032-08-06T10:00:00.000Z' }), [], Date.parse('2032-08-06T07:00:00.000Z'));
+  assert.ok(tricky.rich.markdown.includes('**Paws \\| \\*Claws\\***'));
+  assert.equal(tricky.heading, 'Starting in 3 hours');
 });
 
 // ---------------------------------------------------------------------------

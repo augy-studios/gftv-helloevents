@@ -55,13 +55,18 @@ function renderRsvps() {
   byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event)));
 }
 
-// The notification settings: the four switches, the Telegram row (offered
+// The reminder times' tick boxes, each with its hours before the start.
+const reminderBoxes = () => [...byId('prefReminders').querySelectorAll('[data-remind-hours]')];
+
+// The notification settings: the switches, the reminder times, the Telegram row (offered
 // when the site has Telegram; usable once a chat is linked), and the push
 // buttons and status line for this device.
 function renderNotify() {
   const settings = notifications;
   byId('prefUpdates').checked = settings.prefs.updates;
-  byId('prefReminders').checked = settings.prefs.reminders;
+  for (const box of reminderBoxes()) {
+    box.checked = settings.prefs.reminderHours.includes(Number(box.dataset.remindHours));
+  }
   byId('prefNewEvents').checked = settings.prefs.newEvents;
   byId('prefTelegram').checked = settings.prefs.telegram;
   byId('notifyTelegramBox').hidden = !settings.telegram.available;
@@ -227,8 +232,24 @@ async function load() {
 // Notifications
 // ---------------------------------------------------------------------------
 
+// The reminder times save as soon as one is ticked or unticked: every time
+// ticked is sent, as many as the person likes, or none. A failed save puts
+// the boxes back as they were saved.
+for (const box of reminderBoxes()) {
+  box.addEventListener('change', () => {
+    const reminderHours = reminderBoxes().filter((each) => each.checked).map((each) => Number(each.dataset.remindHours));
+    withBusy(null, byId('notifyError'), async () => {
+      try {
+        notifications = await post('/api/me/notifications', { action: 'prefs', reminderHours });
+      } finally {
+        renderNotify();
+      }
+    });
+  });
+}
+
 // Each switch saves as soon as it changes, and flips back if saving fails.
-for (const [id, key] of [['prefUpdates', 'updates'], ['prefReminders', 'reminders'], ['prefNewEvents', 'newEvents'], ['prefTelegram', 'telegram']]) {
+for (const [id, key] of [['prefUpdates', 'updates'], ['prefNewEvents', 'newEvents'], ['prefTelegram', 'telegram']]) {
   byId(id).addEventListener('change', () => {
     const box = byId(id);
     withBusy(null, byId('notifyError'), async () => {

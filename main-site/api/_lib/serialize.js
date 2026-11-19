@@ -272,11 +272,14 @@ function managedLocation(location) {
 }
 
 // The meals an event offers for meal-only RSVPs, in order, for the event
-// page: { id, label, limit, left }, label null for breakfast, lunch and
-// dinner (the page names those in the reader's language); limit and the
-// places left null for a meal with no limit. row.meal_taken holds how many
-// are coming for each (events.js withMealCounts).
-function mealsView(row) {
+// page: { id, label, limit, left, locations }, label null for breakfast,
+// lunch and dinner (the page names those in the reader's language); limit
+// and the places left null for a meal with no limit; locations the meal's
+// own places when it is held somewhere other than the event (empty: at the
+// event's), with addresses as addressShown allows, like the event's own.
+// row.meal_taken holds how many are coming for each (events.js
+// withMealCounts).
+function mealsView(row, addressShown) {
   let taken = row.meal_taken;
   if (taken === null || taken === undefined) {
     taken = {};
@@ -286,7 +289,13 @@ function mealsView(row) {
     if (meal.limit !== null) {
       left = Math.max(0, meal.limit - numberOrZero(taken[meal.id]));
     }
-    return { id: meal.id, label: meal.label, limit: meal.limit, left };
+    return {
+      id: meal.id,
+      label: meal.label,
+      limit: meal.limit,
+      left,
+      locations: meal.locations.map((location) => locationView(location, addressShown)),
+    };
   });
 }
 
@@ -439,7 +448,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   }
 
   const locations = storedLocations(row);
-  const hasAddress = locations.some((location) => {
+  const mealLocations = storedMeals(row).flatMap((meal) => meal.locations);
+  const hasAddress = [...locations, ...mealLocations].some((location) => {
     if (location.venue_address || location.maps_url) {
       return true;
     }
@@ -478,7 +488,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       onlineUrlForAttendees,
     },
     tiers: tiersView(row),
-    meals: mealsView(row),
+    meals: mealsView(row, addressShown),
     viewer: {
       signedIn: viewer.signedIn === true,
       going: viewer.going === true,
@@ -566,7 +576,12 @@ export function managedEvent(row) {
     tiersEnabled: row.tiers_enabled === true,
     ticketTiers: storedTiers(row).map(managedTier),
     rsvpOpen: row.rsvp_open !== false,
-    meals: storedMeals(row).map((meal) => ({ id: meal.id, label: emptyToBlank(meal.label), limit: stringOrBlank(meal.limit) })),
+    meals: storedMeals(row).map((meal) => ({
+      id: meal.id,
+      label: emptyToBlank(meal.label),
+      limit: stringOrBlank(meal.limit),
+      locations: meal.locations.map(managedLocation),
+    })),
     staffNotes: emptyToBlank(row.staff_notes),
   };
 }

@@ -99,268 +99,289 @@
                 </div>
                 <p class="muted small" data-i18n="manage.autosave-lede">Changes save by themselves as soon as you leave a field.</p>
 
-                <fieldset>
-                    <legend data-i18n="manage.section.basics">Basics</legend>
-                    <div class="form-grid">
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.title">Title</span>
-                            <input id="f-title" name="title" type="text" maxlength="120" required>
-                        </label>
-                        <div class="field span-2">
-                            <label for="f-slug" data-i18n="manage.field.slug-link">Event link</label>
-                            <div class="slug-input">
-                                <span class="slug-prefix" aria-hidden="true">events.globalfurry.tv/e/</span>
-                                <input id="f-slug" name="slug" type="text" maxlength="60" autocapitalize="none" autocomplete="off" spellcheck="false" aria-describedby="slugHint">
-                            </div>
-                            <span class="field-hint" id="slugHint" data-i18n="manage.hint.slug">Lowercase letters, numbers and hyphens. Left blank, it is made from the title. Changing it breaks links already shared.</span>
-                            <div class="callout warn slug-taken" id="slugTaken" role="alert" hidden>
-                                <p id="slugTakenText"></p>
-                                <div class="actions inline">
-                                    <button class="btn btn-small" type="button" id="slugRandom"><span data-icon="refresh"></span><span data-i18n="manage.slug-random">Add eight random characters</span></button>
-                                    <button class="btn btn-small btn-quiet" type="button" id="slugEdit"><span data-icon="edit"></span><span data-i18n="manage.slug-edit">Edit the link</span></button>
+                <!-- The form's sections as tabs (js/tabs.js, without the address);
+                     a dot marks a tab with a field still to fix. -->
+                <div class="tabs editor-tabs" role="tablist" id="editorTabs" aria-label="Event sections" data-i18n-attr="aria-label:manage.etabs-label">
+                    <button class="tab" type="button" role="tab" id="etab-basics" data-tab="basics" aria-controls="epanel-basics" aria-selected="true"><span data-icon="edit"></span><span data-i18n="manage.etab.basics">Basics</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-when" data-tab="when" aria-controls="epanel-when" aria-selected="false" tabindex="-1"><span data-icon="calendar"></span><span data-i18n="manage.etab.when">When and where</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-price" data-tab="price" aria-controls="epanel-price" aria-selected="false" tabindex="-1"><span data-icon="ticket"></span><span data-i18n="manage.etab.price">Price and RSVP</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                </div>
+
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-basics" aria-labelledby="etab-basics">
+                    <fieldset>
+                        <legend data-i18n="manage.section.basics">Basics</legend>
+                        <div class="form-grid">
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.title">Title</span>
+                                <input id="f-title" name="title" type="text" maxlength="120" required>
+                            </label>
+                            <div class="field span-2">
+                                <label for="f-slug" data-i18n="manage.field.slug-link">Event link</label>
+                                <div class="slug-input">
+                                    <span class="slug-prefix" aria-hidden="true">events.globalfurry.tv/e/</span>
+                                    <input id="f-slug" name="slug" type="text" maxlength="60" autocapitalize="none" autocomplete="off" spellcheck="false" aria-describedby="slugHint">
+                                </div>
+                                <span class="field-hint" id="slugHint" data-i18n="manage.hint.slug">Lowercase letters, numbers and hyphens. Left blank, it is made from the title. Changing it breaks links already shared.</span>
+                                <div class="callout warn slug-taken" id="slugTaken" role="alert" hidden>
+                                    <p id="slugTakenText"></p>
+                                    <div class="actions inline">
+                                        <button class="btn btn-small" type="button" id="slugRandom"><span data-icon="refresh"></span><span data-i18n="manage.slug-random">Add eight random characters</span></button>
+                                        <button class="btn btn-small btn-quiet" type="button" id="slugEdit"><span data-icon="edit"></span><span data-i18n="manage.slug-edit">Edit the link</span></button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <label class="field">
-                            <span data-i18n="manage.field.kind">Kind</span>
-                            <select id="f-kind" name="kind">
-                                <option value="furmeet" data-i18n="kind.furmeet">Furmeet</option>
-                                <option value="convention" data-i18n="kind.convention">Convention</option>
-                                <option value="other" data-i18n="kind.other">Other</option>
-                            </select>
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.organiserName">Organiser</span>
-                            <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.summary-optional">Short summary (optional)</span>
-                            <input id="f-summary" name="summary" type="text" maxlength="280">
-                        </label>
-                        <div class="field span-2">
-                            <div class="field-head">
-                                <label for="f-description" id="descriptionLabel" data-i18n="manage.field.description-both">Description</label>
-                                <div class="lang-switch" id="descriptionSwitch" role="group" aria-label="Language" data-i18n-attr="aria-label:manage.description-switch">
-                                    <button class="lang-switch-btn" type="button" data-lang="en" aria-pressed="true" lang="en">English<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
-                                    <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
+                            <label class="field">
+                                <span data-i18n="manage.field.kind">Kind</span>
+                                <select id="f-kind" name="kind">
+                                    <option value="furmeet" data-i18n="kind.furmeet">Furmeet</option>
+                                    <option value="convention" data-i18n="kind.convention">Convention</option>
+                                    <option value="other" data-i18n="kind.other">Other</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.organiserName">Organiser</span>
+                                <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
+                            </label>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.summary-optional">Short summary (optional)</span>
+                                <input id="f-summary" name="summary" type="text" maxlength="280">
+                            </label>
+                            <div class="field span-2">
+                                <div class="field-head">
+                                    <label for="f-description" id="descriptionLabel" data-i18n="manage.field.description-both">Description</label>
+                                    <div class="lang-switch" id="descriptionSwitch" role="group" aria-label="Language" data-i18n-attr="aria-label:manage.description-switch">
+                                        <button class="lang-switch-btn" type="button" data-lang="en" aria-pressed="true" lang="en">English<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
+                                        <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
+                                    </div>
                                 </div>
+                                <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en" required aria-labelledby="descriptionEnName"></textarea>
+                                <textarea id="f-descriptionZh" name="descriptionZh" maxlength="8000" rows="6" lang="zh" required aria-labelledby="descriptionZhName" hidden></textarea>
+                                <span class="visually-hidden" id="descriptionEnName" data-i18n="manage.field.description">Description (English)</span>
+                                <span class="visually-hidden" id="descriptionZhName" data-i18n="manage.field.descriptionZh">Description (Chinese)</span>
+                                <span class="field-hint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Plain text. Line breaks are kept.</span>
                             </div>
-                            <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en" required aria-labelledby="descriptionEnName"></textarea>
-                            <textarea id="f-descriptionZh" name="descriptionZh" maxlength="8000" rows="6" lang="zh" required aria-labelledby="descriptionZhName" hidden></textarea>
-                            <span class="visually-hidden" id="descriptionEnName" data-i18n="manage.field.description">Description (English)</span>
-                            <span class="visually-hidden" id="descriptionZhName" data-i18n="manage.field.descriptionZh">Description (Chinese)</span>
-                            <span class="field-hint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Plain text. Line breaks are kept.</span>
-                        </div>
-                        <div class="field span-2 cover-field">
-                            <span data-i18n="manage.field.cover">Cover picture</span>
-                            <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
-                            <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">Any picture works: you choose the 16:9 part to show, then your browser turns it into a small WebP before it is uploaded.</p>
+                            <div class="field span-2 cover-field">
+                                <span data-i18n="manage.field.cover">Cover picture</span>
+                                <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
+                                <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">Any picture works: you choose the 16:9 part to show, then your browser turns it into a small WebP before it is uploaded.</p>
+                                <p class="field-hint" id="coverPasteHint" data-i18n="manage.hint.cover-paste">Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).</p>
                             <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">A picture can be added once the event has saved.</p>
-                            <div class="actions inline">
-                                <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
-                                <button class="btn" type="button" id="coverAdjust" hidden><span data-icon="edit"></span><span data-i18n="manage.cover-adjust">Adjust crop</span></button>
-                                <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
+                                <div class="actions inline">
+                                    <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
+                                    <button class="btn" type="button" id="coverAdjust" hidden><span data-icon="edit"></span><span data-i18n="manage.cover-adjust">Adjust crop</span></button>
+                                    <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
+                                </div>
+                                <div class="callout danger" id="coverError" role="alert"></div>
                             </div>
-                            <div class="callout danger" id="coverError" role="alert"></div>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.externalUrl-optional">Tickets or website (optional)</span>
+                                <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://">
+                            </label>
                         </div>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.externalUrl-optional">Tickets or website (optional)</span>
-                            <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://">
-                        </label>
-                    </div>
-                </fieldset>
+                    </fieldset>
+                </div>
 
-                <fieldset>
-                    <legend data-i18n="manage.section.when">When</legend>
-                    <div class="form-grid">
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.timezone">Time zone</span>
-                            <select id="f-timezone" name="timezone"></select>
-                            <span class="field-hint" data-i18n="manage.hint.timezone">Where the event happens. The dates and times below are in this zone.</span>
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.startDate">Start date</span>
-                            <input id="f-startDate" name="startDate" type="date" required>
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.startTime-optional">Start time (optional)</span>
-                            <input id="f-startTime" name="startTime" type="time">
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.endDate-optional">End date (optional)</span>
-                            <input id="f-endDate" name="endDate" type="date">
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.endTime-optional">End time (optional)</span>
-                            <input id="f-endTime" name="endTime" type="time">
-                        </label>
-                        <p class="field-hint span-2 times-hint" data-i18n="manage.hint.times">Leave a time blank while it is to be confirmed: the event page shows the date alone. With no end date, the event ends on its start date.</p>
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-datesHidden" name="datesHidden">
-                            <span data-i18n="manage.field.datesHidden">Dates to be announced: keep the dates off the public page</span>
-                        </label>
-                    </div>
-                </fieldset>
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-when" aria-labelledby="etab-when" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.when">When</legend>
+                        <div class="form-grid">
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.timezone">Time zone</span>
+                                <select id="f-timezone" name="timezone"></select>
+                                <span class="field-hint" data-i18n="manage.hint.timezone">Where the event happens. The dates and times below are in this zone.</span>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.startDate">Start date</span>
+                                <input id="f-startDate" name="startDate" type="date" required>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.startTime-optional">Start time (optional)</span>
+                                <input id="f-startTime" name="startTime" type="time">
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.endDate-optional">End date (optional)</span>
+                                <input id="f-endDate" name="endDate" type="date">
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.endTime-optional">End time (optional)</span>
+                                <input id="f-endTime" name="endTime" type="time">
+                            </label>
+                            <p class="field-hint span-2 times-hint" data-i18n="manage.hint.times">Leave a time blank while it is to be confirmed: the event page shows the date alone. With no end date, the event ends on its start date.</p>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-datesHidden" name="datesHidden">
+                                <span data-i18n="manage.field.datesHidden">Dates to be announced: keep the dates off the public page</span>
+                            </label>
+                        </div>
+                    </fieldset>
 
-                <fieldset>
-                    <legend data-i18n="manage.section.where">Where</legend>
-                    <div id="locationList" class="location-list"></div>
-                    <p class="muted small" id="locationsEmpty" hidden data-i18n="manage.locations-empty">No locations yet. An online-only event needs none.</p>
-                    <div class="actions inline">
-                        <button class="btn" type="button" id="locationAdd"><span data-icon="plus"></span><span data-i18n="manage.location-add">Add a location</span></button>
-                    </div>
-                    <div class="form-grid u-mt-1">
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-addressAttendeesOnly" name="addressAttendeesOnly">
-                            <span data-i18n="manage.field.addressAttendeesOnly">Show the street addresses and map links only to people going</span>
-                        </label>
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-isOnline" name="isOnline">
-                            <span data-i18n="manage.field.isOnline">Online, or online too</span>
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.onlineUrl">Online link</span>
-                            <input id="f-onlineUrl" name="onlineUrl" type="url" maxlength="500" placeholder="https://">
-                            <span class="field-hint" data-i18n="manage.hint.onlineUrl">Only people going see this.</span>
-                        </label>
-                    </div>
-                </fieldset>
-
-                <fieldset>
-                    <legend data-i18n="manage.section.price">Price</legend>
-                    <div class="form-grid">
-                        <label class="field">
-                            <span data-i18n="manage.field.priceType">Price</span>
-                            <select id="f-priceType" name="priceType">
-                                <option value="free" data-i18n="manage.price.free">Free</option>
-                                <option value="paid" data-i18n="manage.price.paid">Paid</option>
-                                <option value="tba" data-i18n="manage.price.tba">To be announced</option>
-                            </select>
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.currency">Currency</span>
-                            <input id="f-currency" name="currency" type="text" list="currencyList" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Search code or name" data-i18n-attr="placeholder:manage.currency-search">
-                        </label>
-                        <datalist id="currencyList"></datalist>
-                        <label class="field">
-                            <span data-i18n="manage.field.priceMin">From</span>
-                            <input id="f-priceMin" name="priceMin" type="number" min="0" step="0.01" inputmode="decimal">
-                        </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.priceMax">Up to (optional)</span>
-                            <input id="f-priceMax" name="priceMax" type="number" min="0" step="0.01" inputmode="decimal">
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.priceNote">Price note</span>
-                            <input id="f-priceNote" name="priceNote" type="text" maxlength="200">
-                        </label>
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-priceHidden" name="priceHidden">
-                            <span data-i18n="manage.field.priceHidden">Hide the price: show "to be announced" publicly</span>
-                        </label>
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-tiersEnabled" name="tiersEnabled" aria-describedby="tiersHint">
-                            <span data-i18n="manage.field.tiersEnabled">Sell tickets in tiers, each with its own name, price and benefits</span>
-                        </label>
-                        <p class="field-hint span-2 tiers-hint" id="tiersHint" data-i18n="manage.hint.tiers">For a paid event. The From and Up to prices then come from the tiers.</p>
-                    </div>
-                    <div id="tierSection" hidden>
-                        <div id="tierList" class="location-list"></div>
+                    <fieldset>
+                        <legend data-i18n="manage.section.where">Where</legend>
+                        <div id="locationList" class="location-list"></div>
+                        <p class="muted small" id="locationsEmpty" hidden data-i18n="manage.locations-empty">No locations yet. An online-only event needs none.</p>
                         <div class="actions inline">
-                            <button class="btn" type="button" id="tierAdd"><span data-icon="plus"></span><span data-i18n="manage.tier-add">Add a tier</span></button>
+                            <button class="btn" type="button" id="locationAdd"><span data-icon="plus"></span><span data-i18n="manage.location-add">Add a location</span></button>
                         </div>
-                    </div>
-                </fieldset>
+                        <div class="form-grid u-mt-1">
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-addressAttendeesOnly" name="addressAttendeesOnly">
+                                <span data-i18n="manage.field.addressAttendeesOnly">Show the street addresses and map links only to people going</span>
+                            </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-isOnline" name="isOnline">
+                                <span data-i18n="manage.field.isOnline">Online, or online too</span>
+                            </label>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.onlineUrl">Online link</span>
+                                <input id="f-onlineUrl" name="onlineUrl" type="url" maxlength="500" placeholder="https://">
+                                <span class="field-hint" data-i18n="manage.hint.onlineUrl">Only people going see this.</span>
+                            </label>
+                        </div>
+                    </fieldset>
+                </div>
 
-                <fieldset>
-                    <legend data-i18n="manage.section.rsvp">RSVP and publishing</legend>
-                    <div class="form-grid">
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-price" aria-labelledby="etab-price" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.price">Price</legend>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span data-i18n="manage.field.priceType">Price</span>
+                                <select id="f-priceType" name="priceType">
+                                    <option value="free" data-i18n="manage.price.free">Free</option>
+                                    <option value="paid" data-i18n="manage.price.paid">Paid</option>
+                                    <option value="tba" data-i18n="manage.price.tba">To be announced</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.currency">Currency</span>
+                                <input id="f-currency" name="currency" type="text" list="currencyList" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Search code or name" data-i18n-attr="placeholder:manage.currency-search">
+                            </label>
+                            <datalist id="currencyList"></datalist>
+                            <label class="field">
+                                <span data-i18n="manage.field.priceMin">From</span>
+                                <input id="f-priceMin" name="priceMin" type="number" min="0" step="0.01" inputmode="decimal">
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.priceMax">Up to (optional)</span>
+                                <input id="f-priceMax" name="priceMax" type="number" min="0" step="0.01" inputmode="decimal">
+                            </label>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.priceNote">Price note</span>
+                                <input id="f-priceNote" name="priceNote" type="text" maxlength="200">
+                            </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-priceHidden" name="priceHidden">
+                                <span data-i18n="manage.field.priceHidden">Hide the price: show "to be announced" publicly</span>
+                            </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-tiersEnabled" name="tiersEnabled" aria-describedby="tiersHint">
+                                <span data-i18n="manage.field.tiersEnabled">Sell tickets in tiers, each with its own name, price and benefits</span>
+                            </label>
+                            <p class="field-hint span-2 tiers-hint" id="tiersHint" data-i18n="manage.hint.tiers">For a paid event. The From and Up to prices then come from the tiers.</p>
+                        </div>
+                        <div id="tierSection" hidden>
+                            <div id="tierList" class="location-list"></div>
+                            <div class="actions inline">
+                                <button class="btn" type="button" id="tierAdd"><span data-icon="plus"></span><span data-i18n="manage.tier-add">Add a tier</span></button>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend data-i18n="manage.section.rsvp">RSVP and publishing</legend>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span data-i18n="manage.field.capacity">Spaces (blank for no limit)</span>
+                                <input id="f-capacity" name="capacity" type="number" min="1" step="1" inputmode="numeric">
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.status">Status</span>
+                                <select id="f-status" name="status">
+                                    <option value="draft" data-i18n="status.draft">Draft</option>
+                                    <option value="published" data-i18n="status.published">Published</option>
+                                    <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
+                                </select>
+                            </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
+                                <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
+                            </label>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
+                                <input id="f-publishLocal" name="publishLocal" type="datetime-local">
+                                <span class="field-hint" data-i18n="manage.hint.publishLocal">A published event stays hidden until this time, in the event time zone.</span>
+                            </label>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-meals" aria-labelledby="etab-meals" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.meals">Coming just for a meal</legend>
+                        <p class="muted small" data-i18n="manage.meals-lede">Tick the meals people can RSVP for on their own, instead of the whole event. Leave them all off to take RSVPs for the whole event only.</p>
+                        <div class="meal-rows">
+                            <div class="meal-row">
+                                <label class="check">
+                                    <input type="checkbox" id="f-meal-breakfast" data-meal="breakfast">
+                                    <span data-i18n="meal.breakfast">Breakfast</span>
+                                </label>
+                                <label class="meal-limit">
+                                    <span data-i18n="manage.field.mealPlaces">Places</span>
+                                    <input type="number" id="f-meal-breakfast-limit" data-meal-limit="breakfast" min="1" step="1" inputmode="numeric">
+                                </label>
+                            </div>
+                            <div class="meal-row">
+                                <label class="check">
+                                    <input type="checkbox" id="f-meal-lunch" data-meal="lunch">
+                                    <span data-i18n="meal.lunch">Lunch</span>
+                                </label>
+                                <label class="meal-limit">
+                                    <span data-i18n="manage.field.mealPlaces">Places</span>
+                                    <input type="number" id="f-meal-lunch-limit" data-meal-limit="lunch" min="1" step="1" inputmode="numeric">
+                                </label>
+                            </div>
+                            <div class="meal-row">
+                                <label class="check">
+                                    <input type="checkbox" id="f-meal-dinner" data-meal="dinner">
+                                    <span data-i18n="meal.dinner">Dinner</span>
+                                </label>
+                                <label class="meal-limit">
+                                    <span data-i18n="manage.field.mealPlaces">Places</span>
+                                    <input type="number" id="f-meal-dinner-limit" data-meal-limit="dinner" min="1" step="1" inputmode="numeric">
+                                </label>
+                            </div>
+                        </div>
+                        <div id="mealCustomList" class="meal-custom-list"></div>
+                        <div class="actions inline">
+                            <button class="btn" type="button" id="mealAdd"><span data-icon="plus"></span><span data-i18n="manage.meal-add">Add another meal</span></button>
+                        </div>
+                        <p class="field-hint" data-i18n="manage.hint.meals">Name your own, such as "High tea" or "Supper", up to five. People coming only for a meal do not take one of the event's spaces; give a meal a number of places to limit it, or leave Places blank for no limit.</p>
+                    </fieldset>
+                </div>
+
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-people" aria-labelledby="etab-people" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.notes">Staff notes</legend>
                         <label class="field">
-                            <span data-i18n="manage.field.capacity">Spaces (blank for no limit)</span>
-                            <input id="f-capacity" name="capacity" type="number" min="1" step="1" inputmode="numeric">
+                            <span class="visually-hidden" data-i18n="manage.field.staffNotes">Staff notes</span>
+                            <textarea id="f-staffNotes" name="staffNotes" maxlength="4000" rows="3"></textarea>
+                            <span class="field-hint" data-i18n="manage.hint.staffNotes">Editors only. Never shown on the public page.</span>
                         </label>
-                        <label class="field">
-                            <span data-i18n="manage.field.status">Status</span>
-                            <select id="f-status" name="status">
-                                <option value="draft" data-i18n="status.draft">Draft</option>
-                                <option value="published" data-i18n="status.published">Published</option>
-                                <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
-                            </select>
-                        </label>
-                        <label class="check span-2">
-                            <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
-                            <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
-                            <input id="f-publishLocal" name="publishLocal" type="datetime-local">
-                            <span class="field-hint" data-i18n="manage.hint.publishLocal">A published event stays hidden until this time, in the event time zone.</span>
-                        </label>
-                    </div>
-                </fieldset>
+                    </fieldset>
 
-                <fieldset>
-                    <legend data-i18n="manage.section.meals">Coming just for a meal</legend>
-                    <p class="muted small" data-i18n="manage.meals-lede">Tick the meals people can RSVP for on their own, instead of the whole event. Leave them all off to take RSVPs for the whole event only.</p>
-                    <div class="meal-rows">
-                        <div class="meal-row">
-                            <label class="check">
-                                <input type="checkbox" id="f-meal-breakfast" data-meal="breakfast">
-                                <span data-i18n="meal.breakfast">Breakfast</span>
-                            </label>
-                            <label class="meal-limit">
-                                <span data-i18n="manage.field.mealPlaces">Places</span>
-                                <input type="number" id="f-meal-breakfast-limit" data-meal-limit="breakfast" min="1" step="1" inputmode="numeric">
-                            </label>
-                        </div>
-                        <div class="meal-row">
-                            <label class="check">
-                                <input type="checkbox" id="f-meal-lunch" data-meal="lunch">
-                                <span data-i18n="meal.lunch">Lunch</span>
-                            </label>
-                            <label class="meal-limit">
-                                <span data-i18n="manage.field.mealPlaces">Places</span>
-                                <input type="number" id="f-meal-lunch-limit" data-meal-limit="lunch" min="1" step="1" inputmode="numeric">
-                            </label>
-                        </div>
-                        <div class="meal-row">
-                            <label class="check">
-                                <input type="checkbox" id="f-meal-dinner" data-meal="dinner">
-                                <span data-i18n="meal.dinner">Dinner</span>
-                            </label>
-                            <label class="meal-limit">
-                                <span data-i18n="manage.field.mealPlaces">Places</span>
-                                <input type="number" id="f-meal-dinner-limit" data-meal-limit="dinner" min="1" step="1" inputmode="numeric">
-                            </label>
-                        </div>
-                    </div>
-                    <div id="mealCustomList" class="meal-custom-list"></div>
-                    <div class="actions inline">
-                        <button class="btn" type="button" id="mealAdd"><span data-icon="plus"></span><span data-i18n="manage.meal-add">Add another meal</span></button>
-                    </div>
-                    <p class="field-hint" data-i18n="manage.hint.meals">Name your own, such as "High tea" or "Supper", up to five. People coming only for a meal do not take one of the event's spaces; give a meal a number of places to limit it, or leave Places blank for no limit.</p>
-                </fieldset>
-
-                <fieldset>
-                    <legend data-i18n="manage.section.notes">Staff notes</legend>
-                    <label class="field">
-                        <span class="visually-hidden" data-i18n="manage.field.staffNotes">Staff notes</span>
-                        <textarea id="f-staffNotes" name="staffNotes" maxlength="4000" rows="3"></textarea>
-                        <span class="field-hint" data-i18n="manage.hint.staffNotes">Editors only. Never shown on the public page.</span>
-                    </label>
-                </fieldset>
+                    <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
+                        <h3 id="attendeesTitle" class="section-label"></h3>
+                        <p class="muted small" id="attendeesMeals" hidden></p>
+                        <ul class="item-list" id="attendeeList"></ul>
+                    </section>
+                </div>
 
                 <div class="callout danger" id="editorError" role="alert"></div>
                 <div class="actions inline">
                     <a class="btn" id="editorView" target="_blank" rel="noopener" hidden><span data-icon="external"></span><span data-i18n="manage.view">View page</span></a>
                     <button class="btn btn-danger" type="button" id="editorDelete" hidden><span data-icon="trash"></span><span data-i18n="manage.delete">Delete</span></button>
                 </div>
-
-                <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
-                    <h3 id="attendeesTitle" class="section-label"></h3>
-                    <p class="muted small" id="attendeesMeals" hidden></p>
-                    <ul class="item-list" id="attendeeList"></ul>
-                </section>
 
                 <!-- Sticks to the bottom of the screen while the form is in view. -->
                 <div class="autosave-bar">
@@ -475,9 +496,11 @@
                 <button class="icon-btn small" type="button" data-close-modal="deleteModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
             </div>
             <p data-i18n="manage.delete-lede">The event and its RSVP list are removed for good. To keep the record, set it to Cancelled instead.</p>
+            <p class="muted small" id="cancelInsteadHint" data-i18n="manage.cancel-instead-hint">Cancelling keeps the event page up, marked as cancelled, keeps its RSVP list, and tells the people going.</p>
             <div class="actions">
+                <button class="btn btn-primary" type="button" id="cancelInstead"><span data-icon="x-circle"></span><span data-i18n="manage.cancel-instead">Set to Cancelled instead</span></button>
                 <button class="btn btn-danger" type="button" id="deleteConfirm"><span data-icon="trash"></span><span data-i18n="manage.delete">Delete</span></button>
-                <button class="btn" type="button" data-close-modal="deleteModal" data-i18n="common.cancel">Cancel</button>
+                <button class="btn" type="button" data-close-modal="deleteModal" data-i18n="manage.delete-back">Go back</button>
             </div>
         </div>
     </div>

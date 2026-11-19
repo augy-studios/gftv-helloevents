@@ -1,10 +1,11 @@
-// GET /api/cron/notify, run hourly by Vercel Cron (vercel.json).
+// GET /api/cron/notify, run every ten minutes by Vercel Cron (vercel.json).
 // Vercel sends Authorization: Bearer $CRON_SECRET; anything else is refused.
 //
-// Sends the day-before reminders and the "new event" notices (notify.js),
-// and any change notice an editor's save queued that was never sent (its
-// background send stopped early). Hourly is the coarsest schedule that still
-// gives roughly a day's notice.
+// Sends the reminders due (notify.js sendReminders: 1, 2 or 3 hours, a day
+// or a week before, as each account picked), the "new event" notices, and
+// any change notice an editor's save queued that was never sent (its
+// background send stopped early). Every ten minutes keeps an hour-before
+// reminder within five minutes of the hour.
 
 import { route, send } from '../_lib/http.js';
 import { optionalEnv } from '../_lib/env.js';
