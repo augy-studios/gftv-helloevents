@@ -19,7 +19,8 @@ export const CARD_COLUMNS =
 export const DETAIL_COLUMNS =
   `${CARD_COLUMNS}, price_note, description, description_zh, venue_address, locations, address_attendees_only, online_url, ` +
   'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers, ' +
-  'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value';
+  'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
+  'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.

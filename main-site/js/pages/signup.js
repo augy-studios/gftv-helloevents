@@ -1,13 +1,20 @@
-// Create a public account. Signs in on success and goes on to ?next= or the
+// Create a public account, with its country of origin. Signs in on success and goes on to ?next= or the
 // account page, where 2FA and notifications can be switched on.
 
 import { session } from '../app.js';
 import { post } from '../api.js';
 import { withBusy } from '../ui.js';
 import { humanCheck } from '../turnstile.js';
+import { fillCountrySelect } from '../choices.js';
+import { onChange } from '../../assets/i18n/i18n.js';
 
 const byId = (id) => document.getElementById(id);
 const check = humanCheck(byId('humanCheck'));
+
+// The country of origin (migrations/015): Singapore, Malaysia and Indonesia
+// first, then every other country by name, in the reader's language.
+fillCountrySelect(byId('country'), '');
+onChange(() => fillCountrySelect(byId('country'), byId('country').value));
 
 // Only a path on this site, and not back to sign-in, sign-up or reset.
 function nextPath() {
@@ -45,6 +52,7 @@ byId('signupForm').addEventListener('submit', (event) => {
         displayName: byId('displayName').value,
         email: byId('email').value,
         password: byId('password').value,
+        country: byId('country').value,
         agree: byId('agree').checked,
         ...(await check.fields()),
       });

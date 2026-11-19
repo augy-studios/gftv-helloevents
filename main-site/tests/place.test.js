@@ -79,7 +79,7 @@ test('only editors can read a link, and only a Google Maps link', async () => {
   assert.equal((await browser().call(place, { method: 'POST', body: { link: ION_PIN } })).status, 401);
 
   const member = browser();
-  await member.call(signup, { method: 'POST', body: { username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, agree: true } });
+  await member.call(signup, { method: 'POST', body: { username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, country: 'SG', agree: true } });
   assert.equal((await member.call(place, { method: 'POST', body: { link: ION_PIN } })).status, 403);
 
   const ed = await staff('editor', { is_editor: true });

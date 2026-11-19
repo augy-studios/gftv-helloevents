@@ -14,6 +14,7 @@ import { qrSvg } from '../qr.js';
 import { passkeysSupported, createPasskey, passkeyErrorCode } from '../passkeys.js';
 import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice } from '../push-client.js';
 import { startTabs } from '../tabs.js';
+import { fillCountrySelect } from '../choices.js';
 
 const byId = (id) => document.getElementById(id);
 let currentUser = null;
@@ -24,7 +25,7 @@ let deviceOn = false;
 let totpSetup = null; // the set-up token while an authenticator is being added
 // The action waiting on the password dialog.
 let pendingAction = null;
-const tabs = startTabs(byId('accountTabs'));
+startTabs(byId('accountTabs'));
 
 function renderProfile() {
   byId('displayName').textContent = currentUser.displayName;
@@ -36,15 +37,19 @@ function renderProfile() {
     byId('avatar').hidden = false;
   }
   // Staff names come from gftv.asia, and staff accounts are not deleted
-  // here, so the Profile tab is for public accounts only.
+  // here, so only a public account can rename or delete itself. Everyone
+  // has a country of origin (migrations/015); the Profile tab is marked
+  // while it is missing.
   const isPublic = currentUser.kind === 'public';
   byId('deleteBox').hidden = !isPublic;
-  if (byId('tab-profile').hidden === isPublic) {
-    byId('tab-profile').hidden = !isPublic;
-    tabs.refresh();
-  }
+  byId('nameBox').hidden = !isPublic;
   if (document.activeElement !== byId('nameInput')) {
     byId('nameInput').value = currentUser.displayName;
+  }
+  byId('countryMissing').hidden = Boolean(currentUser.country);
+  byId('profileMark').hidden = Boolean(currentUser.country);
+  if (document.activeElement !== byId('countryInput')) {
+    fillCountrySelect(byId('countryInput'), currentUser.country);
   }
 }
 
@@ -385,6 +390,31 @@ byId('totpForm').addEventListener('submit', (event) => {
       showNewCodes(codes);
     }
     renderSecurity();
+  });
+});
+
+// Where to go back to after setting a country: the event page that asked
+// for it (?next=/e/<slug>), or nowhere.
+function backToEvent() {
+  const next = new URLSearchParams(location.search).get('next');
+  if (next && /^\/e\/[a-z0-9-]{3,60}$/.test(next)) {
+    return next;
+  }
+  return null;
+}
+
+byId('countryForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  withBusy(byId('countrySubmit'), byId('countryError'), async () => {
+    const { user } = await post('/api/me/profile', { country: byId('countryInput').value });
+    currentUser = user;
+    renderProfile();
+    const back = backToEvent();
+    if (back) {
+      location.assign(back);
+      return;
+    }
+    byId('accountNotice').textContent = translate('account.country-saved');
   });
 });
 

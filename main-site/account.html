@@ -72,7 +72,7 @@
                 <button class="tab" type="button" role="tab" id="tab-going" data-tab="going" aria-controls="panel-going" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="account.tab.going">My events</span></button>
                 <button class="tab" type="button" role="tab" id="tab-notifications" data-tab="notifications" aria-controls="panel-notifications" aria-selected="false" tabindex="-1"><span data-icon="bell"></span><span data-i18n="notify.title">Notifications</span></button>
                 <button class="tab" type="button" role="tab" id="tab-security" data-tab="security" aria-controls="panel-security" aria-selected="false" tabindex="-1"><span data-icon="shield"></span><span data-i18n="security.title">Security</span></button>
-                <button class="tab" type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="account.tab.profile">Profile</span></button>
+                <button class="tab" type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false" tabindex="-1"><span data-icon="user"></span><span data-i18n="account.tab.profile">Profile</span><span class="tab-mark" id="profileMark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="account.country-missing-mark">(country of origin to add)</span></span></button>
             </div>
 
             <section class="glass-card page-card" role="tabpanel" id="panel-going" aria-labelledby="tab-going">
@@ -169,7 +169,21 @@
             </section>
 
             <div role="tabpanel" id="panel-profile" aria-labelledby="tab-profile" class="account-panel-stack" hidden>
-            <section class="glass-card page-card" aria-labelledby="nameTitle">
+            <section class="glass-card page-card" aria-labelledby="countryTitle">
+                <h2 id="countryTitle" data-i18n="account.country-title">Country of origin</h2>
+                <p class="muted small" data-i18n="account.country-lede">Cross-border events and conventions ask for it before you RSVP. Only you, and the organisers of those events, see it.</p>
+                <div class="callout warn small u-mt-1" id="countryMissing" hidden data-i18n="account.country-missing">You have not added your country of origin yet.</div>
+                <form class="u-mt-1" id="countryForm" novalidate>
+                    <label class="field">
+                        <span data-i18n="field.country">Country of origin</span>
+                        <select id="countryInput" required></select>
+                    </label>
+                    <div class="actions inline"><button class="btn" type="submit" id="countrySubmit"><span data-i18n="account.country-save">Save country</span></button></div>
+                    <div class="callout danger" id="countryError" role="alert"></div>
+                </form>
+            </section>
+
+            <section class="glass-card page-card" id="nameBox" aria-labelledby="nameTitle">
                 <h2 id="nameTitle" data-i18n="account.name-title">Display name</h2>
                 <form class="u-mt-1" id="nameForm" novalidate>
                     <label class="field">

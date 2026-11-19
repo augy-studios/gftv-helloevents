@@ -1,4 +1,4 @@
-// POST /api/auth/signup { username, displayName, email, password, agree, "cf-turnstile-response"? }
+// POST /api/auth/signup { username, displayName, email, password, country, agree, "cf-turnstile-response"? }
 //
 // A public account, for RSVPs and notifications. Signs the new account in
 // straight away (2FA is optional for public accounts; the account page
@@ -61,7 +61,7 @@ export default route('auth/signup', async (request, response) => {
   if (!check.ok) {
     return fail(response, 400, check.error);
   }
-  const { username, displayName, email } = check.fields;
+  const { username, displayName, email, country } = check.fields;
   if (await refusedName(username)) {
     return fail(response, 400, 'username_reserved');
   }
@@ -83,6 +83,7 @@ export default route('auth/signup', async (request, response) => {
       username,
       display_name: displayName,
       email,
+      country,
       password_hash: passwordHash,
       terms_accepted_at: now,
       password_changed_at: now,

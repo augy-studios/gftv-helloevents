@@ -33,6 +33,17 @@ export const PREVIOUS_DISPLAYS = ['full', 'reference'];
 // percentage or a fixed amount off.
 export const VOLUNTEER_KIND = 'convention';
 export const DISCOUNT_TYPES = ['percent', 'amount'];
+// What the event page's link button says (migrations/015): one of these, or
+// the editor's own words ('custom').
+export const LINK_LABELS = ['tickets_website', 'tickets', 'website', 'group', 'register', 'custom'];
+// Timetables (migrations/014): how the event page shows one (a timeline, or
+// a grid with a column per room), at most MAX_ROOMS rooms and at most
+// MAX_TIMETABLE_ITEMS items. An item with no end is drawn in the grid, and
+// counts as on now, for TIMETABLE_DEFAULT_MINUTES.
+export const TIMETABLE_VIEWS = ['timeline', 'grid'];
+export const MAX_ROOMS = 20;
+export const MAX_TIMETABLE_ITEMS = 300;
+export const TIMETABLE_DEFAULT_MINUTES = 30;
 
 export const LIMITS = Object.freeze({
   title: 120,
@@ -50,6 +61,11 @@ export const LIMITS = Object.freeze({
   mealLabel: 40,
   tierName: 60,
   tierBenefit: 200,
+  roomName: 60,
+  roomTag: 20,
+  itemTitle: 120,
+  itemNote: 300,
+  linkLabel: 40,
 });
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -69,6 +85,10 @@ const COUNTRY_CODE = /^[A-Za-z]{2}$/;
 // by the edit form when the meal is added and kept from then on, so the
 // people coming for it stay with it when it is renamed.
 const CUSTOM_MEAL_ID = /^m-[a-z0-9]{4,16}$/;
+// The id of a timetable room: "r-" and a few letters and digits, made by the
+// edit form when the room is added and kept from then on, so the items in it
+// stay with it when it is renamed.
+const ROOM_ID = /^r-[a-z0-9]{4,16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Every currency code this runtime knows (ISO 4217), for checking the form's
@@ -661,6 +681,33 @@ function readPlaceAndLinks(body, fields) {
   return null;
 }
 
+// What the link button says (migrations/015) and whether the event is
+// cross-border. A label the form does not know reads as "Tickets and
+// website". The editor's own words are kept while another label is picked;
+// 'custom' saves before they are typed (it is picked from a list, which
+// saves at once), and the page says "Tickets and website" until they are.
+// Without the fields (a page from before them) the stored ones are kept.
+function readLinkLabelAndBorder(body, fields) {
+  if (body.externalUrlLabel !== undefined) {
+    fields.external_url_label = allowedOrNull(LINK_LABELS, body.externalUrlLabel);
+    if (!fields.external_url_label) {
+      fields.external_url_label = 'tickets_website';
+    }
+    const custom = cleanText(body.externalUrlCustomLabel, LIMITS.linkLabel);
+    if (custom.length > LIMITS.linkLabel) {
+      return 'externalUrlCustomLabel';
+    }
+    fields.external_url_custom_label = null;
+    if (custom !== '') {
+      fields.external_url_custom_label = custom;
+    }
+  }
+  if (body.crossBorder !== undefined) {
+    fields.cross_border = body.crossBorder === true;
+  }
+  return null;
+}
+
 // The price type, then the amounts and currency, which are kept only for a
 // paid event. A paid event needs a minimum, the maximum cannot be below the
 // minimum, and the currency defaults to SGD.
@@ -1127,16 +1174,280 @@ export function takesVolunteers(row) {
   return row.volunteers_wanted === true;
 }
 
+// ---------------------------------------------------------------------------
+// Timetables (migrations/014). Rooms are the grid's columns, in order; items
+// are what happens, each on a day at a start time, with an optional end
+// (earlier than the start: the next day), room and note. Days and times are
+// wall-clock in the event's own zone, as the form shows them.
+// ---------------------------------------------------------------------------
+
+// One room from the form: { id, name, tag }, as { ok: true, room } (room
+// null when its name and tag are both blank, so an untouched row is
+// dropped) or { ok: false, field }.
+function readRoom(entry, seen) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, field: 'timetableRooms' };
+  }
+  const id = stringOrEmpty(entry.id);
+  if (!ROOM_ID.test(id) || seen.has(id)) {
+    return { ok: false, field: 'timetableRooms' };
+  }
+  seen.add(id);
+  const name = cleanText(entry.name, LIMITS.roomName);
+  if (name.length > LIMITS.roomName) {
+    return { ok: false, field: 'roomName' };
+  }
+  const tag = cleanText(entry.tag, LIMITS.roomTag);
+  if (tag.length > LIMITS.roomTag) {
+    return { ok: false, field: 'roomTag' };
+  }
+  if (name === '' && tag === '') {
+    return { ok: true, room: null };
+  }
+  if (name === '') {
+    return { ok: false, field: 'roomName' };
+  }
+  let storedTag = null;
+  if (tag !== '') {
+    storedTag = tag;
+  }
+  return { ok: true, room: { id, name, tag: storedTag } };
+}
+
+// One item from the form: { title, date, start, end, room, note }, as
+// { ok: true, item } (item null when its title, times and note are all
+// blank: a new card the form filled the day in for, untouched) or
+// { ok: false, field }. An item needs a title, a day and a start time; the
+// end may be blank, and cannot be the start itself. A room no longer in the
+// list (removed while this was being typed) leaves the item in none.
+function readItem(entry, roomIds) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, field: 'timetableItems' };
+  }
+  const title = cleanText(entry.title, LIMITS.itemTitle);
+  if (title.length > LIMITS.itemTitle) {
+    return { ok: false, field: 'itemTitle' };
+  }
+  const note = cleanText(entry.note, LIMITS.itemNote);
+  if (note.length > LIMITS.itemNote) {
+    return { ok: false, field: 'itemNote' };
+  }
+  const date = cleanText(entry.date, 10);
+  const start = cleanText(entry.start, 5);
+  const end = cleanText(entry.end, 5);
+  if (title === '' && start === '' && end === '' && note === '') {
+    return { ok: true, item: null };
+  }
+  if (title === '') {
+    return { ok: false, field: 'itemTitle' };
+  }
+  if (!isCalendarDate(date)) {
+    return { ok: false, field: 'itemDate' };
+  }
+  if (!TIME_ONLY.test(start)) {
+    return { ok: false, field: 'itemStart' };
+  }
+  if (end !== '' && (!TIME_ONLY.test(end) || end === start)) {
+    return { ok: false, field: 'itemEnd' };
+  }
+  let room = stringOrEmpty(entry.room);
+  if (!roomIds.has(room)) {
+    room = null;
+  }
+  let storedEnd = null;
+  if (end !== '') {
+    storedEnd = end;
+  }
+  let storedNote = null;
+  if (note !== '') {
+    storedNote = note;
+  }
+  return { ok: true, item: { title, date, start, end: storedEnd, room, note: storedNote } };
+}
+
+// Items in time order: by day, then start time, then the order of their
+// rooms (an item in no room last), keeping the editor's order otherwise.
+function sortItems(items, rooms) {
+  const roomOrder = new Map(rooms.map((room, index) => [room.id, index]));
+  const place = (item) => {
+    if (item.room !== null && roomOrder.has(item.room)) {
+      return roomOrder.get(item.room);
+    }
+    return rooms.length;
+  };
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((first, second) => {
+      const firstKey = `${first.item.date}T${first.item.start}`;
+      const secondKey = `${second.item.date}T${second.item.start}`;
+      if (firstKey !== secondKey) {
+        if (firstKey < secondKey) {
+          return -1;
+        }
+        return 1;
+      }
+      const byRoom = place(first.item) - place(second.item);
+      if (byRoom !== 0) {
+        return byRoom;
+      }
+      return first.index - second.index;
+    })
+    .map((each) => each.item);
+}
+
+// The timetable (migrations/014): how the page shows it, the rooms and the
+// items, each checked, the items put in time order. With none of its fields
+// at all the stored timetable is kept, so a page from before timetables
+// cannot wipe it; the three are always sent together.
+//
+// It returns the form field at the first problem, and sets fields.badRoom or
+// fields.badItem to that room's or item's place in the list, so the answer
+// can say which one.
+function readTimetable(body, fields) {
+  const given = ['timetableView', 'timetableRooms', 'timetableItems'].some((name) => body[name] !== undefined);
+  if (!given) {
+    return null;
+  }
+  fields.timetable_view = allowedOrNull(TIMETABLE_VIEWS, body.timetableView);
+  if (!fields.timetable_view) {
+    fields.timetable_view = 'timeline';
+  }
+
+  let roomEntries = body.timetableRooms;
+  if (roomEntries === null || roomEntries === undefined) {
+    roomEntries = [];
+  }
+  if (!Array.isArray(roomEntries) || roomEntries.length > MAX_ROOMS) {
+    return 'timetableRooms';
+  }
+  const rooms = [];
+  const seen = new Set();
+  for (const [index, entry] of roomEntries.entries()) {
+    const check = readRoom(entry, seen);
+    if (!check.ok) {
+      fields.badRoom = index;
+      return check.field;
+    }
+    if (check.room) {
+      rooms.push(check.room);
+    }
+  }
+
+  let itemEntries = body.timetableItems;
+  if (itemEntries === null || itemEntries === undefined) {
+    itemEntries = [];
+  }
+  if (!Array.isArray(itemEntries) || itemEntries.length > MAX_TIMETABLE_ITEMS) {
+    return 'timetableItems';
+  }
+  const roomIds = new Set(rooms.map((room) => room.id));
+  const items = [];
+  for (const [index, entry] of itemEntries.entries()) {
+    const check = readItem(entry, roomIds);
+    if (!check.ok) {
+      fields.badItem = index;
+      return check.field;
+    }
+    if (check.item) {
+      items.push(check.item);
+    }
+  }
+  fields.timetable_rooms = rooms;
+  fields.timetable_items = sortItems(items, rooms);
+  return null;
+}
+
+// An event's timetable as stored: { view, rooms, items }, each room and item
+// with every key, skipping anything malformed, and an item's room null when
+// that room is not in the list.
+export function storedTimetable(row) {
+  let view = 'timeline';
+  if (row && row.timetable_view === 'grid') {
+    view = 'grid';
+  }
+  const rooms = [];
+  if (row && Array.isArray(row.timetable_rooms)) {
+    for (const room of row.timetable_rooms) {
+      if (!room || typeof room.id !== 'string' || !ROOM_ID.test(room.id)) {
+        continue;
+      }
+      if (typeof room.name !== 'string' || room.name === '') {
+        continue;
+      }
+      let tag = null;
+      if (typeof room.tag === 'string' && room.tag !== '') {
+        tag = room.tag;
+      }
+      rooms.push({ id: room.id, name: room.name, tag });
+    }
+  }
+  const roomIds = new Set(rooms.map((room) => room.id));
+  const items = [];
+  if (row && Array.isArray(row.timetable_items)) {
+    for (const item of row.timetable_items) {
+      if (!item || typeof item.title !== 'string' || item.title === '') {
+        continue;
+      }
+      if (typeof item.date !== 'string' || !isCalendarDate(item.date)) {
+        continue;
+      }
+      if (typeof item.start !== 'string' || !TIME_ONLY.test(item.start)) {
+        continue;
+      }
+      let end = null;
+      if (typeof item.end === 'string' && TIME_ONLY.test(item.end) && item.end !== item.start) {
+        end = item.end;
+      }
+      let room = null;
+      if (typeof item.room === 'string' && roomIds.has(item.room)) {
+        room = item.room;
+      }
+      let note = null;
+      if (typeof item.note === 'string' && item.note !== '') {
+        note = item.note;
+      }
+      items.push({ title: item.title, date: item.date, start: item.start, end, room, note });
+    }
+  }
+  return { view, rooms, items };
+}
+
+// The day after a calendar date: "2026-12-31" -> "2027-01-01".
+export function nextDate(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+// When one stored item starts and ends, in UTC, in the event's zone:
+// { startsAt, endsAt, endsNextDay } (endsAt null when it has no end). An
+// end earlier than the start is on the next day.
+export function itemTimes(item, timeZone) {
+  const startsAt = wallToUtc(`${item.date}T${item.start}`, timeZone);
+  let endsAt = null;
+  let endsNextDay = false;
+  if (item.end !== null) {
+    let endDate = item.date;
+    if (item.end < item.start) {
+      endDate = nextDate(item.date);
+      endsNextDay = true;
+    }
+    endsAt = wallToUtc(`${endDate}T${item.end}`, timeZone);
+  }
+  return { startsAt, endsAt, endsNextDay };
+}
+
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readTiers, readCapacity, readMeals, readVolunteers];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readCapacity, readMeals, readVolunteers, readTimetable];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
 // that is wrong, plus location (its place in the list, from 0) when that
-// field is one location's, tier when it is one ticket tier's, and meal (its
-// id) when it is one of a meal's places or the list of them.
+// field is one location's, tier when it is one ticket tier's, meal (its
+// id) when it is one of a meal's places or the list of them, and room or
+// item (its place in the list, from 0) when it is one timetable room's or
+// item's.
 export function validateEvent(input) {
   let body = {};
   if (input && typeof input === 'object') {
@@ -1155,6 +1466,12 @@ export function validateEvent(input) {
       }
       if (fields.badMeal !== undefined) {
         problem.meal = fields.badMeal;
+      }
+      if (fields.badRoom !== undefined) {
+        problem.room = fields.badRoom;
+      }
+      if (fields.badItem !== undefined) {
+        problem.item = fields.badItem;
       }
       return problem;
     }

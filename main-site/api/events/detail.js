@@ -14,6 +14,14 @@ import { canManage } from '../_lib/users.js';
 import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
+// The signed-in person's country of origin (migrations/015), or null.
+function countryOfSession(session) {
+  if (session && session.user.country) {
+    return session.user.country;
+  }
+  return null;
+}
+
 // Finds the event (any status for an editor, released ones for everyone
 // else) and answers with what this viewer may see of it.
 export default route('events/detail', async (request, response) => {
@@ -54,6 +62,7 @@ export default route('events/detail', async (request, response) => {
     volunteer: mine.volunteer,
     volunteered: standing.volunteered,
     discount: standing.discount,
+    country: countryOfSession(session),
   });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.

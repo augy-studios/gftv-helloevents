@@ -18,11 +18,12 @@
 // Emails are read for sign-in lookups only and never leave this module.
 
 import { database, TABLES } from './supabase.js';
+import { optionalEnv } from './env.js';
 
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
 const ACCOUNT_COLUMNS =
-  'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram';
+  'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram, country';
 
 // When reminders can come, in hours before an event starts (migrations/011):
 // 1, 2 and 3 hours, a day and a week. An account picks any of them.
@@ -61,6 +62,7 @@ function fromStaff(staff, account = null) {
     is_admin: staff.is_admin === true,
     is_editor: staff.is_editor === true,
     is_approved: staff.is_approved === true,
+    country: countryOf(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in staff) {
@@ -84,6 +86,7 @@ function fromPublic(account) {
     is_admin: false,
     is_editor: false,
     is_approved: account.status === 'active',
+    country: countryOf(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in account) {
@@ -91,6 +94,15 @@ function fromPublic(account) {
     normalised.totp_secret = null;
   }
   return normalised;
+}
+
+// The account's country of origin (migrations/015), a two-letter code, or
+// null while it has none (and for a staff member with no accounts row yet).
+function countryOf(account) {
+  if (account && typeof account.country === 'string' && account.country !== '') {
+    return account.country;
+  }
+  return null;
 }
 
 // The account's notification choices. Updates are on unless switched off;
@@ -114,6 +126,28 @@ function notificationPreferences(account) {
     newEvents: row.notify_new_events === true,
     telegram: row.notify_telegram === true,
   };
+}
+
+// Where a staff member's profile picture (set on gftv.asia) is fetched from
+// by api/me/avatar.js: its https address, but only when it is in this site's
+// own Supabase project, the one place it is fetched from; otherwise null.
+// The address itself never goes to a browser.
+export function avatarSource(account) {
+  if (!account || typeof account.avatar_url !== 'string') {
+    return null;
+  }
+  let picture;
+  let project;
+  try {
+    picture = new URL(account.avatar_url);
+    project = new URL(optionalEnv('SUPABASE_URL'));
+  } catch {
+    return null;
+  }
+  if (picture.protocol !== 'https:' || picture.host !== project.host || picture.username || picture.password) {
+    return null;
+  }
+  return picture.href;
 }
 
 // An account row from SESSION_ACCOUNT_SELECT, normalised, or null.

@@ -16,6 +16,14 @@
 //   Staff notes, who created or edited an event, and attendee identities go
 //   only to editors, and an attendee is a display name and username, never
 //   an email.
+//   Pictures (covers, staff profile pictures) go out as this site's own
+//   addresses (api/events/cover.js, api/me/avatar.js), never the Supabase
+//   Storage address they are kept at.
+//   A timetable goes out only while the dates are announced, since its days
+//   would give them away.
+//   On a cross-border event (migrations/015), the link goes only to people
+//   signed in with a country of origin, and to editors; an attendee's
+//   country goes only to editors, and only for a cross-border event.
 //   Whether someone signed up to volunteer, or volunteered, goes only to
 //   them and to editors (migrations/012); the public page says only whether
 //   a convention takes volunteers and what its volunteer benefit is.
@@ -33,8 +41,9 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive } from './event-rules.js';
-import { roleOf, canManage } from './users.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS } from './event-rules.js';
+import { roleOf, canManage, avatarSource } from './users.js';
+import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
 
 // ---------------------------------------------------------------------------
@@ -104,10 +113,13 @@ export function selfView(user) {
   if (!displayName) {
     displayName = user.username;
   }
-  // Only an https:// address goes out; any other stored value is dropped.
+  // The picture is served from this site (api/me/avatar.js), so its Storage
+  // address never goes out; v changes with the picture. Only one stored in
+  // this site's Supabase project is shown.
   let avatarUrl = null;
-  if (typeof user.avatar_url === 'string' && user.avatar_url.startsWith('https://')) {
-    avatarUrl = user.avatar_url;
+  const source = avatarSource(user);
+  if (source) {
+    avatarUrl = `/api/me/avatar?v=${sha256(source).slice(0, 12)}`;
   }
   let kind = 'staff';
   if (user.kind === 'public') {
@@ -120,6 +132,7 @@ export function selfView(user) {
     kind,
     role: roleOf(user),
     canManage: canManage(user),
+    country: missingToNull(user.country),
   };
 }
 
@@ -160,11 +173,21 @@ export function attendeeView(row, event = {}, standing = {}) {
     displayName,
     staff: isStaff,
     meals: offeredMeals(event, row.meals),
+    country: attendeeCountry(event, account),
     volunteer: row.volunteer === true,
     volunteered: standing.volunteered === true,
     pastVolunteer: standing.pastVolunteer === true,
     rsvpAt: row.created_at,
   };
+}
+
+// An attendee's country of origin, for the editors of a cross-border event
+// (migrations/015) only; null for any other event, or while they have none.
+function attendeeCountry(event, account) {
+  if (event.cross_border !== true) {
+    return null;
+  }
+  return emptyToNull(account.country);
 }
 
 // A passkey on the account page: its name, when it was added and when it was
@@ -358,6 +381,127 @@ function tiersView(row) {
   });
 }
 
+// The link label as stored (migrations/015), read as "Tickets and website"
+// when it is not one of LINK_LABELS.
+function storedLinkLabel(row) {
+  if (LINK_LABELS.includes(row.external_url_label)) {
+    return row.external_url_label;
+  }
+  return 'tickets_website';
+}
+
+// What the link button says on the event page: the stored label, except
+// that 'custom' with no words of its own says "Tickets and website".
+function linkLabelOf(row) {
+  const label = storedLinkLabel(row);
+  if (label === 'custom' && !row.external_url_custom_label) {
+    return 'tickets_website';
+  }
+  return label;
+}
+
+// The event's link on its page, or null when it has none: its address, what
+// its button says (label, and customLabel for the editor's own words), and
+// locked when this viewer may not have it yet. A cross-border event's link
+// goes only to people signed in with a country of origin, and to editors:
+// locked is 'sign-in' for someone signed out and 'country' for someone with
+// no country set, and the address is then left out.
+function externalLinkView(row, viewer) {
+  if (!row.external_url) {
+    return null;
+  }
+  let locked = null;
+  if (row.cross_border === true && viewer.canManage !== true) {
+    if (viewer.signedIn !== true) {
+      locked = 'sign-in';
+    } else if (!viewer.country) {
+      locked = 'country';
+    }
+  }
+  let url = null;
+  if (locked === null) {
+    url = row.external_url;
+  }
+  const label = linkLabelOf(row);
+  let customLabel = null;
+  if (label === 'custom') {
+    customLabel = row.external_url_custom_label;
+  }
+  return { url, label, customLabel, locked };
+}
+
+// The timetable on the event page (migrations/014), or null when there is
+// none to show: no items, or the dates are to be announced (its days would
+// give them away). view is how the editor wants it shown ("timeline" or
+// "grid"); rooms are the grid's columns, in order ({ name, tag }); items
+// are in time order, each with its day, start and end as the editor typed
+// them (wall-clock in the event's zone, end null when there is none), the
+// moments it starts and ends (for what is on now), whether the end is the
+// next day, its room's place in rooms (null for none) and its note.
+//
+// A timeline's steps have a time only, so it goes out with no rooms and no
+// ends, even if some were kept from when it was a grid.
+function timetableDetail(row) {
+  if (!datesAnnounced(row)) {
+    return null;
+  }
+  const timetable = storedTimetable(row);
+  if (timetable.items.length === 0) {
+    return null;
+  }
+  const timeline = timetable.view === 'timeline';
+  let rooms = timetable.rooms;
+  if (timeline) {
+    rooms = [];
+  }
+  const roomPlace = new Map(rooms.map((room, index) => [room.id, index]));
+  return {
+    view: timetable.view,
+    rooms: rooms.map((room) => ({ name: room.name, tag: room.tag })),
+    items: timetable.items.map((item) => {
+      let shown = item;
+      if (timeline) {
+        shown = { ...item, end: null, room: null };
+      }
+      const times = itemTimes(shown, row.timezone);
+      let room = null;
+      if (shown.room !== null) {
+        room = roomPlace.get(shown.room);
+      }
+      return {
+        title: item.title,
+        date: item.date,
+        start: item.start,
+        end: shown.end,
+        endsNextDay: times.endsNextDay,
+        startsAt: times.startsAt,
+        endsAt: times.endsAt,
+        room,
+        note: item.note,
+      };
+    }),
+  };
+}
+
+// The timetable on the edit form, every field a string: how the page shows
+// it, the rooms with their ids, and the items with their room's id ('' for
+// none).
+function managedTimetable(row) {
+  const timetable = storedTimetable(row);
+  return {
+    timetableView: timetable.view,
+    timetableRooms: timetable.rooms.map((room) => ({ id: room.id, name: room.name, tag: emptyToBlank(room.tag) })),
+    timetableItems: timetable.items.map((item) => ({
+      title: item.title,
+      date: item.date,
+      start: item.start,
+      end: emptyToBlank(item.end),
+      room: emptyToBlank(item.room),
+      note: emptyToBlank(item.note),
+    })),
+  };
+}
+
 // One tier on the edit form, its price and benefits as the fields hold
 // them (the benefits one per line).
 function managedTier(tier) {
@@ -457,7 +601,7 @@ export function publicEventCard(row, now = Date.now()) {
     title: row.title,
     kind: row.kind,
     summary: emptyToNull(row.summary),
-    coverImageUrl: coverUrl(row.cover_image_path),
+    coverImageUrl: coverUrl(row),
     cancelled: row.status === 'cancelled',
     when: whenView(row),
     where: {
@@ -483,7 +627,7 @@ export function publicEventCard(row, now = Date.now()) {
 //
 // It is the card plus the price note, the spaces left, the descriptions (in
 // English and Chinese), the organiser, the link, every location, the ticket
-// tiers and the meals people can come to on their own. People going
+// tiers, the meals people can come to on their own and the timetable. People going
 // and editors ("insiders") also get attendees-only addresses and map links,
 // and the online link; everyone else gets only a flag saying there is one
 // for attendees.
@@ -537,6 +681,11 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (viewer.discount === true && volunteerDiscountActive(row)) {
     volunteerDiscount = true;
   }
+  // A cross-border event needs a country of origin to RSVP (migrations/015).
+  let needsCountry = false;
+  if (row.cross_border === true && viewer.signedIn === true && !viewer.country) {
+    needsCountry = true;
+  }
 
   return {
     ...card,
@@ -545,7 +694,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     description: emptyToNull(row.description),
     descriptionZh: emptyToNull(row.description_zh),
     organiserName: emptyToNull(row.organiser_name),
-    externalUrl: emptyToNull(row.external_url),
+    externalLink: externalLinkView(row, viewer),
+    crossBorder: row.cross_border === true,
     where: {
       ...card.where,
       locations: locations.map((location) => locationView(location, addressShown)),
@@ -555,6 +705,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     },
     tiers: tiersView(row),
     meals: mealsView(row, addressShown),
+    timetable: timetableDetail(row),
     volunteers: volunteersView(row),
     viewer: {
       signedIn: viewer.signedIn === true,
@@ -565,6 +716,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       volunteer,
       volunteered: viewer.volunteered === true,
       volunteerDiscount,
+      needsCountry,
     },
   };
 }
@@ -607,7 +759,7 @@ export function managedSummary(row, now = Date.now()) {
 // (api/manage/cover.js): the edit form redraws only its cover preview.
 export function managedCover(row) {
   return {
-    coverImageUrl: emptyToBlank(coverUrl(row.cover_image_path)),
+    coverImageUrl: emptyToBlank(coverUrl(row)),
     hasCover: Boolean(row.cover_image_path),
   };
 }
@@ -637,6 +789,9 @@ export function managedEvent(row) {
     addressAttendeesOnly: row.address_attendees_only === true,
     ...managedCover(row),
     externalUrl: emptyToBlank(row.external_url),
+    externalUrlLabel: storedLinkLabel(row),
+    externalUrlCustomLabel: emptyToBlank(row.external_url_custom_label),
+    crossBorder: row.cross_border === true,
     organiserName: emptyToBlank(row.organiser_name),
     priceType: row.price_type,
     priceHidden: row.price_hidden === true,
@@ -658,6 +813,7 @@ export function managedEvent(row) {
     volunteerDiscountFrom: emptyToBlank(row.volunteer_discount_from),
     volunteerDiscountType: volunteerDiscountType(row),
     volunteerDiscountValue: stringOrBlank(row.volunteer_discount_value),
+    ...managedTimetable(row),
     staffNotes: emptyToBlank(row.staff_notes),
   };
 }

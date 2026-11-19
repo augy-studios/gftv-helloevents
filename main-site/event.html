@@ -136,6 +136,10 @@
                             <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
                         </label>
                         <p class="callout ok small rsvp-volunteer-note" id="rsvpVolunteerNote" hidden></p>
+                        <div class="callout warn small rsvp-country" id="rsvpCountry" hidden>
+                            <p data-i18n="event.country-needed">This is a cross-border event. Add your country of origin to your account to RSVP.</p>
+                            <a class="btn btn-small u-mt-1" id="rsvpCountryLink" href="/account#profile"><span data-icon="globe"></span><span data-i18n="event.country-set">Set my country</span></a>
+                        </div>
                         <button class="btn btn-primary btn-block" type="button" id="rsvpBtn" hidden></button>
                         <a class="btn btn-primary btn-block" id="rsvpSignIn" href="/login" hidden><span data-icon="lock"></span><span data-i18n="event.sign-in-to-rsvp">Sign in to RSVP</span></a>
                         <p class="small muted" id="rsvpNote"></p>
@@ -143,12 +147,28 @@
                     </div>
 
                     <div class="actions">
-                        <a class="btn btn-block" id="externalLink" target="_blank" rel="noopener noreferrer" hidden><span data-icon="external"></span><span data-i18n="event.external">Tickets and website</span></a>
+                        <a class="btn btn-block" id="externalLink" hidden><span class="icon" aria-hidden="true" id="externalLinkIcon"></span><span id="externalLinkText"></span></a>
+                        <p class="small muted external-link-note" id="externalLinkNote" hidden></p>
                         <button class="btn btn-block" type="button" id="shareBtn"><span data-icon="copy"></span><span data-i18n="event.share">Copy link</span></button>
                         <a class="btn btn-block btn-quiet" id="manageLink" hidden><span data-icon="edit"></span><span data-i18n="event.edit">Edit this event</span></a>
                     </div>
                 </aside>
             </div>
+
+            <!-- Full width, below the details, so a grid with many rooms has room
+                 (js/timetable.js). -->
+            <section class="glass-card event-section timetable-section" id="timetableBox" hidden aria-labelledby="timetableTitle">
+                <div class="row between">
+                    <h2 id="timetableTitle" data-i18n="event.timetable">Timetable</h2>
+                    <p class="muted small" id="timetableZone"></p>
+                </div>
+                <div class="tt-layout-switch" id="timetableLayout" role="group" aria-label="Show the timetable as" data-i18n-attr="aria-label:event.timetable-layout" hidden>
+                    <button class="tt-layout-btn" type="button" data-layout="table" aria-pressed="true"><span data-icon="grid"></span><span data-i18n="event.timetable-table">Table</span></button>
+                    <button class="tt-layout-btn" type="button" data-layout="list" aria-pressed="false"><span data-icon="list"></span><span data-i18n="event.timetable-list">List</span></button>
+                </div>
+                <div class="tt-days" id="timetableDays" role="group" aria-label="Days" data-i18n-attr="aria-label:event.timetable-days" hidden></div>
+                <div id="timetableBody"></div>
+            </section>
         </article>
     </main>
 

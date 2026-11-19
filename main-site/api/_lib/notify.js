@@ -2,8 +2,9 @@
 // the account page (gftvevents_accounts.notify_*):
 //
 //   updates    an event you are going to changes when or where it happens,
-//              or is cancelled (sent shortly after an editor saves the change,
-//              once for a run of saves: queueEventChange below)
+//              its timetable changes, or it is cancelled (sent shortly after
+//              an editor saves the change, once for a run of saves:
+//              queueEventChange below)
 //   reminders  before an event you are going to, at the times the account
 //              picked: 1, 2 or 3 hours, a day, a week (cron/notify.js, every
 //              ten minutes; each time once per RSVP: sendReminders)
@@ -33,7 +34,7 @@ import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
 import { eventNoticeMessage, reminderMessage } from './telegram-messages.js';
 import { reminderHoursFrom } from './users.js';
-import { isReleased, storedLocations, storedMeals } from './event-rules.js';
+import { isReleased, datesAnnounced, storedLocations, storedMeals, storedTimetable } from './event-rules.js';
 import { whenText, endText, placeText, countryText, untilText, startDateText, startTimeText } from './event-text.js';
 import { embedImageUrl } from './covers.js';
 import { errorDetail } from './http.js';
@@ -96,6 +97,10 @@ export function noticeFor(kind, row) {
   if (kind === 'updated') {
     const message = 'The time or place changed. Now:';
     return { ...notice, heading: 'Event updated', lines: [message, ...lines], intro: message, tag: `event-${row.slug}` };
+  }
+  if (kind === 'timetable') {
+    const message = 'The timetable changed. See the event page for the latest.';
+    return { ...notice, heading: 'Timetable updated', lines: [message], intro: message, tag: `event-${row.slug}` };
   }
   return { ...notice, heading: 'New event', tag: `new-${row.slug}` };
 }
@@ -227,8 +232,45 @@ function mealPlacesChanged(before, after) {
   });
 }
 
+// The timetable as the event page shows it, in one comparable shape: each
+// item's title, day, start and note, and unless timeOnly, its end and room
+// (by its name and tag, so renaming a room is a change but its id is not).
+// A timeline shows no ends or rooms, so for one (before or after) those are
+// left out: changing them, or switching between a timeline and a grid, is
+// not news.
+function timetableShape(row, timeOnly) {
+  const timetable = storedTimetable(row);
+  const rooms = new Map(timetable.rooms.map((room) => [room.id, [room.name, room.tag]]));
+  return JSON.stringify(timetable.items.map((item) => {
+    if (timeOnly) {
+      return [item.title, item.date, item.start, item.note];
+    }
+    let room = null;
+    if (item.room !== null) {
+      room = rooms.get(item.room);
+    }
+    return [item.title, item.date, item.start, item.end, room, item.note];
+  }));
+}
+
+// Whether the timetable people can see changed (migrations/014): an item
+// added, removed, moved or renamed, or its room renamed. A notice_base kept
+// before timetables existed has no timetable_items, and is taken as
+// unchanged.
+function timetableChanged(before, after) {
+  if (!('timetable_items' in before) || !('timetable_items' in after)) {
+    return false;
+  }
+  let timeOnly = false;
+  if (storedTimetable(before).view === 'timeline' || storedTimetable(after).view === 'timeline') {
+    timeOnly = true;
+  }
+  return timetableShape(before, timeOnly) !== timetableShape(after, timeOnly);
+}
+
 // What changed between two versions of an event that people going should
-// hear about: "cancelled", "updated" or null.
+// hear about: "cancelled", "updated" (when or where), "timetable" (only the
+// timetable, while the page shows it) or null.
 export function changeKind(before, after) {
   if (!isReleased(after)) {
     return null;
@@ -250,6 +292,9 @@ export function changeKind(before, after) {
   if (moved && isReleased(before)) {
     return 'updated';
   }
+  if (isReleased(before) && datesAnnounced(after) && timetableChanged(before, after)) {
+    return 'timetable';
+  }
   return null;
 }
 
@@ -269,6 +314,7 @@ export const changeNotice = { waitMs: 45_000, graceMs: 1_000 };
 const NOTICE_BASE_COLUMNS = [
   'status', 'publish_at', 'starts_at', 'ends_at', 'start_time_tbc', 'end_time_tbc', 'timezone', 'dates_hidden',
   'venue_name', 'venue_address', 'city', 'country', 'is_online', 'locations', 'meal_options',
+  'timetable_view', 'timetable_rooms', 'timetable_items',
 ];
 
 // What flushEventChange reads: the columns above, and what a notice says.

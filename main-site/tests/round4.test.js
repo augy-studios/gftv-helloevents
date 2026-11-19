@@ -36,7 +36,7 @@ beforeEach(() => {
   forgetNameFilters();
 });
 
-const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, agree: true, ...over });
+const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, country: 'SG', agree: true, ...over });
 
 // A browser on its own connection unless ip is given.
 let nextIp = 1;

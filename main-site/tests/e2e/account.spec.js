@@ -1,6 +1,7 @@
 // The account page of a public account with 2FA: the profile, then its tabs
 // (the events it is going to, notifications, Security with each passkey's
-// "Last used" line (help desk #18, job 01), and Profile).
+// "Last used" line (help desk #18, job 01), and Profile, with the country
+// of origin).
 
 import { test, expect, serverOrigin, signInWithBackupCode, signInAsStaff } from './fixtures.js';
 import { EVENTS, PASSKEY_MEMBER, PASSKEYS, BACKUP_CODES, STAFF } from './seed.js';
@@ -17,7 +18,10 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(page.locator('#username')).toHaveText(PASSKEY_MEMBER.username);
   await expect(page.locator('#role')).toHaveText('Member');
   const tabs = page.getByRole('tab');
-  await expect(tabs).toHaveText(['My events', 'Notifications', 'Security', 'Profile']);
+  await expect(tabs).toHaveText(['My events', 'Notifications', 'Security', /^Profile/], { useInnerText: true });
+  // No country of origin yet (an account from before migrations/015): the
+  // Profile tab is marked.
+  await expect(page.locator('#profileMark')).toBeVisible();
 
   // The events you are going to, in the first tab; the others are hidden.
   await expect(page.getByRole('tab', { name: 'My events' })).toHaveAttribute('aria-selected', 'true');
@@ -80,17 +84,33 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(page.locator('#nameInput')).toHaveValue(PASSKEY_MEMBER.displayName);
   await expect(page.locator('#deleteBox')).toBeVisible();
 
+  // The country of origin: Singapore, Malaysia and Indonesia first.
+  await expect(page.locator('#countryMissing')).toBeVisible();
+  const countries = page.locator('#countryInput option');
+  await expect(countries.nth(1)).toHaveText('Singapore');
+  await expect(countries.nth(2)).toHaveText('Malaysia');
+  await expect(countries.nth(3)).toHaveText('Indonesia');
+  await page.locator('#countryInput').selectOption('MY');
+  await page.locator('#countrySubmit').click();
+  await expect(page.locator('#accountNotice')).toHaveText('Country of origin saved.');
+  await expect(page.locator('#countryMissing')).toBeHidden();
+  await expect(page.locator('#profileMark')).toBeHidden();
+
   // A reload opens the same tab, from the address.
   await page.reload();
   await expect(page.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#nameInput')).toBeVisible();
 });
 
-test('a staff account has no Profile tab', async ({ page }) => {
+test('a staff account sets only its country in Profile: its name comes from gftv.asia', async ({ page }) => {
   await page.goto('/login?next=/account');
   await signInAsStaff(page, STAFF.username);
   await page.waitForURL(`${serverOrigin()}/account`);
-  await expect(page.getByRole('tab')).toHaveText(['My events', 'Notifications', 'Security']);
   await page.goto('/account#profile');
-  await expect(page.getByRole('tab', { name: 'My events' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: /^Profile/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#nameBox')).toBeHidden();
+  await expect(page.locator('#deleteBox')).toBeHidden();
+  await page.locator('#countryInput').selectOption('SG');
+  await page.locator('#countrySubmit').click();
+  await expect(page.locator('#accountNotice')).toHaveText('Country of origin saved.');
 });

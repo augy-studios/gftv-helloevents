@@ -13,7 +13,7 @@
 // the notices a run of saves sends to people going (api/_lib/notify.js).
 //
 // The form's sections are tabs of their own (Basics, When and where, Price
-// and RSVP, Meals, Attendees and notes), so a section is a click away rather
+// and RSVP, Meals, Timetable, Attendees and notes), so a section is a click away rather
 // than a long scroll; the tab holding a field the pill asks about is marked.
 // A picture pasted anywhere in the open form (Ctrl+V, or Cmd+V) is used as
 // the cover, exactly as if it had been chosen with "Choose a picture".
@@ -27,11 +27,12 @@ import { decodeCover, cropToWebp } from '../cover-upload.js';
 import { cropCover } from '../cover-crop.js';
 import { startTools } from '../manage-tools.js';
 import { startTabs } from '../tabs.js';
-import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom } from '../choices.js';
+import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom, countryName } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
 import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANGED } from '../manage-meals.js';
 import { setTiers, readTiers, startTiers, relabelTiers, addTier, TIERS_CHANGED } from '../manage-tiers.js';
+import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
 
 const byId = (id) => document.getElementById(id);
@@ -40,15 +41,16 @@ const form = byId('eventForm');
 const PAGE_SIZE = 10;
 
 // The form's plain fields, by the name the server takes. The time zone,
-// currency, locations, ticket tiers, meals and the earlier convention a
-// volunteer benefit is for have their own handling below.
+// currency, locations, ticket tiers, meals, the earlier convention a
+// volunteer benefit is for and the timetable's rooms and items have their
+// own handling below.
 const TEXT_FIELDS = [
   'title', 'slug', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
-  'volunteerDiscountType', 'volunteerDiscountValue',
+  'volunteerDiscountType', 'volunteerDiscountValue', 'timetableView', 'externalUrlLabel', 'externalUrlCustomLabel',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -67,6 +69,10 @@ const BLANK = {
   meals: [],
   ticketTiers: [],
   volunteerDiscountType: 'percent',
+  timetableView: 'timeline',
+  externalUrlLabel: 'tickets_website',
+  timetableRooms: [],
+  timetableItems: [],
 };
 
 let currentUser = null;
@@ -77,6 +83,9 @@ let attendees = [];
 // The meals the open event offers as last saved ([{ id, label }]), for
 // naming the meals attendees are coming for.
 let savedMeals = [];
+// Whether the open event is cross-border as last saved (migrations/015): its
+// attendee list then says where each person is from.
+let savedCrossBorder = false;
 let cover = { url: '', has: false };
 // The picture last chosen for this event's cover in this visit, and the crop
 // it was uploaded with, so "Adjust crop" can crop it again: { bitmap, crop }.
@@ -207,11 +216,21 @@ function setForm(values) {
     tiers = [];
   }
   setTiers(tiers);
+  savedCrossBorder = values.crossBorder === true;
   savedMeals = [];
   if (Array.isArray(values.meals)) {
     savedMeals = values.meals;
   }
   setMeals(savedMeals);
+  let rooms = values.timetableRooms;
+  if (!Array.isArray(rooms)) {
+    rooms = [];
+  }
+  let items = values.timetableItems;
+  if (!Array.isArray(items)) {
+    items = [];
+  }
+  setTimetable(rooms, items);
   fillVolunteerSources(values.volunteerDiscountFrom);
   let coverUrl = values.coverImageUrl;
   if (!coverUrl) {
@@ -389,6 +408,7 @@ function readForm() {
   values.ticketTiers = readTiers();
   values.meals = readMeals();
   values.volunteerDiscountFrom = byId('f-volunteerDiscountFrom').value;
+  Object.assign(values, readTimetable());
   return values;
 }
 
@@ -454,6 +474,10 @@ function syncDependent() {
   }
   byId('tierSection').hidden = !tiersOn;
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
+  // The editor's own words for the link button, only for "My own words".
+  byId('externalUrlCustomField').hidden = byId('f-externalUrlLabel').value !== 'custom';
+  // An itinerary's steps have a time only: no rooms, ends or rooms per item.
+  byId('epanel-timetable').classList.toggle('is-itinerary', byId('f-timetableView').value === 'timeline');
   // Only a convention takes volunteers; the benefit's fields mean something
   // only while it is switched on, and a percentage goes up to 100.
   const convention = byId('f-kind').value === 'convention';
@@ -527,13 +551,22 @@ function savesOnChange(element) {
   return false;
 }
 
+// The cards saved only once they are left: a ticket tier, a timetable room
+// and a timetable item.
+const DRAFT_CARDS = '.tier-edit-card, .room-row, .timetable-item-card';
+
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType'].includes(event.target.id)) {
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel'].includes(event.target.id)) {
     syncDependent();
   }
   // The attendee list's Volunteered boxes save on their own.
   if (event.target.closest('#attendeeList')) {
     return;
+  }
+  // A convention draws people from everywhere, so Kind set to Convention
+  // ticks "Cross-border event" (the editor can untick it). Saved with it.
+  if (event.target.id === 'f-kind' && event.target.value === 'convention') {
+    byId('f-crossBorder').checked = true;
   }
   // Tiers switched on with none yet: a first card to fill in.
   if (event.target.id === 'f-tiersEnabled' && event.target.checked && readTiers().length === 0) {
@@ -555,28 +588,31 @@ form.addEventListener('change', (event) => {
   }
   if (savesOnChange(event.target)) {
     // A box ticked or a choice made in a tier card saves even while the
-    // card is still being filled in.
+    // card is still being filled in. A room picked in a timetable item waits
+    // for the card to be left, like its other fields: its start time may
+    // not be in yet.
     autosave({ force: event.target.closest('.tier-edit-card') !== null });
   }
 });
 
-// Whether the editor is in a ticket tier card (focus is in it, or moving
-// into it): a tier is saved once its card is left, so it is not refused for
-// its price while its name is still being typed.
-function inTierCard(element) {
+// Whether the editor is in one of those cards (focus is in it, or moving
+// into it), so it is not refused for its price or start time while its name
+// is still being typed.
+function inDraftCard(element) {
   if (!element || typeof element.closest !== 'function') {
     return false;
   }
-  return element.closest('.tier-edit-card') !== null;
+  return element.closest(DRAFT_CARDS) !== null;
 }
 
-// Leaving a field saves it, unless focus moves into a tier card (it is saved
-// when that card is left). The cover picture is uploaded on its own.
+// Leaving a field saves it, unless focus moves into one of those cards (it
+// is saved when that card is left). The cover picture is uploaded on its
+// own.
 form.addEventListener('focusout', (event) => {
   if (event.target.id === 'coverFile') {
     return;
   }
-  if (inTierCard(event.relatedTarget)) {
+  if (inDraftCard(event.relatedTarget)) {
     return;
   }
   autosave();
@@ -584,6 +620,7 @@ form.addEventListener('focusout', (event) => {
 form.addEventListener(LOCATIONS_CHANGED, () => autosave());
 form.addEventListener(MEALS_CHANGED, () => autosave());
 form.addEventListener(TIERS_CHANGED, () => autosave({ force: true }));
+form.addEventListener(TIMETABLE_CHANGED, () => autosave({ force: true }));
 
 // Enter in a text field saves at once, rather than sending the form.
 form.addEventListener('submit', (event) => {
@@ -689,14 +726,20 @@ const FIELD_TABS = {
   locations: 'when', locationLabel: 'when', customLabel: 'when', venueName: 'when', venueAddress: 'when', city: 'when', country: 'when', mapsUrl: 'when',
   ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
+  timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
+  timetableItems: 'timetable', itemTitle: 'timetable', itemDate: 'timetable', itemStart: 'timetable', itemEnd: 'timetable', itemNote: 'timetable',
 };
 
 // The section tab a refused field is in: a meal's place is under Meals, a
-// ticket tier's field under Price, a location's under When and where, and
-// any other field wherever its input is.
+// ticket tier's field under Price, a location's under When and where, a
+// timetable room's or item's under Timetable, and any other field wherever
+// its input is.
 function tabOfField({ field, detail }) {
   if (typeof detail.meal === 'string') {
     return 'meals';
+  }
+  if (Number.isInteger(detail.room) || Number.isInteger(detail.item)) {
+    return 'timetable';
   }
   if (Number.isInteger(detail.tier)) {
     return 'price';
@@ -764,13 +807,14 @@ function applySaved(saved, sent) {
 // Saves the form if it changed since the last save, one save at a time: a
 // change while one is on its way is saved straight after it. Resolves once
 // nothing is left to save (or a save was refused). While the editor is in a
-// tier card it waits for the card to be left, unless force says not to (a
-// change made in the card itself, or leaving or hiding the page).
+// tier card, timetable room or item, it waits for that to be left, unless
+// force says not to (a change made in the card itself, or leaving or hiding
+// the page).
 function autosave({ force = false } = {}) {
   if (form.hidden) {
     return Promise.resolve();
   }
-  if (!force && !saving && inTierCard(document.activeElement)) {
+  if (!force && !saving && inDraftCard(document.activeElement)) {
     renderStatus();
     return Promise.resolve();
   }
@@ -891,6 +935,16 @@ async function saveForm(sent, body) {
   }
   byId('editorTitle').textContent = translate('manage.edit-title', { title: data.event.title });
   listStale = true;
+  // Made cross-border (or not): the attendee list comes again, with (or
+  // without) everyone's country.
+  if (!created && data.event.crossBorder !== savedCrossBorder) {
+    savedCrossBorder = data.event.crossBorder;
+    try {
+      attendees = (await api(`/api/manage/events?id=${encodeURIComponent(data.event.id)}`)).attendees;
+    } catch {
+      // The list as it was; reopening the event brings the countries.
+    }
+  }
   renderAttendees();
   if (created || moved) {
     showSavedControls();
@@ -1011,6 +1065,9 @@ function attendeeRow(attendee) {
   if (convention && attendee.pastVolunteer) {
     details.push(translate('manage.attendee-past-volunteer'));
   }
+  if (savedCrossBorder) {
+    details.push(attendeeCountryText(attendee));
+  }
   details.push(formatDate(attendee.rsvpAt));
   const controls = [];
   if (convention) {
@@ -1049,6 +1106,7 @@ function renderAttendees() {
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
   renderMealCounts();
   renderVolunteerCounts();
+  renderCountryCounts();
   let attendeeRows;
   if (attendees.length === 0) {
     attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
@@ -1056,6 +1114,40 @@ function renderAttendees() {
     attendeeRows = attendees.map((attendee) => attendeeRow(attendee));
   }
   byId('attendeeList').replaceChildren(...attendeeRows);
+}
+
+// Where an attendee of a cross-border event is from, or that they have not
+// said (they RSVPed before it was made cross-border).
+function attendeeCountryText(attendee) {
+  if (attendee.country) {
+    return countryName(attendee.country);
+  }
+  return translate('manage.attendee-no-country');
+}
+
+// Under the attendee count of a cross-border event, how many come from each
+// country, the most first ("From: Singapore 40 · Malaysia 12 · Not given 1").
+// Hidden for any other event, or while nobody is going.
+function renderCountryCounts() {
+  const box = byId('attendeesCountries');
+  const counts = new Map();
+  for (const attendee of attendees) {
+    const name = attendeeCountryText(attendee);
+    let count = counts.get(name);
+    if (!count) {
+      count = 0;
+    }
+    counts.set(name, count + 1);
+  }
+  const parts = [...counts.entries()]
+    .sort((first, second) => second[1] - first[1])
+    .map(([country, count]) => translate('manage.country-count', { country, count }));
+  let shown = false;
+  if (savedCrossBorder && parts.length > 0) {
+    shown = true;
+  }
+  box.hidden = !shown;
+  box.textContent = translate('manage.attendees-countries', { counts: parts.join(' · ') });
 }
 
 // Under the attendee count, how many are coming only for each meal
@@ -1237,6 +1329,7 @@ byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
 startMeals();
 startTiers();
+startTimetable();
 
 // The edit form's section tabs, kept out of the address (it already says
 // #editor). A tab picked with the tab bar stuck under the page header (the
@@ -1321,6 +1414,7 @@ onChange(() => {
     relabelLocations();
     relabelMeals();
     relabelTiers();
+    relabelTimetable();
     fillVolunteerSources(byId('f-volunteerDiscountFrom').value);
     fillTimeZoneSelect(byId('f-timezone'), byId('f-timezone').value);
     fillCurrencyList(byId('currencyList'));

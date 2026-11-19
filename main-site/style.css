@@ -147,6 +147,19 @@
   --callout-ok-bg: color-mix(in srgb, var(--ok) 14%, transparent);
   --callout-warn-bg: color-mix(in srgb, var(--warn) 14%, transparent);
   --focus-ring: var(--brand-dark);
+  /* Timetable rooms (js/timetable.js): six hues taken from the theme's own
+     colours, so every colour theme and mode gets a matching set, plus a
+     neutral one for items in no room. Each is a tinted fill and an edge. */
+  --tt-c0: var(--brand-dark);
+  --tt-c1: var(--ok);
+  --tt-c2: var(--warn);
+  --tt-c3: var(--link-visited);
+  --tt-c4: var(--danger);
+  --tt-c5: var(--link);
+  --tt-cx: var(--text-muted);
+  --tt-fill-mix: 18%;
+  --tt-band: color-mix(in srgb, var(--text) 4%, transparent);
+  --tt-grid-bg: var(--bg-alt);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--font); }
@@ -956,6 +969,10 @@ main.wide > .page-card { margin-inline: auto; }
   font-weight: 600;
   white-space: nowrap;
 }
+.chip-cross-border { display: inline-flex; align-items: center; gap: 0.3rem; }
+.chip-cross-border svg { width: 14px; height: 14px; }
+.external-link-note { margin-top: -0.25rem; text-align: center; }
+.rsvp-country p { margin: 0; }
 .chip-danger, .chip.status-cancelled { background: var(--callout-danger-bg); color: var(--danger); border-color: transparent; }
 .chip.status-published { background: var(--callout-ok-bg); color: var(--ok); border-color: transparent; }
 .chip.unreleased { border-style: dashed; border-color: var(--border-strong); }
@@ -982,6 +999,208 @@ main.wide > .page-card { margin-inline: auto; }
 .event-section h2 { font-size: 1.125rem; font-weight: 700; margin-bottom: 0.6rem; }
 .event-aside { display: grid; gap: 1rem; }
 .event-main { display: grid; gap: 1rem; min-width: 0; }
+
+/* event page: timetable (js/timetable.js). Room colours are the --tt-c*
+   tokens in section 1; .tt-c0 to .tt-c5 and .tt-cx pick one as --tt-hue. */
+.timetable-section { min-width: 0; }
+.timetable-section .row.between { align-items: baseline; flex-wrap: wrap; gap: 0.25rem 1rem; }
+.tt-c0 { --tt-hue: var(--tt-c0); }
+.tt-c1 { --tt-hue: var(--tt-c1); }
+.tt-c2 { --tt-hue: var(--tt-c2); }
+.tt-c3 { --tt-hue: var(--tt-c3); }
+.tt-c4 { --tt-hue: var(--tt-c4); }
+.tt-c5 { --tt-hue: var(--tt-c5); }
+.tt-cx { --tt-hue: var(--tt-cx); }
+.tt-mark { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; line-height: 1.4; }
+.tt-mark-now { background: var(--brand-dark); color: var(--brand-on); }
+.tt-mark-next { border: 1px solid var(--border-strong); color: var(--text-muted); }
+.tt-room { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); }
+.tt-room::before { content: ''; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--tt-hue); flex: none; }
+.tt-room-tag { padding: 0 0.35rem; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--tt-hue) 50%, transparent); font-size: 0.6875rem; }
+
+/* timeline: a line down the side, a dot at each time of day (.tl-stop),
+   and what starts then beside it. The line is drawn in up to the dots
+   reached (.is-reached); the dot of what is on now has a ring (.is-now). */
+.tt-timeline { display: grid; gap: 1.5rem; }
+.tt-day-title { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; }
+.tl-line { --tl-gutter: 2rem; --tl-dot: 0.875rem; list-style: none; padding: 0; margin: 0; }
+.tl-stop { position: relative; padding: 0 0 1.25rem var(--tl-gutter); }
+.tl-stop::before {
+  content: ''; position: absolute; left: calc(var(--tl-dot) / 2 - 1px); top: 0.55rem; bottom: -0.55rem; width: 2px;
+  background: var(--border-strong);
+}
+.tl-stop:last-child { padding-bottom: 0; }
+.tl-stop:last-child::before { display: none; }
+.tl-stop.is-reached::before { background: var(--brand-dark); }
+.tl-dot {
+  position: absolute; left: 0; top: 0.3rem; z-index: 1; width: var(--tl-dot); height: var(--tl-dot); border-radius: 50%;
+  border: 2px solid var(--border-strong); background: var(--bg);
+  transition: background-color var(--motion), border-color var(--motion), box-shadow var(--motion);
+}
+.tl-stop.is-reached .tl-dot { border-color: var(--brand-dark); background: var(--brand-dark); }
+.tl-stop.is-now .tl-dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-dark) 30%, transparent); }
+.tl-time { font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.5rem; margin-bottom: 0.35rem; }
+.tl-stop.is-now .tl-time { color: var(--brand-text); }
+.tl-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.4rem; }
+.tl-item {
+  --tt-hue: var(--brand-dark);
+  display: grid; gap: 0.15rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-left: 3px solid var(--tt-hue);
+  border-radius: var(--radius-sm); background: var(--surface);
+  transition: opacity var(--motion), background-color var(--motion), border-color var(--motion);
+}
+.tl-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+.tl-item-title { font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.tt-note { font-size: 0.875rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.tl-item.is-now { background: color-mix(in srgb, var(--tt-hue) var(--tt-fill-mix), var(--surface)); border-color: var(--tt-hue); box-shadow: 0 0 0 1px var(--tt-hue); }
+.tl-item.is-past { opacity: 0.55; }
+
+/* a timetable's Table / List switch, beside its day buttons */
+.tt-layout-switch {
+  display: inline-flex; gap: 0.25rem; padding: 0.2rem; margin-bottom: 0.75rem;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+}
+.tt-layout-btn {
+  display: inline-flex; align-items: center; gap: 0.35rem; min-height: 32px; padding: 0.25rem 0.85rem;
+  border-radius: 999px; font-weight: 600; font-size: 0.875rem;
+}
+.tt-layout-btn svg { width: 16px; height: 16px; }
+.tt-layout-btn:hover { background: var(--surface-hover); }
+.tt-layout-btn[aria-pressed="true"] { background: var(--brand-dark); color: var(--brand-on); }
+
+/* a timetable as a list: each item, its times on the left */
+.tt-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
+.tt-entry {
+  display: grid; grid-template-columns: minmax(7.5rem, 11rem) minmax(0, 1fr); gap: 0.25rem 1rem;
+  padding: 0.65rem 0.85rem; border: 1px solid var(--border); border-left: 4px solid var(--tt-hue);
+  border-radius: var(--radius-sm); background: var(--surface);
+  transition: opacity var(--motion), background-color var(--motion), border-color var(--motion);
+}
+.tt-entry-time { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.tt-entry-what { display: grid; gap: 0.2rem; min-width: 0; }
+.tt-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+.tt-entry-title { font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.tt-entry.is-now { background: color-mix(in srgb, var(--tt-hue) var(--tt-fill-mix), var(--surface)); border-color: var(--tt-hue); box-shadow: 0 0 0 1px var(--tt-hue); }
+.tt-entry.is-now .tt-entry-time { color: var(--text); }
+.tt-entry.is-past { opacity: 0.55; }
+@media (max-width: 520px) {
+  .tt-entry { grid-template-columns: 1fr; }
+}
+
+/* grid: one day, a column per room, 30 minutes = --tt-slot tall */
+.tt-days { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.tt-day-btn {
+  min-height: 36px; padding: 0.35rem 0.85rem; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); font-weight: 600; font-size: 0.875rem;
+}
+.tt-day-btn:hover { background: var(--surface-hover); }
+.tt-day-btn[aria-pressed="true"] { background: var(--brand-dark); border-color: var(--brand-dark); color: var(--brand-on); }
+.tt-grid-scroll {
+  overflow: auto; max-height: 78vh; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--tt-grid-bg); overscroll-behavior: contain;
+}
+.tt-grid {
+  --tt-slot: 2.4rem;
+  --tt-minute: calc(var(--tt-slot) / 30);
+  --tt-time-col: 4.25rem;
+  position: relative; display: grid;
+  grid-template-columns: var(--tt-time-col) repeat(var(--tt-cols), minmax(8.5rem, 1fr));
+  grid-template-rows: auto calc(var(--tt-span) * var(--tt-minute));
+  min-width: calc(var(--tt-time-col) + var(--tt-cols) * 8.5rem);
+}
+.tt-grid.no-header { grid-template-rows: 0 calc(var(--tt-span) * var(--tt-minute)); }
+.tt-corner, .tt-head {
+  position: sticky; top: 0; z-index: 3; padding: 0.45rem 0.4rem; background: var(--tt-grid-bg);
+  border-bottom: 1px solid var(--border-strong); text-align: center;
+}
+.tt-corner { left: 0; z-index: 4; font-size: 0.75rem; font-weight: 700; color: var(--text-muted); display: flex; align-items: flex-end; justify-content: center; }
+.tt-head { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 0.2rem; border-left: 1px solid var(--border); }
+.tt-head-tag {
+  padding: 0.05rem 0.55rem; border-radius: 999px; font-size: 0.6875rem; font-weight: 700;
+  background: color-mix(in srgb, var(--tt-hue) 30%, var(--tt-grid-bg)); color: var(--text);
+}
+.tt-head-name { font-size: 0.8125rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.tt-times, .tt-col { grid-row: 2; position: relative; }
+.tt-times {
+  grid-column: 1; position: sticky; left: 0; z-index: 2; background: var(--tt-grid-bg);
+  border-right: 1px solid var(--border-strong);
+}
+.tt-time {
+  position: absolute; left: 0; right: 0; top: calc(var(--tt-at) * var(--tt-minute));
+  padding: 0.15rem 0.4rem 0; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right;
+}
+.tt-col {
+  list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border);
+  background: repeating-linear-gradient(to bottom, var(--tt-band) 0, var(--tt-band) var(--tt-slot), transparent var(--tt-slot), transparent calc(2 * var(--tt-slot)));
+}
+.tt-block {
+  position: absolute; overflow: hidden;
+  top: calc(var(--tt-top) * var(--tt-minute) + 1px);
+  height: calc(var(--tt-length) * var(--tt-minute) - 2px);
+  left: calc(3px + (100% - 6px) * var(--tt-lane) / var(--tt-lanes));
+  width: calc((100% - 6px) / var(--tt-lanes) - 2px);
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+  padding: 0.3rem 0.35rem; text-align: center; border-radius: 6px;
+  background: color-mix(in srgb, var(--tt-hue) 26%, var(--tt-grid-bg));
+  border: 1px solid color-mix(in srgb, var(--tt-hue) 60%, transparent);
+  color: var(--text); font-size: 0.75rem; line-height: 1.2;
+  transition: opacity var(--motion), box-shadow var(--motion);
+}
+.tt-block-title { font-weight: 700; overflow-wrap: anywhere; }
+.tt-block-time { font-size: 0.6875rem; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.tt-block-note { font-size: 0.6875rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.tt-block.is-short { flex-direction: row; justify-content: center; padding-top: 0.1rem; padding-bottom: 0.1rem; }
+.tt-block.is-short .tt-block-time, .tt-block.is-short .tt-block-note { display: none; }
+.tt-block .tt-mark { margin-top: auto; }
+.tt-block.is-short .tt-mark { margin-top: 0; }
+.tt-block.is-now {
+  z-index: 1; background: color-mix(in srgb, var(--tt-hue) 55%, var(--tt-grid-bg));
+  border: 2px solid var(--tt-hue); box-shadow: 0 0 0 2px color-mix(in srgb, var(--tt-hue) 35%, transparent), 0 4px 14px var(--shadow);
+}
+.tt-block.is-now .tt-block-time, .tt-block.is-now .tt-block-note { color: var(--text); }
+.tt-block.is-past { opacity: 0.5; }
+.tt-now-line {
+  grid-row: 2; grid-column: 2 / -1; position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none;
+  top: calc(var(--tt-at) * var(--tt-minute)); height: 0; border-top: 2px solid var(--danger);
+}
+.tt-now-line::before {
+  content: ''; position: absolute; left: -5px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger);
+}
+.tt-now-label {
+  position: absolute; left: 0.5rem; top: -1.35rem; padding: 0 0.4rem; border-radius: 999px;
+  background: var(--danger); color: var(--danger-on); font-size: 0.6875rem; font-weight: 700; white-space: nowrap;
+}
+
+/* edit form: timetable rooms and items */
+.room-list { display: grid; gap: 0.5rem; }
+.room-row {
+  display: grid; grid-template-columns: 1.5rem minmax(0, 2fr) minmax(0, 1fr) auto; gap: 0.5rem; align-items: end;
+  padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+}
+.room-number { align-self: center; font-weight: 700; color: var(--text-muted); text-align: center; }
+.room-actions { display: flex; gap: 0.25rem; }
+/* An itinerary (the timeline view) hides what only a timetable has. */
+#epanel-timetable:not(.is-itinerary) .only-timeline,
+#epanel-timetable.is-itinerary .only-grid,
+#epanel-timetable.is-itinerary #roomsFieldset,
+#epanel-timetable.is-itinerary .item-f-end,
+#epanel-timetable.is-itinerary .item-f-room { display: none; }
+/* On a wide screen an item card is two rows: what, day, start, end; then
+   room and note. */
+@media (min-width: 900px) {
+  .timetable-item-card .form-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .timetable-item-card .form-grid .item-f-title { grid-column: span 3; }
+  .timetable-item-card .form-grid .item-f-room { grid-column: span 2; }
+  .timetable-item-card .form-grid .item-f-note { grid-column: span 4; }
+  .timetable-item-card .form-grid .item-f-room { order: 1; }
+  .timetable-item-card .form-grid .item-f-note { order: 2; }
+}
+@media (max-width: 640px) {
+  .room-row { grid-template-columns: 1.5rem minmax(0, 1fr); }
+  .room-row .room-tag, .room-row .room-actions { grid-column: 2; }
+  /* Icons only: each button is still named for screen readers. */
+  .room-actions .btn-label, .timetable-item-card .row .btn-label { display: none; }
+  .room-actions { flex-wrap: wrap; }
+}
 
 /* event page: ticket tiers */
 .tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; }

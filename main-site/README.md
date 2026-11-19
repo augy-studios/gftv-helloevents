@@ -57,6 +57,13 @@ the functions with the service role key. No Supabase Auth, no request signing.
   size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
   Supabase Storage bucket `gftvevents_covers`. The event keeps the object's path; the old picture is
   deleted when it is replaced or the event is deleted.
+- **Pictures come from this site.** Pages never get a Supabase Storage address: a cover is
+  served by `api/events/cover.js` (`/api/events/cover?slug=...&v=<cover name>`), as stored. A
+  released event's cover is public and cached by the CDN for a year (a new upload gets a new
+  address); an unreleased event's goes only to editors, never cached; anything else is a 404. A
+  staff member's profile picture from gftv.asia is served by `api/me/avatar.js`, and only
+  fetched when it is in this site's Supabase project. The Content-Security-Policy no longer
+  allows images from Supabase at all.
 - **Managing events** at `/manage`: the event list and the edit form are separate tabs (Event list,
   Manage event). The form saves itself whenever a field is left, a list option picked or a box
   ticked; a pill at the bottom says "Saving…", "All changes saved" or why a change was refused.
@@ -123,15 +130,53 @@ the functions with the service role key. No Supabase Auth, no request signing.
   someone signed up or volunteered goes only to them and to editors. An editor removing someone
   from the attendee list also removes their Volunteered tick; someone taking back their own RSVP
   after the convention keeps it, since they did volunteer.
+- **Timetables and itineraries** (migrations/014). Any event can carry one, filled in under the
+  edit form's Timetable tab, and the editor picks how the event page shows it:
+  - **An itinerary** (the "timeline" view): a line down the side with a dot at each time of day
+    and what happens then ("12:00: Travel to the border"). A step has a time only, no end or
+    room, and counts as going on until the next step's time. The section is headed "Itinerary".
+  - **A timetable** (the "grid" view): rooms (a name and a short tag such as "Level G", in
+    column order) and items with a day, start, optional end (earlier than the start: the next
+    day) and room. Visitors switch between a **table** (one day at a time, a column per room
+    used that day, a row per half hour, like a con's printed schedule) and a **list**; the
+    choice is kept in their browser, and a phone starts on the list.
+
+  Both mark what is on now (highlighted, "Now"), fade what is over and mark what is next; the
+  table draws a line at the current time and opens scrolled to it. Days and times are wall-clock
+  in the event's zone, as typed, so the timetable stays put if the zone changes. An item or room
+  card saves once it is left, like a ticket tier. While Itinerary is picked, the rooms and each
+  item's end and room are hidden but kept. The event page shows it to everyone who can see the
+  event, except while the dates are to be announced. A change people can see (not switching
+  between the two views) tells the people going, batched like a change of time or place.
+- **The event's link** (migrations/015). The edit form's Link is a button on the event page, and
+  the editor picks what it says: Tickets and website, Tickets, Website, Join the group, Register,
+  or their own words (up to 40 characters; until they are typed it says "Tickets and website").
+- **Cross-border events** (migrations/015). An event held outside Singapore, or drawing people
+  from other countries, is ticked "Cross-border event" under Basics; setting Kind to Convention
+  ticks it (the editor can untick it), and the conventions already there were marked by the
+  migration. It shows a "Cross-border" chip. Every account has a **country of origin** (Singapore,
+  Malaysia and Indonesia first, then every other country): new public accounts pick it at sign-up,
+  and anyone, staff included, sets or changes it in the account page's Profile tab, which is marked
+  while it is missing. On a cross-border event:
+  - an RSVP needs a country of origin. Without one the page says so, with a "Set my country"
+    button that goes to the Profile tab and comes back to the event once it is saved. Someone
+    already going (from before the event was made cross-border) can still change or cancel;
+  - the link needs one too. Signed out, the button signs in first; signed in with no country, it
+    goes to set one. The server leaves the link's address out of the answer until then. Editors
+    always get it;
+  - editors see each attendee's country (or "Country not given") in the attendee list, with a
+    count per country ("From: Singapore 40 · Malaysia 12"). Nobody else sees anyone's country, and
+    no other event sends it.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
   Timings' share pages). The cover goes out as a JPEG from `api/events/embed-image.js`, since not
   every app reads WebP. Drafts and events not released yet get the site's own tags.
 - **The account page** has the profile at the top and tabs below it: My events,
-  Notifications, Security, and (public accounts only) Profile, to rename or delete the account.
+  Notifications, Security, and Profile: the country of origin for everyone, and for public
+  accounts, renaming or deleting the account.
   The open tab is kept in the address (`/account#security`).
-- **Notifications**, chosen on the account page: changes of time or place (or a cancellation) of
+- **Notifications**, chosen on the account page: changes of time or place or timetable (or a cancellation) of
   events you are going to, reminders before them, and, off by default, new events. They go by
   Web Push to the browsers you switch on (subscriptions stored in Upstash Redis) and, if you choose,
   to your linked Telegram chat. A notice carries only what the public event page shows. Reminders
@@ -158,7 +203,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 013) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 015) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -170,6 +215,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    its columns. Run `012_volunteers.sql` before deploying volunteers: the event pages, RSVPs and
    the edit form read its columns and table. Run `013_rsvp_numbers.sql` before deploying RSVP IDs: it numbers
    the RSVPs already there, and replaces the RSVP function so each new one gets the next number.
+   Run `014_timetable.sql` before deploying timetables: the event pages and the edit form read
+   its columns. Run `015_link_labels_cross_border.sql` before deploying link labels and
+   cross-border events: sign-up, the account page, RSVPs and the event pages read its columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
@@ -225,7 +273,7 @@ Bump `VERSION` in `sw.js` on every deploy that changes a served file, or nobody 
 HelloEvents' own code calls `translate(` since help desk #18's job 03, so keys used only there
 aren't checked against `en.json` until the shared scanner also looks for `translate(`.
 
-**End-to-end tests:** `npm ci`, then `npm run test:e2e` (7 tests, about 5 seconds).
+**End-to-end tests:** `npm ci`, then `npm run test:e2e`.
 
 - Playwright starts `tests/e2e/server.js`. It serves this folder the way Vercel does (`vercel.json`'s
   clean URLs, the `/e/<slug>` rewrite and the security headers, so the real Content-Security-Policy

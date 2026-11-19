@@ -91,6 +91,15 @@ export default route('events/rsvp', async (request, response) => {
     return fail(response, 400, 'bad_request');
   }
   let meals = [];
+  // A cross-border event (migrations/015) takes a new RSVP only from someone
+  // with a country of origin on their account; someone already going can
+  // still change their meals or take it back.
+  if (body.going === true && event.cross_border === true && !session.user.country) {
+    const already = await attendance(event.id, session.user.id);
+    if (!already.going) {
+      return fail(response, 400, 'country_required');
+    }
+  }
   if (body.going === true) {
     const choice = chooseMeals(event, body.meals);
     if (!choice.ok) {
@@ -162,6 +171,7 @@ export default route('events/rsvp', async (request, response) => {
       volunteer: mine.volunteer,
       volunteered: standing.volunteered,
       discount: standing.discount,
+      country: session.user.country,
     }),
   });
 });

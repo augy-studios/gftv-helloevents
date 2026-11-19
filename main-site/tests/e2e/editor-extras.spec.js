@@ -153,6 +153,10 @@ test('a portrait cover is cropped to 16:9, from the middle, and can be cropped a
   await expect(page.locator('#cropModal')).toBeHidden();
   await expect(page.locator('#coverAdjust')).toBeVisible();
   await expect(page.locator('#coverRemove')).toBeVisible();
+  // Shown from this site's own address, never the Storage bucket's.
+  const preview = page.locator('#coverPreview img');
+  await expect(preview).toHaveAttribute('src', new RegExp(`^/api/events/cover\\?slug=${event.slug}&v=`));
+  await expect.poll(() => preview.evaluate((image) => image.naturalWidth)).toBe(600);
 
   // Again, moved all the way down with the keyboard and zoomed in: blue.
   await page.locator('#coverAdjust').click();

@@ -242,6 +242,13 @@ export function errorText(error) {
   if (field && Number.isInteger(error.detail.tier)) {
     return translate('error.invalid_tier_field', { ...placeholders, number: error.detail.tier + 1 });
   }
+  // A field of one timetable room or item says which one.
+  if (field && Number.isInteger(error.detail.room)) {
+    return translate('error.invalid_room_field', { ...placeholders, number: error.detail.room + 1 });
+  }
+  if (field && Number.isInteger(error.detail.item)) {
+    return translate('error.invalid_item_field', { ...placeholders, number: error.detail.item + 1 });
+  }
   const text = translate(`error.${code}`, placeholders);
   // A code with no sentence of its own comes back as the key itself.
   if (text === `error.${code}`) {

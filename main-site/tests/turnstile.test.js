@@ -195,7 +195,7 @@ test('nothing logged carries the token or the IP address', async () => {
 // The routes
 // ---------------------------------------------------------------------------
 
-const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, agree: true, ...over });
+const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, country: 'SG', agree: true, ...over });
 const post = (b, handler, body) => b.call(handler, { method: 'POST', body });
 
 test('sign-up needs a passed "signup" check; the name filter and the rest still apply after it', async () => {

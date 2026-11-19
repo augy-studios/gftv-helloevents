@@ -14,9 +14,9 @@
 //                              a convention only: mark that someone going did
 //                              (or did not) volunteer at it (migrations/012)
 //
-// Saving a change to when or where a released event happens, or cancelling
-// it, tells the people going (notify.js), in the background, once for a run
-// of autosaves.
+// Saving a change to when or where a released event happens, to its
+// timetable, or cancelling it, tells the people going (notify.js), in the
+// background, once for a run of autosaves.
 //
 // event is the edit form's fields (event-rules.js validateEvent picks what it
 // knows and ignores the rest). Answers are built by serialize.js, never rows.
@@ -54,7 +54,7 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
 
 // The event columns the attendee list needs: the meals it offers, and its
 // kind and volunteer benefit, for who volunteered.
-const ATTENDEE_EVENT_COLUMNS = 'id, kind, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value';
+const ATTENDEE_EVENT_COLUMNS = 'id, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value';
 
 // The event's attendees in RSVP order, as the edit page lists them, each
 // with the meals they are coming for that the event still offers, and for
@@ -65,7 +65,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, volunteer, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, volunteer, account:${TABLES.accounts} ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -270,6 +270,12 @@ async function saveEvent(request, response, body, user) {
     }
     if (check.meal !== undefined) {
       detail.meal = check.meal;
+    }
+    if (check.item !== undefined) {
+      detail.item = check.item;
+    }
+    if (check.room !== undefined) {
+      detail.room = check.room;
     }
     return fail(response, 400, check.error, detail);
   }
@@ -478,7 +484,9 @@ export default route('manage/events', async (request, response) => {
     return;
   }
 
-  const body = await readJson(request, response, { maxBytes: 64 * 1024 });
+  // A whole form, with a con's timetable (a few hundred items) and both
+  // descriptions in it, fits well inside this.
+  const body = await readJson(request, response, { maxBytes: 256 * 1024 });
   if (!body) {
     return;
   }

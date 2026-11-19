@@ -106,6 +106,7 @@
                     <button class="tab" type="button" role="tab" id="etab-when" data-tab="when" aria-controls="epanel-when" aria-selected="false" tabindex="-1"><span data-icon="calendar"></span><span data-i18n="manage.etab.when">When and where</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-price" data-tab="price" aria-controls="epanel-price" aria-selected="false" tabindex="-1"><span data-icon="ticket"></span><span data-i18n="manage.etab.price">Price and RSVP</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-timetable" data-tab="timetable" aria-controls="epanel-timetable" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="manage.etab.timetable">Timetable</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                 </div>
 
@@ -140,6 +141,11 @@
                                     <option value="other" data-i18n="kind.other">Other</option>
                                 </select>
                             </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-crossBorder" name="crossBorder" aria-describedby="crossBorderHint">
+                                <span data-i18n="manage.field.crossBorder">Cross-border event: held outside Singapore, or drawing people from other countries</span>
+                            </label>
+                            <p class="field-hint span-2" id="crossBorderHint" data-i18n="manage.hint.crossBorder">People must give their country of origin on their account to RSVP or open the link, and the attendee list shows where everyone is from. Ticked for a convention to start with.</p>
                             <label class="field">
                                 <span data-i18n="manage.field.organiserName">Organiser</span>
                                 <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
@@ -176,8 +182,24 @@
                                 <div class="callout danger" id="coverError" role="alert"></div>
                             </div>
                             <label class="field span-2">
-                                <span data-i18n="manage.field.externalUrl-optional">Tickets or website (optional)</span>
-                                <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://">
+                                <span data-i18n="manage.field.externalUrl-link">Link (optional)</span>
+                                <input id="f-externalUrl" name="externalUrl" type="url" maxlength="500" placeholder="https://" aria-describedby="externalUrlHint">
+                                <span class="field-hint" id="externalUrlHint" data-i18n="manage.hint.externalUrl">Tickets, the event's website, a group to join: the event page shows it as a button.</span>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.externalUrlLabel">The button says</span>
+                                <select id="f-externalUrlLabel" name="externalUrlLabel">
+                                    <option value="tickets_website" data-i18n="link.tickets_website">Tickets and website</option>
+                                    <option value="tickets" data-i18n="link.tickets">Tickets</option>
+                                    <option value="website" data-i18n="link.website">Website</option>
+                                    <option value="group" data-i18n="link.group">Join the group</option>
+                                    <option value="register" data-i18n="link.register">Register</option>
+                                    <option value="custom" data-i18n="link.custom">My own words…</option>
+                                </select>
+                            </label>
+                            <label class="field" id="externalUrlCustomField">
+                                <span data-i18n="manage.field.externalUrlCustomLabel">Button text</span>
+                                <input id="f-externalUrlCustomLabel" name="externalUrlCustomLabel" type="text" maxlength="40" placeholder="Join our Telegram" data-i18n-attr="placeholder:manage.externalUrlCustomLabel-placeholder">
                             </label>
                         </div>
                     </fieldset>
@@ -392,6 +414,43 @@
                     </fieldset>
                 </div>
 
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-timetable" aria-labelledby="etab-timetable" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.timetable">Timetable</legend>
+                        <p class="muted small" data-i18n="manage.timetable-lede">What happens when, for the event page. It shows there once it has an item, except while the dates are to be announced. People going are told when it changes.</p>
+                        <div class="form-grid">
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.timetableView">Show it on the event page as</span>
+                                <select id="f-timetableView" name="timetableView">
+                                    <option value="timeline" data-i18n="manage.timetable-view.timeline">An itinerary: a timeline with a dot at each time of day and what happens then (no rooms or end times)</option>
+                                    <option value="grid" data-i18n="manage.timetable-view.grid">A timetable: a table with a column for each room, or a list (visitors can switch)</option>
+                                </select>
+                            </label>
+                        </div>
+                    </fieldset>
+
+                    <fieldset id="roomsFieldset">
+                        <legend data-i18n="manage.section.rooms">Rooms</legend>
+                        <p class="muted small" data-i18n="manage.rooms-lede">The timetable's columns, left to right: a hall, a panel room, a stage. A short tag such as "Level G" shows over the name. A meet in one place needs none.</p>
+                        <div id="roomList" class="room-list"></div>
+                        <p class="muted small" id="roomsEmpty" data-i18n="manage.rooms-empty">No rooms yet.</p>
+                        <div class="actions inline">
+                            <button class="btn" type="button" id="roomAdd"><span data-icon="plus"></span><span data-i18n="manage.room-add">Add a room</span></button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend data-i18n="manage.section.items">What happens</legend>
+                        <div id="itemList" class="location-list"></div>
+                        <p class="muted small" id="itemsEmpty" data-i18n="manage.items-empty">Nothing on the timetable yet.</p>
+                        <div class="actions inline">
+                            <button class="btn" type="button" id="itemAdd"><span data-icon="plus"></span><span data-i18n="manage.item-add">Add an item</span></button>
+                        </div>
+                        <p class="field-hint only-grid" data-i18n="manage.hint.items">Times are in the event's time zone. An end earlier than the start is the next day (21:00 to 01:00). With no end, an item is shown as half an hour long. The event page puts the items in time order.</p>
+                        <p class="field-hint only-timeline" data-i18n="manage.hint.itinerary">Each step is a time and what happens then, such as "12:00: Travel to the border". Times are in the event's time zone. A step lasts until the next one; the event page puts them in time order.</p>
+                    </fieldset>
+                </div>
+
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-people" aria-labelledby="etab-people" hidden>
                     <fieldset>
                         <legend data-i18n="manage.section.notes">Staff notes</legend>
@@ -406,6 +465,7 @@
                         <h3 id="attendeesTitle" class="section-label"></h3>
                         <p class="muted small" id="attendeesMeals" hidden></p>
                         <p class="muted small" id="attendeesVolunteers" hidden></p>
+                        <p class="muted small" id="attendeesCountries" hidden></p>
                         <ul class="item-list" id="attendeeList"></ul>
                     </section>
                 </div>

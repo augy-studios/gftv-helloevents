@@ -119,7 +119,7 @@ function assertKeys(response, expected, opaque = []) {
 
 // The signed-in person: the account page shows all of it; the header and
 // /manage read canManage and role.
-const USER = ['username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage'];
+const USER = ['username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage', 'country'];
 const METHODS = ['totp', 'passkey', 'telegram', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];
 
@@ -138,16 +138,24 @@ const CARD_TBA_FREE = [
   ...nest('when', ['tba', 'timezone']), ...nest('where', WHERE), ...nest('price', ['type']),
   'going', 'rsvp',
 ];
+// The timetable on the event page (migrations/014): how it is shown, its
+// rooms and its items.
+const TIMETABLE = [
+  'view', ...listOf('rooms', ['name', 'tag']),
+  ...listOf('items', ['title', 'date', 'start', 'end', 'endsNextDay', 'startsAt', 'endsAt', 'room', 'note']),
+];
 // One of an event's locations on its page.
 const LOCATION = ['label', 'customLabel', 'venueName', 'city', 'country', 'address', 'mapsUrl'];
 // The event page: the card, plus what only the page shows.
 const DETAIL = [
-  ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
+  ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName',
+  ...nest('externalLink', ['url', 'label', 'customLabel', 'locked']), 'crossBorder',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
+  ...nest('timetable', TIMETABLE),
   ...nest('volunteers', ['wanted', 'discount']),
-  ...nest('viewer', ['signedIn', 'going', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount']),
+  ...nest('viewer', ['signedIn', 'going', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry']),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
 const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
@@ -159,13 +167,16 @@ const EDITOR = [
   'id', 'slug', 'title', 'kind', 'status', 'datesHidden', 'timezone', 'capacity', 'summary', 'description',
   'descriptionZh', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
+  'externalUrlLabel', 'externalUrlCustomLabel', 'crossBorder',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
   ...listOf('ticketTiers', ['name', 'price', 'benefits', 'includesPrevious', 'previousDisplay']), 'rsvpOpen',
   ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]),
-  'volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue', 'staffNotes',
+  'volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
+  'timetableView', ...listOf('timetableRooms', ['id', 'name', 'tag']),
+  ...listOf('timetableItems', ['title', 'date', 'start', 'end', 'room', 'note']), 'staffNotes',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
-const ATTENDEE = ['rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt'];
+const ATTENDEE = ['rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt'];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];
 const FILTER = ['id', 'term'];
@@ -200,7 +211,7 @@ function on() {
   return b;
 }
 
-const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, agree: true, ...over });
+const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, country: 'SG', agree: true, ...over });
 
 // A signed-in public account: { b, joined (the sign-up answer), id }.
 async function member(over = {}) {
@@ -376,6 +387,15 @@ test('a reset for a public account lists its ways back in, and each step answers
   assertKeys(options, ['options'], ['options']);
 });
 
+// A timetable with a room and an item, and a link, so their keys are pinned
+// too.
+const TIMETABLE_ROWS = {
+  external_url: 'https://tickets.example.com/',
+  timetable_view: 'grid',
+  timetable_rooms: [{ id: 'r-jade1', name: 'Panel 1 Jade', tag: 'Level G' }],
+  timetable_items: [{ title: 'Opening', date: '2030-01-01', start: '10:00', end: '11:00', room: 'r-jade1', note: 'Doors at 9:45' }],
+};
+
 // ---------------------------------------------------------------------------
 // Events, as the public and attendees see them
 // ---------------------------------------------------------------------------
@@ -389,6 +409,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
     ],
     tiers_enabled: true,
     ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
+    ...TIMETABLE_ROWS,
   });
   addEvent({ slug: 'tba-meet', dates_hidden: true, starts_at: null, price_type: 'free', price_min: null, price_max: null, currency: null });
 
@@ -413,6 +434,7 @@ test('a convention with volunteers, and its volunteer benefit, carry only what t
     meal_options: [{ id: 'lunch', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat', venue_address: '18 Raffles Quay', city: 'Singapore', country: 'SG', maps_url: null }] }],
     tiers_enabled: true,
     ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
+    ...TIMETABLE_ROWS,
   });
   const { b, id: otterId } = await member();
   db.table('gftvevents_volunteers').push({ event_id: lastYear.id, user_id: otterId, confirmed_by: null, confirmed_at: new Date().toISOString() });
@@ -443,6 +465,9 @@ test('the event list, the edit form, attendees and the cover answer only what /m
         priceType: 'free', capacity: '50', locations: [{ label: 'event', venueName: 'Expo Hall', city: 'Singapore', country: 'SG' }],
         meals: [{ id: 'lunch', locations: [{ label: 'meal', venueName: 'Lau Pa Sat', city: 'Singapore' }] }, { id: 'm-tea123', label: 'High tea' }],
         ticketTiers: [{ name: 'Basic', price: '0', benefits: 'Entry' }],
+        timetableView: 'grid',
+        timetableRooms: [{ id: 'r-jade1', name: 'Panel 1 Jade', tag: 'Level G' }],
+        timetableItems: [{ title: 'Opening', date: '2030-01-01', start: '10:00', end: '11:00', room: 'r-jade1', note: '' }],
       },
     },
 

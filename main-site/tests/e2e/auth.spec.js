@@ -20,6 +20,7 @@ test('sign up for a public account, sign out, and sign in again with it', async 
   await expect(page.locator('#username')).toHaveValue(NEW_ACCOUNT.username);
   await page.locator('#displayName').fill(NEW_ACCOUNT.displayName);
   await page.locator('#email').fill(NEW_ACCOUNT.email);
+  await page.locator('#country').selectOption('MY');
   await page.locator('#password').fill(NEW_ACCOUNT.password);
   await page.locator('#agree').check();
   await page.locator('#signupSubmit').click();

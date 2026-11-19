@@ -67,7 +67,7 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(status(page)).toHaveText(/^Saves by itself once it has a title/);
   await expect(page.locator('#f-slug')).toHaveValue('');
   // The form opens on Basics; the other sections are tabs of their own.
-  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Meals', 'Attendees and notes'], { useInnerText: true });
+  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Meals', 'Timetable', 'Attendees and notes'], { useInnerText: true });
   await expect(page.locator('#f-startDate')).toBeHidden();
   await openSection(page, 'When and where');
   await expect(page.locator('#f-title')).toBeHidden();

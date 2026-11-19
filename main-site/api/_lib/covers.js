@@ -14,7 +14,7 @@
 
 import sharp from 'sharp';
 import { database, TABLES } from './supabase.js';
-import { optionalEnv, siteUrl } from './env.js';
+import { siteUrl } from './env.js';
 import { randomToken } from './crypto.js';
 import { errorDetail } from './http.js';
 
@@ -30,15 +30,17 @@ const MAX_INPUT_PIXELS = MAX_SIDE * MAX_SIDE;
 // A stored cover's path: "<event id>/<random name>.webp".
 const COVER_PATH = /^[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
 
-export function coverUrl(path) {
-  if (!path || !COVER_PATH.test(path)) {
+// Where the pages load an event's cover from: this site's own
+// api/events/cover.js, never the Storage bucket, so the bucket's address
+// never reaches a browser. The cover's own name is in it (v), so a new
+// upload gets a new address and an old one is never shown from a cache.
+// null for an event with no cover. row: { slug, cover_image_path }.
+export function coverUrl(row) {
+  const version = coverVersion(row.cover_image_path);
+  if (!version || !row.slug) {
     return null;
   }
-  const supabaseUrl = optionalEnv('SUPABASE_URL').replace(/\/+$/, '');
-  if (!supabaseUrl) {
-    return null;
-  }
-  return `${supabaseUrl}/storage/v1/object/public/${TABLES.coversBucket}/${path}`;
+  return `/api/events/cover?slug=${encodeURIComponent(row.slug)}&v=${encodeURIComponent(version)}`;
 }
 
 // A WebP file starts "RIFF", four bytes of size, then "WEBP".

@@ -12,7 +12,7 @@ const DEFAULTS = {
   gftvevents_accounts: () => ({
     staff_user_id: null, username: null, display_name: null, email: null, password_hash: null, terms_accepted_at: null,
     email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true, reminder_hours: [24],
-    notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null,
+    notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null, country: null,
   }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
   gftvevents_sessions: () => ({ last_seen_at: now(), ip_hash: null }),
@@ -30,6 +30,8 @@ const DEFAULTS = {
     cover_image_url: null, cover_image_path: null, announced_at: null,
     notice_base: null, notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
     volunteers_wanted: false, volunteer_discount_enabled: false, volunteer_discount_from: null, volunteer_discount_type: 'percent', volunteer_discount_value: null,
+    timetable_view: 'timeline', timetable_rooms: [], timetable_items: [],
+    external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
   }),
   gftvevents_attendees: () => ({ meals: [], reminders_sent: [], volunteer: false }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),

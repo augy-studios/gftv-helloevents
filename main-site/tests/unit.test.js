@@ -302,11 +302,15 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'meals', 'pastVolunteer', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
+  assert.deepEqual(Object.keys(staff).sort(), ['country', 'displayName', 'meals', 'pastVolunteer', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
   assert.equal(staff.staff, true);
   const member = ser.attendeeView({ user_id: 'p1', rsvp_number: 7, created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
-  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], volunteer: false, volunteered: false, pastVolunteer: false, rsvpAt: 'x' });
+  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], country: null, volunteer: false, volunteered: false, pastVolunteer: false, rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
+  // An attendee's country goes to the editors of a cross-border event only.
+  const traveller = { user_id: 'p2', created_at: 'x', account: { kind: 'public', username: 'lynx', display_name: 'Lynx', country: 'MY' } };
+  assert.equal(ser.attendeeView(traveller, { cross_border: true }).country, 'MY');
+  assert.equal(ser.attendeeView(traveller, { cross_border: false }).country, null);
 });
 
 test('meals offered are checked, put in order, and blank named ones dropped', () => {
@@ -487,9 +491,9 @@ test('the signed-in view of yourself has no secrets', () => {
     id: 'u1', kind: 'staff', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
     is_admin: false, is_editor: true, is_approved: true, avatar_url: 'http://insecure.example/a.png',
   });
-  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true });
-  const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$' });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false });
+  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, country: null });
+  const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$', country: 'SG' });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, country: 'SG' });
 });
 
 test('a public account can never manage events, whatever its row says', () => {
@@ -619,11 +623,13 @@ test('every rich message carries a plain fallback with the same code', () => {
 // Public accounts (round 3)
 // ---------------------------------------------------------------------------
 
-const signup = (over = {}) => ({ username: 'Snow_Fox', displayName: '  Snow   Fox ', email: ' Snow@Example.com ', password: 'a long enough secret', agree: true, ...over });
+const signup = (over = {}) => ({ username: 'Snow_Fox', displayName: '  Snow   Fox ', email: ' Snow@Example.com ', password: 'a long enough secret', country: 'sg', agree: true, ...over });
 
 test('sign-up input is cleaned and checked', () => {
   const r = acct.validateSignup(signup());
-  assert.deepEqual(r, { ok: true, fields: { username: 'snow_fox', displayName: 'Snow Fox', email: 'snow@example.com' } });
+  assert.deepEqual(r, { ok: true, fields: { username: 'snow_fox', displayName: 'Snow Fox', email: 'snow@example.com', country: 'SG' } });
+  assert.equal(acct.validateSignup(signup({ country: '' })).error, 'country_required');
+  assert.equal(acct.validateSignup(signup({ country: 'XX' })).error, 'country_required', 'not a country');
   assert.equal(acct.validateSignup(signup({ username: 'ab' })).error, 'username_invalid');
   assert.equal(acct.validateSignup(signup({ displayName: '\u200b' })).error, 'display_name_invalid');
   assert.equal(acct.validateSignup(signup({ email: 'not-an-email' })).error, 'email_invalid');
@@ -685,12 +691,13 @@ test('a cover must be a real WebP within size and dimension limits', async () =>
   assert.equal((await covers.prepareCover('not base64 !!')).error, 'cover_invalid');
 });
 
-test('cover addresses are built from the stored path only', () => {
+test('cover addresses are this site\'s, built from the stored path only', () => {
   const path = '11111111-1111-4111-8111-111111111111/abcdefghijklmnopqrstuv.webp';
-  assert.equal(covers.coverUrl(path), `https://project.supabase.co/storage/v1/object/public/gftvevents_covers/${path}`);
-  assert.equal(covers.coverUrl('../../etc/passwd'), null);
-  assert.equal(covers.coverUrl(null), null);
-  assert.equal(ser.publicEventCard(row({ cover_image_path: path, cover_image_url: 'https://old.example/a.png' }), now).coverImageUrl, covers.coverUrl(path));
+  assert.equal(covers.coverUrl({ slug: 'meet', cover_image_path: path }), '/api/events/cover?slug=meet&v=abcdefghijklmnopqrstuv');
+  assert.equal(covers.coverUrl({ slug: 'meet', cover_image_path: '../../etc/passwd' }), null);
+  assert.equal(covers.coverUrl({ slug: 'meet', cover_image_path: null }), null);
+  const card = ser.publicEventCard(row({ cover_image_path: path, cover_image_url: 'https://old.example/a.png' }), now);
+  assert.equal(card.coverImageUrl, covers.coverUrl({ slug: card.slug, cover_image_path: path }));
 });
 
 // ---------------------------------------------------------------------------

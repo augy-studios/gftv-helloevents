@@ -47,7 +47,7 @@ export default route('manage/cover', async (request, response) => {
 
   const { data: event, error } = await database()
     .from(TABLES.events)
-    .select('id, cover_image_path')
+    .select('id, slug, cover_image_path')
     .eq('id', body.id)
     .maybeSingle();
   if (error) {
@@ -76,7 +76,7 @@ export default route('manage/cover', async (request, response) => {
     .from(TABLES.events)
     .update({ cover_image_path: path, updated_by: session.user.id })
     .eq('id', event.id)
-    .select('cover_image_path')
+    .select('slug, cover_image_path')
     .single();
   if (saveError) {
     await deleteCover(path);

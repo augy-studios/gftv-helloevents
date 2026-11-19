@@ -7,6 +7,7 @@ import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
+import { renderTimetable } from '../timetable.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -314,9 +315,22 @@ function renderRsvp() {
   byId('rsvpSignIn').hidden = signInHidden;
   byId('rsvpSignIn').href = `/login?next=${encodeURIComponent(location.pathname)}`;
 
+  // A cross-border event needs a country of origin before an RSVP
+  // (migrations/015); someone already going can still change or cancel it.
+  let needsCountry = false;
+  if (event.viewer.needsCountry === true && !going && canJoin) {
+    needsCountry = true;
+  }
+  byId('rsvpCountry').hidden = !needsCountry;
+  byId('rsvpCountryLink').href = countryPageHref();
+  if (needsCountry) {
+    byId('rsvpMeals').hidden = true;
+    byId('rsvpVolunteerRow').hidden = true;
+  }
+
   const rsvpButton = byId('rsvpBtn');
   let rsvpButtonHidden = false;
-  if (!signedIn || (!going && !canJoin)) {
+  if (!signedIn || (!going && !canJoin) || needsCountry) {
     rsvpButtonHidden = true;
   }
   rsvpButton.hidden = rsvpButtonHidden;
@@ -444,6 +458,51 @@ function renderTiers() {
   byId('ticketTiers').replaceChildren(...cards);
 }
 
+// Where to set a country of origin, coming back here afterwards.
+function countryPageHref() {
+  return `/account?next=${encodeURIComponent(location.pathname)}#profile`;
+}
+
+// The event's link button, saying what the editor picked (Tickets, Join the
+// group, their own words). A cross-border event's link needs a country of
+// origin (migrations/015): signed out, the button signs in first; signed in
+// with no country, it goes to the account page to set one. Neither has the
+// link's address, which the server leaves out.
+function renderExternalLink() {
+  const link = event.externalLink;
+  const button = byId('externalLink');
+  const note = byId('externalLinkNote');
+  button.hidden = !link;
+  note.hidden = true;
+  if (!link) {
+    return;
+  }
+  let text = link.customLabel;
+  if (link.label !== 'custom' || !text) {
+    text = translate(`link.${link.label}`);
+  }
+  byId('externalLinkText').textContent = text;
+  let iconName = 'external';
+  button.removeAttribute('target');
+  button.removeAttribute('rel');
+  if (link.locked === 'sign-in') {
+    iconName = 'lock';
+    button.href = `/login?next=${encodeURIComponent(location.pathname)}`;
+    note.hidden = false;
+    note.textContent = translate('event.link-sign-in');
+  } else if (link.locked === 'country') {
+    iconName = 'lock';
+    button.href = countryPageHref();
+    note.hidden = false;
+    note.textContent = translate('event.link-country');
+  } else {
+    button.href = link.url;
+    button.target = '_blank';
+    button.rel = 'noopener noreferrer';
+  }
+  byId('externalLinkIcon').innerHTML = icon(iconName);
+}
+
 // Draws the whole event: title, chips, cover, summary, description,
 // organiser, the facts (when, where, price, going), the outside and manage
 // links, the preview note, and the RSVP box.
@@ -452,6 +511,9 @@ function render() {
   renderCover();
 
   const chips = [createElement('span', { class: `chip kind-${event.kind}`, text: translate(`kind.${event.kind}`) })];
+  if (event.crossBorder) {
+    chips.push(createElement('span', { class: 'chip chip-cross-border' }, [iconNode('globe'), createElement('span', { text: translate('event.cross-border') })]));
+  }
   if (event.cancelled) {
     chips.push(createElement('span', { class: 'chip chip-danger', text: translate('event.state.cancelled') }));
   }
@@ -487,15 +549,29 @@ function render() {
   byId('factMeals').textContent = event.meals.map((meal) => mealPlacesText(meal)).join(', ');
   renderVolunteerFact();
 
-  byId('externalLink').hidden = !event.externalUrl;
-  if (event.externalUrl) {
-    byId('externalLink').href = event.externalUrl;
-  }
+  renderExternalLink();
   byId('manageLink').hidden = !event.viewer.canManage;
   byId('manageLink').href = `/manage?slug=${encodeURIComponent(event.slug)}`;
   byId('previewNote').hidden = !preview;
 
   renderRsvp();
+}
+
+// The timetable is drawn on its own, only when it changes (or the reader's
+// language does), so an RSVP or a meal choice does not redraw it under
+// someone scrolling through the grid.
+let timetableDrawn = '';
+function drawTimetable(force = false) {
+  let timetable = event.timetable;
+  if (timetable === undefined) {
+    timetable = null;
+  }
+  const key = JSON.stringify(timetable);
+  if (!force && key === timetableDrawn) {
+    return;
+  }
+  timetableDrawn = key;
+  renderTimetable(timetable, event.when.timezone);
 }
 
 async function load() {
@@ -508,6 +584,7 @@ async function load() {
     byId('eventLoading').hidden = true;
     byId('eventView').hidden = false;
     render();
+    drawTimetable();
   } catch (error) {
     byId('eventLoading').hidden = true;
     if (error.code === 'not_found') {
@@ -612,6 +689,7 @@ onChange(() => {
   if (event) {
     mealsDrawn = '';
     render();
+    drawTimetable(true);
   }
 });
 

@@ -1,4 +1,7 @@
-// What a public account may be: username, display name, email, password.
+// What a public account may be: username, display name, email, password,
+// and country of origin (migrations/015).
+
+import { countryCode } from './countries.js';
 // Pure functions, so tests/unit.test.js runs them directly.
 
 const USERNAME = /^[a-z0-9_]{3,32}$/;
@@ -92,8 +95,13 @@ export function validateSignup(body) {
     return passwordCheck;
   }
 
+  const country = countryCode(input.country);
+  if (!country) {
+    return { ok: false, error: 'country_required' };
+  }
+
   if (input.agree !== true) {
     return { ok: false, error: 'terms_required' };
   }
-  return { ok: true, fields: { username, displayName, email } };
+  return { ok: true, fields: { username, displayName, email, country } };
 }

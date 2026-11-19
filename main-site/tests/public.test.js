@@ -68,7 +68,7 @@ beforeEach(() => {
   });
 });
 
-const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, agree: true, ...over });
+const join = (over = {}) => ({ username: 'otter', displayName: 'Otter', email: 'otter@example.com', password: PASSWORD, country: 'SG', agree: true, ...over });
 
 async function member(b = browser(), over = {}) {
   const r = await b.call(signup, { method: 'POST', body: join(over) });
@@ -130,7 +130,7 @@ test('signing up makes a public account with a bcrypt cost 12 password, and sign
   const r = await b.call(signup, { method: 'POST', body: join({ username: 'Otter', email: ' Otter@Example.com ' }) });
   assert.equal(r.status, 200);
   // The answer is only ok (help desk #18); the session says who it is.
-  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false });
+  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, country: 'SG' });
   assert.deepEqual(leaks(r.json), []);
   const row = db.table('gftvevents_accounts')[0];
   assert.equal(row.kind, 'public');
@@ -555,7 +555,8 @@ test('editors upload a WebP cover to the bucket; it is checked, replaced cleanly
   const event = addEvent({ slug: 'cover-meet' });
   const first = await ed.call(cover, { method: 'POST', body: { id: event.id, image: await webp() } });
   assert.equal(first.status, 200, JSON.stringify(first.json));
-  assert.match(first.json.event.coverImageUrl, /^https:\/\/project\.supabase\.co\/storage\/v1\/object\/public\/gftvevents_covers\/[0-9a-f-]{36}\/[A-Za-z0-9_-]+\.webp$/);
+  // This site's own address, never the bucket's (api/events/cover.js).
+  assert.match(first.json.event.coverImageUrl, /^\/api\/events\/cover\?slug=[a-z0-9-]+&v=[A-Za-z0-9_-]+$/);
   assert.equal(db.objects.size, 1);
   const [key, object] = [...db.objects][0];
   assert.equal(object.contentType, 'image/webp');
