@@ -11,7 +11,7 @@
 import { route, guard, ok, fail, query } from '../_lib/http.js';
 import { currentSession } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
-import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, DETAIL_COLUMNS } from '../_lib/events.js';
+import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
 // Finds the event (any status for an editor, released ones for everyone
@@ -38,11 +38,23 @@ export default route('events/detail', async (request, response) => {
   }
 
   await withMealCounts(row);
-  let mine = { going: false, meals: [] };
+  await withVolunteerSource(row);
+  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null };
+  let standing = { volunteered: false, discount: false };
   if (session) {
     mine = await attendance(row.id, session.user.id);
+    standing = await volunteerStanding(row, session.user.id);
   }
-  const event = publicEventDetail(row, { signedIn: Boolean(session), going: mine.going, meals: mine.meals, canManage: isManager });
+  const event = publicEventDetail(row, {
+    signedIn: Boolean(session),
+    going: mine.going,
+    meals: mine.meals,
+    rsvpNumber: mine.rsvpNumber,
+    canManage: isManager,
+    volunteer: mine.volunteer,
+    volunteered: standing.volunteered,
+    discount: standing.discount,
+  });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.
   let preview = false;

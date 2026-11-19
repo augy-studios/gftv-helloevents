@@ -255,5 +255,7 @@ export async function seedDatabase(db) {
     event_id: EVENTS.furmeet.id,
     user_id: PASSKEY_MEMBER.id,
     created_at: '2026-11-01T08:00:00.000Z',
+    rsvp_number: 1,
   });
+  await insert('gftvevents_rsvp_counters', { event_id: EVENTS.furmeet.id, last_number: 1 });
 }

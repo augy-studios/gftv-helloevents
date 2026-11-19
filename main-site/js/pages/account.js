@@ -49,10 +49,10 @@ function renderProfile() {
 }
 
 function renderRsvps() {
-  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event)));
+  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber })));
   byId('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
   byId('pastBox').hidden = rsvps.past.length === 0;
-  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event)));
+  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber })));
 }
 
 // The reminder times' tick boxes, each with its hours before the start.

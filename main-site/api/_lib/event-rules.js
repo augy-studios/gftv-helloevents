@@ -28,6 +28,11 @@ export const MAX_MEAL_LOCATIONS = 3;
 export const MAX_TIERS = 10;
 export const MAX_TIER_BENEFITS = 20;
 export const PREVIOUS_DISPLAYS = ['full', 'reference'];
+// Volunteers (migrations/012): only a convention takes them, and a later
+// convention can give the people who volunteered at an earlier one a
+// percentage or a fixed amount off.
+export const VOLUNTEER_KIND = 'convention';
+export const DISCOUNT_TYPES = ['percent', 'amount'];
 
 export const LIMITS = Object.freeze({
   title: 120,
@@ -64,6 +69,7 @@ const COUNTRY_CODE = /^[A-Za-z]{2}$/;
 // by the edit form when the meal is added and kept from then on, so the
 // people coming for it stay with it when it is renamed.
 const CUSTOM_MEAL_ID = /^m-[a-z0-9]{4,16}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Every currency code this runtime knows (ISO 4217), for checking the form's
 // currency. Empty if the runtime cannot list them, and then any three
@@ -1047,10 +1053,84 @@ export function storedTiers(row) {
   return tiers;
 }
 
+// Volunteers (migrations/012), for a convention only: whether it takes
+// volunteer sign-ups, and the benefit it gives the people who volunteered at
+// an earlier convention (which one, a percentage or an amount, and how
+// much). Any other kind of event has both switched off; its stored benefit
+// settings are kept, like tiers, so switching back brings them back.
+//
+// The benefit may be switched on before the convention or the value is
+// filled in, so autosave never refuses the tick box: it is in effect only
+// once both are there (volunteerDiscountActive). The API checks that the
+// convention named exists, is a convention and is not this event
+// (api/manage/events.js). With none of these fields at all the stored ones
+// are kept, so a page from before volunteers cannot wipe them.
+function readVolunteers(body, fields) {
+  const isConvention = fields.kind === VOLUNTEER_KIND;
+  const given = ['volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue']
+    .some((name) => body[name] !== undefined);
+  if (!given) {
+    if (!isConvention) {
+      fields.volunteers_wanted = false;
+      fields.volunteer_discount_enabled = false;
+    }
+    return null;
+  }
+  fields.volunteers_wanted = false;
+  fields.volunteer_discount_enabled = false;
+  if (isConvention) {
+    fields.volunteers_wanted = body.volunteersWanted === true;
+    fields.volunteer_discount_enabled = body.volunteerDiscountEnabled === true;
+  }
+
+  const from = cleanText(body.volunteerDiscountFrom, 36).toLowerCase();
+  if (from !== '' && !UUID.test(from)) {
+    return 'volunteerDiscountFrom';
+  }
+  fields.volunteer_discount_from = null;
+  if (from !== '') {
+    fields.volunteer_discount_from = from;
+  }
+
+  fields.volunteer_discount_type = allowedOrNull(DISCOUNT_TYPES, body.volunteerDiscountType);
+  if (!fields.volunteer_discount_type) {
+    fields.volunteer_discount_type = 'percent';
+  }
+  const value = parseMoney(body.volunteerDiscountValue);
+  if (!value.ok) {
+    return 'volunteerDiscountValue';
+  }
+  if (fields.volunteer_discount_type === 'percent' && value.value !== null && value.value > 100) {
+    return 'volunteerDiscountValue';
+  }
+  fields.volunteer_discount_value = value.value;
+  return null;
+}
+
+// Whether an event's volunteer benefit is in effect: a convention, with it
+// switched on, an earlier convention picked and a value above 0.
+export function volunteerDiscountActive(row) {
+  if (!row || row.kind !== VOLUNTEER_KIND || row.volunteer_discount_enabled !== true) {
+    return false;
+  }
+  if (!row.volunteer_discount_from) {
+    return false;
+  }
+  return Number(row.volunteer_discount_value) > 0;
+}
+
+// Whether an event takes volunteer sign-ups: a convention that says so.
+export function takesVolunteers(row) {
+  if (!row || row.kind !== VOLUNTEER_KIND) {
+    return false;
+  }
+  return row.volunteers_wanted === true;
+}
+
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readTiers, readCapacity, readMeals];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readTiers, readCapacity, readMeals, readVolunteers];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field

@@ -46,6 +46,8 @@ export const TABLES = Object.freeze({
   passwordResets: 'gftvevents_password_resets',
   signupAllowances: 'gftvevents_signup_allowances',
   nameFilters: 'gftvevents_name_filters',
+  // Who an editor confirmed volunteered at a convention (migrations/012).
+  volunteers: 'gftvevents_volunteers',
   // Cover pictures (migrations/002), a public-read Storage bucket that only
   // the API writes to.
   coversBucket: 'gftvevents_covers',

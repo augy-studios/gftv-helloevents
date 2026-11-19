@@ -5,7 +5,7 @@ import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
-import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText } from '../format.js';
+import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 
 const byId = (id) => document.getElementById(id);
@@ -24,6 +24,9 @@ let mealsDrawn = '';
 // while it was.
 let choiceSaving = null;
 let choiceAgain = false;
+// Whether "I would like to volunteer" is ticked before this person says
+// they are going (once going, the server's answer says).
+let volunteerPick = false;
 
 function renderCover() {
   const box = byId('eventCover');
@@ -294,7 +297,15 @@ function renderRsvp() {
     statusText = translate('event.you-are-going-for', { meals: mealsText(event.meals, event.viewer.meals) });
   }
   byId('rsvpStatusText').textContent = statusText;
+  // Their RSVP ID for this event (migrations/013), to give at the door.
+  const number = event.viewer.rsvpNumber;
+  byId('rsvpNumber').hidden = true;
+  if (going && number !== null) {
+    byId('rsvpNumber').hidden = false;
+    byId('rsvpNumber').textContent = translate('event.rsvp-number', { number });
+  }
   renderMealChoice();
+  renderVolunteer();
 
   let signInHidden = false;
   if (signedIn || !canJoin) {
@@ -330,6 +341,74 @@ function renderRsvp() {
     note = translate('event.full-meals-open');
   }
   byId('rsvpNote').textContent = note;
+}
+
+// A convention's volunteer benefit in words: "20% off", "SGD 15.00 off".
+function benefitText(discount) {
+  if (discount.type === 'amount') {
+    return translate('event.volunteer-benefit-amount', { amount: formatMoney(discount.value, discount.currency) });
+  }
+  return translate('event.volunteer-benefit-percent', { value: discount.value });
+}
+
+// The Volunteers fact, for a convention taking volunteers or giving a
+// benefit to the ones from an earlier convention; hidden otherwise.
+function renderVolunteerFact() {
+  const volunteers = event.volunteers;
+  const lines = [];
+  if (volunteers.wanted) {
+    lines.push(translate('event.volunteers-wanted'));
+  }
+  const discount = volunteers.discount;
+  if (discount && discount.fromTitle) {
+    lines.push(translate('event.volunteer-benefit-from', { convention: discount.fromTitle, benefit: benefitText(discount) }));
+  } else if (discount) {
+    lines.push(translate('event.volunteer-benefit-earlier', { benefit: benefitText(discount) }));
+  }
+  byId('factVolunteersRow').hidden = lines.length === 0;
+  byId('factVolunteers').replaceChildren(...lines.map((line) => createElement('span', { class: 'fact-line', text: line })));
+}
+
+// Whether this person can still sign up to volunteer, or change it: while
+// they can join, or, once going, until the event is over or cancelled.
+function canChangeVolunteer() {
+  if (!event.viewer.going) {
+    return canJoinNow();
+  }
+  if (event.rsvp === 'over' || event.rsvp === 'cancelled') {
+    return false;
+  }
+  return true;
+}
+
+// The volunteer tick box in the RSVP box, for someone signed in while the
+// convention takes volunteers, and under it their thanks for volunteering
+// here and the benefit they get from volunteering at an earlier convention.
+function renderVolunteer() {
+  const viewer = event.viewer;
+  let shown = false;
+  if (viewer.signedIn && event.volunteers.wanted && canChangeVolunteer()) {
+    shown = true;
+  }
+  byId('rsvpVolunteerRow').hidden = !shown;
+  if (viewer.going) {
+    byId('rsvpVolunteer').checked = viewer.volunteer;
+  } else {
+    byId('rsvpVolunteer').checked = volunteerPick;
+  }
+
+  const notes = [];
+  if (viewer.volunteered) {
+    notes.push(translate('event.volunteer-thanks'));
+  }
+  const discount = event.volunteers.discount;
+  if (viewer.volunteerDiscount && discount && discount.fromTitle) {
+    notes.push(translate('event.volunteer-you-get', { convention: discount.fromTitle, benefit: benefitText(discount) }));
+  } else if (viewer.volunteerDiscount && discount) {
+    notes.push(translate('event.volunteer-you-get-earlier', { benefit: benefitText(discount) }));
+  }
+  byId('rsvpVolunteerNote').hidden = notes.length === 0;
+  byId('rsvpVolunteerNote').textContent = notes.join(' ');
 }
 
 // The ticket tiers, when the event sells its tickets in tiers: each tier's
@@ -406,6 +485,7 @@ function render() {
   byId('factGoing').textContent = goingText;
   byId('factMealsRow').hidden = event.meals.length === 0;
   byId('factMeals').textContent = event.meals.map((meal) => mealPlacesText(meal)).join(', ');
+  renderVolunteerFact();
 
   byId('externalLink').hidden = !event.externalUrl;
   if (event.externalUrl) {
@@ -443,6 +523,9 @@ byId('rsvpBtn').addEventListener('click', () => {
     const body = { slug: event.slug, going: !event.viewer.going };
     if (body.going) {
       body.meals = chosenMeals();
+    }
+    if (body.going && !byId('rsvpVolunteerRow').hidden) {
+      body.volunteer = volunteerPick;
     }
     const data = await post('/api/events/rsvp', body);
     event = data.event;
@@ -490,6 +573,27 @@ byId('rsvpMeals').addEventListener('change', (changed) => {
   if (event.viewer.going && choiceReady()) {
     saveChoice();
   }
+});
+
+// Before going, the tick is kept and sent with "I am going". While going,
+// it is saved at once (with the meals as they are); if that fails, the box
+// goes back to what the server has.
+byId('rsvpVolunteer').addEventListener('change', () => {
+  const wanted = byId('rsvpVolunteer').checked;
+  byId('rsvpError').textContent = '';
+  if (!event.viewer.going) {
+    volunteerPick = wanted;
+    return;
+  }
+  byId('rsvpVolunteer').disabled = true;
+  withBusy(null, byId('rsvpError'), async () => {
+    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals: event.viewer.meals, volunteer: wanted });
+    event = data.event;
+    render();
+  }).finally(() => {
+    byId('rsvpVolunteer').disabled = false;
+    renderVolunteer();
+  });
 });
 
 byId('shareBtn').addEventListener('click', () => {

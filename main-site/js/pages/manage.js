@@ -40,13 +40,15 @@ const form = byId('eventForm');
 const PAGE_SIZE = 10;
 
 // The form's plain fields, by the name the server takes. The time zone,
-// currency, locations, ticket tiers and meals have their own handling below.
+// currency, locations, ticket tiers, meals and the earlier convention a
+// volunteer benefit is for have their own handling below.
 const TEXT_FIELDS = [
   'title', 'slug', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
+  'volunteerDiscountType', 'volunteerDiscountValue',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -64,6 +66,7 @@ const BLANK = {
   locations: [{ label: 'event' }],
   meals: [],
   ticketTiers: [],
+  volunteerDiscountType: 'percent',
 };
 
 let currentUser = null;
@@ -172,6 +175,10 @@ async function loadList() {
   events = data.events;
   listStale = false;
   renderList();
+  // The earlier conventions a volunteer benefit can be for come from it.
+  if (!form.hidden && document.activeElement !== byId('f-volunteerDiscountFrom')) {
+    fillVolunteerSources(byId('f-volunteerDiscountFrom').value);
+  }
 }
 
 function setForm(values) {
@@ -205,6 +212,7 @@ function setForm(values) {
     savedMeals = values.meals;
   }
   setMeals(savedMeals);
+  fillVolunteerSources(values.volunteerDiscountFrom);
   let coverUrl = values.coverImageUrl;
   if (!coverUrl) {
     coverUrl = '';
@@ -380,7 +388,51 @@ function readForm() {
   values.locations = readLocations();
   values.ticketTiers = readTiers();
   values.meals = readMeals();
+  values.volunteerDiscountFrom = byId('f-volunteerDiscountFrom').value;
   return values;
+}
+
+// The earlier conventions a volunteer benefit can be for: every other
+// convention in the event list, the latest first, each with its start date.
+// A convention picked that the list does not have (one made since it
+// loaded) stays picked, under a plain name. selected: the id picked, or ''.
+function fillVolunteerSources(selected) {
+  const select = byId('f-volunteerDiscountFrom');
+  let picked = selected;
+  if (!picked) {
+    picked = '';
+  }
+  const startTime = (row) => {
+    if (row.datesHidden || !row.startsAt) {
+      return -Infinity;
+    }
+    return new Date(row.startsAt).getTime();
+  };
+  const conventions = events
+    .filter((row) => {
+      if (row.kind !== 'convention') {
+        return false;
+      }
+      if (!editing) {
+        return true;
+      }
+      return row.id !== editing.id;
+    })
+    .sort((first, second) => startTime(second) - startTime(first));
+  const options = [createElement('option', { value: '', text: translate('manage.volunteer-source-pick') })];
+  for (const row of conventions) {
+    let date = translate('event.dates-tba');
+    if (!row.datesHidden && row.startsAt) {
+      date = formatDate(row.startsAt);
+    }
+    options.push(createElement('option', { value: row.id, text: translate('manage.volunteer-source', { title: row.title, date }) }));
+  }
+  if (picked && !conventions.some((row) => row.id === picked)) {
+    options.push(createElement('option', { value: picked, text: translate('manage.volunteer-source-other') }));
+  }
+  select.replaceChildren(...options);
+  select.value = picked;
+  byId('volunteerSourcesNone').hidden = conventions.length > 0;
 }
 
 // Fields that only mean something with another one switched on. Tiers are
@@ -402,6 +454,23 @@ function syncDependent() {
   }
   byId('tierSection').hidden = !tiersOn;
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
+  // Only a convention takes volunteers; the benefit's fields mean something
+  // only while it is switched on, and a percentage goes up to 100.
+  const convention = byId('f-kind').value === 'convention';
+  byId('volunteersConventionOnly').hidden = convention;
+  byId('volunteerFields').hidden = !convention;
+  let discountOn = false;
+  if (convention && byId('f-volunteerDiscountEnabled').checked) {
+    discountOn = true;
+  }
+  for (const name of ['volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue']) {
+    byId(`f-${name}`).disabled = !discountOn;
+  }
+  if (byId('f-volunteerDiscountType').value === 'percent') {
+    byId('f-volunteerDiscountValue').max = '100';
+  } else {
+    byId('f-volunteerDiscountValue').removeAttribute('max');
+  }
 }
 
 // The two descriptions, both required: [language, text box, form field].
@@ -459,8 +528,12 @@ function savesOnChange(element) {
 }
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled'].includes(event.target.id)) {
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType'].includes(event.target.id)) {
     syncDependent();
+  }
+  // The attendee list's Volunteered boxes save on their own.
+  if (event.target.closest('#attendeeList')) {
+    return;
   }
   // Tiers switched on with none yet: a first card to fill in.
   if (event.target.id === 'f-tiersEnabled' && event.target.checked && readTiers().length === 0) {
@@ -681,6 +754,9 @@ function applySaved(saved, sent) {
   if (now.currency === sent.currency && document.activeElement !== byId('f-currency')) {
     byId('f-currency').value = currencyLabel(saved.currency);
   }
+  if (now.volunteerDiscountFrom === sent.volunteerDiscountFrom && document.activeElement !== byId('f-volunteerDiscountFrom')) {
+    fillVolunteerSources(saved.volunteerDiscountFrom);
+  }
   syncDependent();
   markMissingDescriptions();
 }
@@ -900,9 +976,17 @@ function attendeeMealsText(attendee) {
     .join(', ');
 }
 
-// One attendee: the name (the username when there is no display name), the
-// username, staff or member, the meals when they are coming only for those,
-// when they said they are going, and a Remove button.
+// Whether the open event is a convention, which takes volunteers.
+function isConvention() {
+  return byId('f-kind').value === 'convention';
+}
+
+// One attendee: the name (the username when there is no display name), their
+// RSVP ID for this event (migrations/013), the username, staff or member, the meals when they are coming only for those,
+// when they said they are going, and a Remove button. At a convention, also
+// whether they signed up to volunteer and whether they get the volunteer
+// benefit for having volunteered at the earlier convention, and a
+// Volunteered box an editor ticks for the ones who really did.
 function attendeeRow(attendee) {
   let name = attendee.displayName;
   if (!name) {
@@ -913,17 +997,39 @@ function attendeeRow(attendee) {
     roleKey = 'role.staff';
   }
   const details = [attendee.username, translate(roleKey)];
+  if (attendee.rsvpNumber !== null) {
+    details.unshift(translate('manage.attendee-number', { number: attendee.rsvpNumber }));
+  }
   const meals = attendeeMealsText(attendee);
   if (meals) {
     details.push(translate('manage.attendee-meals', { meals }));
   }
+  const convention = isConvention();
+  if (convention && attendee.volunteer) {
+    details.push(translate('manage.attendee-volunteer'));
+  }
+  if (convention && attendee.pastVolunteer) {
+    details.push(translate('manage.attendee-past-volunteer'));
+  }
   details.push(formatDate(attendee.rsvpAt));
-  return createElement('li', { class: 'item-row' }, [
+  const controls = [];
+  if (convention) {
+    const box = createElement('input', { type: 'checkbox' });
+    box.checked = attendee.volunteered;
+    box.addEventListener('change', () => confirmVolunteer(attendee, box));
+    controls.push(createElement('label', { class: 'check attendee-volunteered' }, [
+      box,
+      createElement('span', { text: translate('manage.attendee-volunteered') }),
+      createElement('span', { class: 'visually-hidden', text: translate('manage.attendee-volunteered-named', { name }) }),
+    ]));
+  }
+  return createElement('li', { class: 'item-row attendee-row' }, [
     iconNode('user'),
     createElement('span', { class: 'item-main' }, [
       createElement('span', { text: name }),
       createElement('span', { class: 'muted small', text: details.join(' · ') }),
     ]),
+    ...controls,
     createElement('button', {
       class: 'btn btn-small btn-quiet',
       type: 'button',
@@ -942,6 +1048,7 @@ function renderAttendees() {
   }
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
   renderMealCounts();
+  renderVolunteerCounts();
   let attendeeRows;
   if (attendees.length === 0) {
     attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
@@ -974,6 +1081,26 @@ function renderMealCounts() {
   const box = byId('attendeesMeals');
   box.hidden = parts.length === 0;
   box.textContent = translate('manage.attendees-meals', { counts: parts.join(' · ') });
+}
+
+// Under the attendee count at a convention, how many signed up to
+// volunteer, how many an editor ticked as having volunteered, and how many
+// get the volunteer benefit ("Volunteers: 4 signed up · 2 volunteered · 1
+// gets the benefit"). Hidden while all are none.
+function renderVolunteerCounts() {
+  const box = byId('attendeesVolunteers');
+  const counts = [
+    ['manage.volunteers-signed-up', attendees.filter((attendee) => attendee.volunteer).length],
+    ['manage.volunteers-confirmed', attendees.filter((attendee) => attendee.volunteered).length],
+    ['manage.volunteers-benefit', attendees.filter((attendee) => attendee.pastVolunteer).length],
+  ];
+  const parts = counts.filter(([, count]) => count > 0).map(([key, count]) => translate(key, { count }));
+  let shown = false;
+  if (isConvention() && parts.length > 0) {
+    shown = true;
+  }
+  box.hidden = !shown;
+  box.textContent = translate('manage.attendees-volunteers', { counts: parts.join(' · ') });
 }
 
 // The form opens in the Manage event tab, in place of its "No event open"
@@ -1028,6 +1155,28 @@ async function openNew() {
   setForm(BLANK);
   editorTabs.open('basics');
   showEditor(translate('manage.new-title'));
+}
+
+// Ticks (or unticks) that an attendee really volunteered at this
+// convention, saved at once; if that fails, the box goes back.
+async function confirmVolunteer(attendee, box) {
+  box.disabled = true;
+  const done = await withBusy(null, byId('editorError'), async () => {
+    const data = await post('/api/manage/events', {
+      action: 'volunteer-confirm',
+      id: editing.id,
+      username: attendee.username,
+      staff: attendee.staff,
+      volunteered: box.checked,
+    });
+    attendees = data.attendees;
+    renderAttendees();
+    return true;
+  });
+  if (!done) {
+    box.checked = attendee.volunteered;
+    box.disabled = false;
+  }
 }
 
 async function removeAttendee(username, staff) {
@@ -1172,6 +1321,7 @@ onChange(() => {
     relabelLocations();
     relabelMeals();
     relabelTiers();
+    fillVolunteerSources(byId('f-volunteerDiscountFrom').value);
     fillTimeZoneSelect(byId('f-timezone'), byId('f-timezone').value);
     fillCurrencyList(byId('currencyList'));
   }

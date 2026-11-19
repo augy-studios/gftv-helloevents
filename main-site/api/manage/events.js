@@ -10,6 +10,9 @@
 // POST { action: "update", id, event }             -> { event }
 // POST { action: "delete", id }                    admins only
 // POST { action: "remove-attendee", id, username, staff } take someone off
+// POST { action: "volunteer-confirm", id, username, staff, volunteered }
+//                              a convention only: mark that someone going did
+//                              (or did not) volunteer at it (migrations/012)
 //
 // Saving a change to when or where a released event happens, or cancelling
 // it, tells the people going (notify.js), in the background, once for a run
@@ -23,8 +26,8 @@ import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
-import { validateEvent, isSlug } from '../_lib/event-rules.js';
-import { MANAGE_COLUMNS } from '../_lib/events.js';
+import { validateEvent, isSlug, volunteerDiscountActive, VOLUNTEER_KIND } from '../_lib/event-rules.js';
+import { MANAGE_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
 import { background, queueEventChange, sendEventChangeWhenDue } from '../_lib/notify.js';
@@ -49,14 +52,20 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
   return data;
 }
 
+// The event columns the attendee list needs: the meals it offers, and its
+// kind and volunteer benefit, for who volunteered.
+const ATTENDEE_EVENT_COLUMNS = 'id, kind, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value';
+
 // The event's attendees in RSVP order, as the edit page lists them, each
-// with the meals they are coming for that the event still offers.
-// event: its row, with at least id and meal_options.
+// with the meals they are coming for that the event still offers, and for
+// a convention, whether an editor confirmed they volunteered at it and at
+// the earlier convention its volunteer benefit is for.
+// event: its row, with at least ATTENDEE_EVENT_COLUMNS.
 async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `created_at, meals, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, volunteer, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -68,7 +77,37 @@ async function loadAttendees(event) {
   if (data !== null && data !== undefined) {
     rows = data;
   }
-  return rows.map((row) => attendeeView(row, event));
+  const userIds = rows.map((row) => row.user_id);
+  let confirmed = new Set();
+  if (event.kind === VOLUNTEER_KIND) {
+    confirmed = await confirmedVolunteers(event.id, userIds);
+  }
+  let earlier = new Set();
+  if (volunteerDiscountActive(event)) {
+    earlier = await confirmedVolunteers(event.volunteer_discount_from, userIds);
+  }
+  return rows.map((row) => attendeeView(row, event, {
+    volunteered: confirmed.has(row.user_id),
+    pastVolunteer: earlier.has(row.user_id),
+  }));
+}
+
+// Whether the earlier convention a volunteer benefit names can be used:
+// none named, or an event that exists, is a convention, and is not this one
+// (eventId: the event being saved; undefined for a new one).
+async function volunteerSourceAllowed(fields, eventId) {
+  const sourceId = fields.volunteer_discount_from;
+  if (!sourceId) {
+    return true;
+  }
+  if (sourceId === eventId) {
+    return false;
+  }
+  const source = await loadEvent(sourceId, 'id, kind');
+  if (!source) {
+    return false;
+  }
+  return source.kind === VOLUNTEER_KIND;
 }
 
 // A failed save the editor can fix gets its own answer: a slug already in
@@ -234,6 +273,13 @@ async function saveEvent(request, response, body, user) {
     }
     return fail(response, 400, check.error, detail);
   }
+  let savedId;
+  if (body.action === 'update' && isUuid(body.id)) {
+    savedId = String(body.id).toLowerCase();
+  }
+  if (!(await volunteerSourceAllowed(check.fields, savedId))) {
+    return fail(response, 400, 'invalid_field', { field: 'volunteerDiscountFrom' });
+  }
   const fields = { ...check.fields, updated_by: user.id };
   if (body.action === 'create') {
     return createEvent(request, response, fields, user, { numberSlug: !slugGiven(body.event) });
@@ -293,48 +339,115 @@ function isNamedAttendee(row, username, staff) {
   return staff === isStaff;
 }
 
-// "remove-attendee": takes someone off an event, by username.
-async function removeAttendee(request, response, body, user) {
-  if (!isUuid(body.id)) {
-    return fail(response, 400, 'bad_request');
-  }
+// The username an attendee action names, trimmed, or null when it is
+// missing or too long.
+function namedUsername(body) {
   let typedUsername = '';
   if (body.username !== null && body.username !== undefined) {
     typedUsername = body.username;
   }
   const username = String(typedUsername).trim();
   if (!username || username.length > 64) {
-    return fail(response, 400, 'bad_request');
+    return null;
   }
-  const event = await loadEvent(body.id, 'id, meal_options');
-  if (!event) {
-    return fail(response, 404, 'not_found');
-  }
-  // Matched against this event's own list, so only someone on it can go.
-  const { data: attendeeData, error: attendeesError } = await database()
+  return username;
+}
+
+// The attendee row of the person an editor named on this event's own list,
+// so only someone on it can be acted on: { user_id } or null.
+async function findAttendee(eventId, username, staff) {
+  const { data, error } = await database()
     .from(TABLES.attendees)
     .select(`user_id, account:${TABLES.accounts} ( kind, username, staff:${TABLES.users} ( username ) )`)
-    .eq('event_id', body.id);
-  if (attendeesError) {
-    throw attendeesError;
-  }
-  let attendeeRows = [];
-  if (attendeeData !== null && attendeeData !== undefined) {
-    attendeeRows = attendeeData;
-  }
-  const match = attendeeRows.find((row) => isNamedAttendee(row, username, body.staff));
-  if (!match) {
-    return fail(response, 404, 'not_found');
-  }
-  const { error } = await database()
-    .from(TABLES.attendees)
-    .delete()
-    .eq('event_id', body.id)
-    .eq('user_id', match.user_id);
+    .eq('event_id', eventId);
   if (error) {
     throw error;
   }
+  let rows = [];
+  if (data !== null && data !== undefined) {
+    rows = data;
+  }
+  const match = rows.find((row) => isNamedAttendee(row, username, staff));
+  if (!match) {
+    return null;
+  }
+  return match;
+}
+
+// "remove-attendee": takes someone off an event, by username, along with
+// any confirmation that they volunteered at it.
+async function removeAttendee(request, response, body, user) {
+  if (!isUuid(body.id)) {
+    return fail(response, 400, 'bad_request');
+  }
+  const username = namedUsername(body);
+  if (!username) {
+    return fail(response, 400, 'bad_request');
+  }
+  const event = await loadEvent(body.id, ATTENDEE_EVENT_COLUMNS);
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
+  const match = await findAttendee(body.id, username, body.staff);
+  if (!match) {
+    return fail(response, 404, 'not_found');
+  }
+  for (const table of [TABLES.attendees, TABLES.volunteers]) {
+    const { error } = await database()
+      .from(table)
+      .delete()
+      .eq('event_id', body.id)
+      .eq('user_id', match.user_id);
+    if (error) {
+      throw error;
+    }
+  }
   await audit(request, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
+  return ok(response, { attendees: await loadAttendees(event) });
+}
+
+// "volunteer-confirm": marks that someone going to a convention really
+// volunteered at it (volunteered: true), or takes that back (false). Only
+// those confirmed get a later convention's volunteer benefit.
+async function confirmVolunteer(request, response, body, user) {
+  if (!isUuid(body.id) || typeof body.volunteered !== 'boolean') {
+    return fail(response, 400, 'bad_request');
+  }
+  const username = namedUsername(body);
+  if (!username) {
+    return fail(response, 400, 'bad_request');
+  }
+  const event = await loadEvent(body.id, ATTENDEE_EVENT_COLUMNS);
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
+  if (event.kind !== VOLUNTEER_KIND) {
+    return fail(response, 400, 'volunteers_convention_only');
+  }
+  const match = await findAttendee(body.id, username, body.staff);
+  if (!match) {
+    return fail(response, 404, 'not_found');
+  }
+  let result;
+  if (body.volunteered) {
+    result = await database()
+      .from(TABLES.volunteers)
+      .upsert({ event_id: body.id, user_id: match.user_id, confirmed_by: user.id, confirmed_at: new Date().toISOString() });
+  } else {
+    result = await database()
+      .from(TABLES.volunteers)
+      .delete()
+      .eq('event_id', body.id)
+      .eq('user_id', match.user_id);
+  }
+  if (result.error) {
+    throw result.error;
+  }
+  let action = 'volunteer.unconfirmed';
+  if (body.volunteered) {
+    action = 'volunteer.confirmed';
+  }
+  await audit(request, { action, actorId: user.id, eventId: body.id, details: { username } });
   return ok(response, { attendees: await loadAttendees(event) });
 }
 
@@ -383,6 +496,10 @@ export default route('manage/events', async (request, response) => {
   }
   if (body.action === 'remove-attendee') {
     await removeAttendee(request, response, body, user);
+    return;
+  }
+  if (body.action === 'volunteer-confirm') {
+    await confirmVolunteer(request, response, body, user);
     return;
   }
   fail(response, 400, 'bad_request');

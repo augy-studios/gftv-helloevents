@@ -1,4 +1,4 @@
-// POST /api/events/rsvp  { slug, going: true | false, meals?: [id] }
+// POST /api/events/rsvp  { slug, going: true | false, meals?: [id], volunteer?: true | false }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
 // meals: when the event offers meals people can come to on their own, the
@@ -6,21 +6,26 @@
 // out: the whole event). Sending going: true again with another choice
 // changes it; after RSVPs close, someone going can still change their meals
 // but not take one of the event's spaces (migrations/010).
+// volunteer: for a convention taking volunteers, whether this person signs
+// up to volunteer (migrations/012); left out, it stays as it was. Someone
+// going can change it until the event is over, even after RSVPs close.
 // Joining goes through the gftvevents_rsvp database function, which locks the
 // event row, so two people cannot both take the last space. Only released,
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
 // -> { event } as the person now sees it (event.viewer.going says whether
-// they are going, event.viewer.meals what for).
+// they are going, event.viewer.meals what for, event.viewer.rsvpNumber
+// their RSVP ID for the event: the next number up when they join, kept
+// while they change their meals, migrations/013).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
-import { releasedEventBySlug, withMealCounts } from '../_lib/events.js';
-import { chooseMeals } from '../_lib/event-rules.js';
+import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
+import { chooseMeals, takesVolunteers } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
@@ -35,6 +40,25 @@ const RESULTS = {
   meal_full: [409, 'meal_full'],
   event_over: [409, 'event_over'],
 };
+
+// Signs someone going up to volunteer, or takes them off (volunteer true or
+// false), once their RSVP has gone through. Returns whether it changed.
+async function setVolunteer(eventId, userId, volunteer) {
+  const { data, error } = await database()
+    .from(TABLES.attendees)
+    .update({ volunteer })
+    .eq('event_id', eventId)
+    .eq('user_id', userId)
+    .neq('volunteer', volunteer)
+    .select('volunteer');
+  if (error) {
+    throw error;
+  }
+  if (!Array.isArray(data)) {
+    return false;
+  }
+  return data.length > 0;
+}
 
 // Joins (going: true) or leaves (going: false) a released event, then
 // answers with the event as this person now sees it.
@@ -63,11 +87,17 @@ export default route('events/rsvp', async (request, response) => {
     return fail(response, 404, 'not_found');
   }
 
+  if (body.volunteer !== undefined && typeof body.volunteer !== 'boolean') {
+    return fail(response, 400, 'bad_request');
+  }
   let meals = [];
   if (body.going === true) {
     const choice = chooseMeals(event, body.meals);
     if (!choice.ok) {
       return fail(response, 400, 'meal_not_offered');
+    }
+    if (body.volunteer === true && !takesVolunteers(event)) {
+      return fail(response, 400, 'volunteers_not_wanted');
     }
     meals = choice.meals;
     const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals });
@@ -84,11 +114,18 @@ export default route('events/rsvp', async (request, response) => {
       const errorCode = refusal[1];
       return fail(response, status, errorCode);
     }
+    let volunteerChanged = false;
+    if (typeof body.volunteer === 'boolean') {
+      volunteerChanged = await setVolunteer(event.id, session.user.id, body.volunteer);
+    }
     if (result === 'ok') {
-      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details: { meals } });
+      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details: { meals, volunteer: body.volunteer === true } });
     }
     if (result === 'changed') {
       await audit(request, { action: 'rsvp.meals_changed', actorId: session.user.id, eventId: event.id, details: { meals } });
+    }
+    if (volunteerChanged && result !== 'ok') {
+      await audit(request, { action: 'rsvp.volunteer_changed', actorId: session.user.id, eventId: event.id, details: { volunteer: body.volunteer } });
     }
   } else if (body.going === false) {
     const { error } = await database()
@@ -112,12 +149,19 @@ export default route('events/rsvp', async (request, response) => {
     shown = fresh;
   }
   await withMealCounts(shown);
+  await withVolunteerSource(shown);
+  const mine = await attendance(event.id, session.user.id);
+  const standing = await volunteerStanding(shown, session.user.id);
   ok(response, {
     event: publicEventDetail(shown, {
       signedIn: true,
       going: body.going === true,
       meals,
+      rsvpNumber: mine.rsvpNumber,
       canManage: canManage(session.user),
+      volunteer: mine.volunteer,
+      volunteered: standing.volunteered,
+      discount: standing.discount,
     }),
   });
 });

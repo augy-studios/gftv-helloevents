@@ -100,6 +100,29 @@ the functions with the service role key. No Supabase Auth, no request signing.
   meal's name ("Dinner", "Dinner · Meeting location"). "Show the street addresses and map links
   only to people going" covers them too. Moving a meal's place, or bringing it back to the event,
   tells the people going, like any change of place.
+- **RSVP IDs** (migrations/013). Everyone who RSVPs to an event, of any kind and whether for the
+  whole event or just a meal, gets an ID counting up from 1 for that event: the first person going
+  is #1, the next #2. Numbers are never reused (`gftvevents_rsvp_counters` keeps the last one
+  handed out): if #3 takes back their RSVP, the next person still gets a new number, and someone
+  who RSVPs again gets a new one too. Changing meals keeps it. The person sees "Your RSVP ID: #12"
+  on the event page and "RSVP #12" on their My events cards; editors see each attendee's number
+  in the attendee list. Nobody else sees any.
+- **Volunteers** (migrations/012). Only a convention takes them. Under Price and RSVP, the edit
+  form's Volunteers section has "Taking volunteers": with it on, someone signed in ticks "I
+  would like to volunteer at this convention" on the event page when they RSVP, and while going
+  can change it (it saves at once) until the event is over. Signing up is not volunteering: in
+  the attendee list on `/manage` an editor ticks **Volunteered** next to the people who really did
+  (kept in `gftvevents_volunteers`, with who ticked it); a count reads "Volunteers: 4 signed up ·
+  2 volunteered". A later convention can then give those people a benefit: tick "Give a benefit
+  to the people who volunteered at an earlier convention", pick that convention (every other
+  convention is listed, latest first), and set a percentage (up to 100) or an amount in the
+  event's currency. The event page shows the offer to everyone ("Volunteered at Mega Con 2025?
+  You get 20% off."), and each confirmed volunteer of that convention sees "You volunteered at
+  Mega Con 2025, so you get 20% off here."; the attendee list marks who "Gets the volunteer
+  benefit". Nothing is taken off a price yet: applying it (discount codes) comes later. Whether
+  someone signed up or volunteered goes only to them and to editors. An editor removing someone
+  from the attendee list also removes their Volunteered tick; someone taking back their own RSVP
+  after the convention keeps it, since they did volunteer.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
@@ -135,7 +158,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 011) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 013) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -144,7 +167,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    through its view, and it replaces the RSVP function again. `010_meal_changes_after_close.sql`
    replaces it once more, so people going can change their meals after RSVPs close. Run
    `011_reminder_times.sql` before deploying reminder times: the account page and the cron read
-   its columns.
+   its columns. Run `012_volunteers.sql` before deploying volunteers: the event pages, RSVPs and
+   the edit form read its columns and table. Run `013_rsvp_numbers.sql` before deploying RSVP IDs: it numbers
+   the RSVPs already there, and replaces the RSVP function so each new one gets the next number.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

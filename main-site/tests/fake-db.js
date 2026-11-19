@@ -29,8 +29,10 @@ const DEFAULTS = {
     description_zh: null, start_time_tbc: false, end_time_tbc: false, locations: [],
     cover_image_url: null, cover_image_path: null, announced_at: null,
     notice_base: null, notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
+    volunteers_wanted: false, volunteer_discount_enabled: false, volunteer_discount_from: null, volunteer_discount_type: 'percent', volunteer_discount_value: null,
   }),
-  gftvevents_attendees: () => ({ meals: [], reminders_sent: [] }),
+  gftvevents_attendees: () => ({ meals: [], reminders_sent: [], volunteer: false }),
+  gftvevents_volunteers: () => ({ confirmed_by: null }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
   gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
@@ -47,6 +49,8 @@ const PRIMARY = {
   gftvevents_totp_secrets: 'user_id',
   gftvevents_telegram_links: 'user_id',
   gftvevents_attendees: ['event_id', 'user_id'],
+  gftvevents_volunteers: ['event_id', 'user_id'],
+  gftvevents_rsvp_counters: 'event_id',
 };
 const UNIQUE = {
   gftvevents_accounts: ['username', 'email', 'staff_user_id'],
@@ -74,6 +78,12 @@ const FKS = {
   gftvevents_telegram_links: [toAccount('user_id')],
   gftvevents_telegram_link_tokens: [toAccount('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
   gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id')],
+  // migrations/012: confirmed volunteers, and the convention a volunteer
+  // benefit is for.
+  gftvevents_volunteers: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('confirmed_by', 'set null')],
+  gftvevents_events: [{ column: 'volunteer_discount_from', parent: 'gftvevents_events', onDelete: 'set null' }],
+  // migrations/013: the last RSVP ID handed out for each event.
+  gftvevents_rsvp_counters: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }],
   // migrations/009: a view of the attendees coming to the whole event.
   gftvevents_full_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }],
   gftvevents_audit_logs: [toAccount('actor_id', 'set null'), { column: 'event_id', parent: 'gftvevents_events', onDelete: 'set null' }],
@@ -311,7 +321,7 @@ export function createFakeDb() {
       row.hits += 1;
       return row.hits;
     },
-    // The same rules as the SQL function in migrations/001, 007, 009 and 010.
+    // The same rules as the SQL function in migrations/001, 007, 009, 010 and 013.
     gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [] }) {
       const meals = p_meals ?? [];
       const e = table('gftvevents_events').find((r) => r.id === p_event_id);
@@ -335,7 +345,14 @@ export function createFakeDb() {
         mine.meals = [...meals];
         return 'changed';
       }
-      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], reminders_sent: [] });
+      const counters = table('gftvevents_rsvp_counters');
+      let counter = counters.find((r) => r.event_id === p_event_id);
+      if (!counter) {
+        counter = { event_id: p_event_id, last_number: 0 };
+        counters.push(counter);
+      }
+      counter.last_number += 1;
+      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], reminders_sent: [], volunteer: false, rsvp_number: counter.last_number });
       return 'ok';
     },
     gftvevents_meal_counts({ p_event_id }) {

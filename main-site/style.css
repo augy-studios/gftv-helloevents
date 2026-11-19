@@ -1011,6 +1011,9 @@ main.wide > .page-card { margin-inline: auto; }
 .rsvp { display: grid; gap: 0.5rem; }
 .rsvp-status { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; color: var(--ok); }
 .rsvp-status svg { width: 18px; height: 18px; }
+/* Someone's RSVP ID for the event (migrations/013). */
+.rsvp-number { font-size: 0.9375rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chip-rsvp-number { font-variant-numeric: tabular-nums; }
 .rsvp .small:empty { display: none; }
 /* The choice of the whole event or only some of its meals. */
 .rsvp-meals { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0.35rem; }
@@ -1023,6 +1026,10 @@ main.wide > .page-card { margin-inline: auto; }
 .remind-options .check { margin-bottom: 0.25rem; }
 .remind-times .field-hint { margin: 0.25rem 0 0; }
 .rsvp-meal-list { display: grid; gap: 0.35rem; padding-inline-start: 1.6rem; }
+/* Volunteering (migrations/012): the tick box sits with the meal choice,
+   and the thanks or benefit note under it. */
+.rsvp-volunteer { margin-bottom: 0; }
+.rsvp .rsvp-volunteer-note { margin-top: 0; }
 #rsvpMealChecks { display: grid; gap: 0.35rem; }
 .event-aside .actions { margin-top: 0; }
 
@@ -1063,6 +1070,12 @@ main.wide > .page-card { margin-inline: auto; }
 .item-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .item-main > span { overflow: hidden; text-overflow: ellipsis; }
 .item-title { font-weight: 600; }
+/* An attendee at a convention also has a Volunteered box; on a narrow
+   screen it and Remove wrap under the name. */
+.attendee-row { flex-wrap: wrap; }
+.attendee-row .item-main { flex-basis: 11rem; }
+.attendee-volunteered { margin-bottom: 0; font-size: 0.875rem; white-space: nowrap; align-items: center; }
+.attendee-volunteered input { margin-top: 0; }
 details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text); border-radius: var(--radius-sm); }
 .steps-list { display: grid; gap: 0.35rem; padding-inline-start: 1.25rem; margin-bottom: 0.75rem; }
 

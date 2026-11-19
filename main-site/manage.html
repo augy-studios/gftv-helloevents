@@ -314,6 +314,38 @@
                             </label>
                         </div>
                     </fieldset>
+
+                    <fieldset id="volunteerSection">
+                        <legend data-i18n="manage.section.volunteers">Volunteers</legend>
+                        <p class="muted small" id="volunteersConventionOnly" data-i18n="manage.volunteers-convention-only">Only conventions take volunteers. Set Kind to Convention under Basics to use this.</p>
+                        <div class="form-grid" id="volunteerFields">
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-volunteersWanted" name="volunteersWanted">
+                                <span data-i18n="manage.field.volunteersWanted">Taking volunteers: people going can tick "I would like to volunteer"</span>
+                            </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-volunteerDiscountEnabled" name="volunteerDiscountEnabled" aria-describedby="volunteerDiscountHint">
+                                <span data-i18n="manage.field.volunteerDiscountEnabled">Give a benefit to the people who volunteered at an earlier convention</span>
+                            </label>
+                            <label class="field span-2">
+                                <span data-i18n="manage.field.volunteerDiscountFrom">Earlier convention</span>
+                                <select id="f-volunteerDiscountFrom" name="volunteerDiscountFrom"></select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.volunteerDiscountType">Benefit</span>
+                                <select id="f-volunteerDiscountType" name="volunteerDiscountType">
+                                    <option value="percent" data-i18n="manage.discount.percent">Percentage off</option>
+                                    <option value="amount" data-i18n="manage.discount.amount">Amount off</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.volunteerDiscountValue">How much off</span>
+                                <input id="f-volunteerDiscountValue" name="volunteerDiscountValue" type="number" min="0" step="0.01" inputmode="decimal">
+                            </label>
+                            <p class="field-hint span-2" id="volunteerDiscountHint" data-i18n="manage.hint.volunteerDiscount">Only the people an editor ticked as "Volunteered" in that convention's attendee list get it. A percentage is up to 100; an amount is in this event's currency. Applying it at checkout comes later: for now the event page tells them they have it.</p>
+                            <p class="field-hint span-2" id="volunteerSourcesNone" hidden data-i18n="manage.volunteer-sources-none">There are no other conventions yet. Once there is one, it can be picked here.</p>
+                        </div>
+                    </fieldset>
                 </div>
 
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-meals" aria-labelledby="etab-meals" hidden>
@@ -373,6 +405,7 @@
                     <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
                         <h3 id="attendeesTitle" class="section-label"></h3>
                         <p class="muted small" id="attendeesMeals" hidden></p>
+                        <p class="muted small" id="attendeesVolunteers" hidden></p>
                         <ul class="item-list" id="attendeeList"></ul>
                     </section>
                 </div>

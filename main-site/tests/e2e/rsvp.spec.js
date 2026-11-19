@@ -25,6 +25,8 @@ test('a member signs in from an event page, RSVPs, sees the address, and cancels
   await button.click();
   await expect(status).toBeVisible();
   await expect(status).toHaveText('You are going');
+  // keyfox (seed.js) is #1 here, so this is RSVP #2.
+  await expect(page.locator('#rsvpNumber')).toHaveText('Your RSVP ID: #2');
   await expect(button).toHaveText('I can no longer go');
   await expect(going).toHaveText('2 of 20 spaces taken');
   await expect(page.locator('#rsvpNote')).toHaveText('18 spaces left');
@@ -34,11 +36,17 @@ test('a member signs in from an event page, RSVPs, sees the address, and cancels
   // Kept on the server, not just on the page.
   await page.reload();
   await expect(status).toBeVisible();
+  await expect(page.locator('#rsvpNumber')).toHaveText('Your RSVP ID: #2');
+  // And on the account page's My events.
+  await page.goto('/account');
+  await expect(page.locator('#rsvpUpcoming .event-card', { hasText: event.title }).locator('.chip-rsvp-number')).toHaveText('RSVP #2');
+  await page.goto(`/e/${event.slug}`);
   await expect(button).toHaveText('I can no longer go');
   await expect(going).toHaveText('2 of 20 spaces taken');
 
   await button.click();
   await expect(status).toBeHidden();
+  await expect(page.locator('#rsvpNumber')).toBeHidden();
   await expect(button).toHaveText('I am going');
   await expect(going).toHaveText('1 of 20 spaces taken');
   await expect(page.locator('#rsvpNote')).toHaveText('19 spaces left');

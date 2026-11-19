@@ -109,10 +109,12 @@
                         <div><dt><span data-icon="ticket"></span><span data-i18n="event.price">Price</span></dt><dd id="factPrice"></dd></div>
                         <div><dt><span data-icon="users"></span><span data-i18n="event.going-label">Going</span></dt><dd id="factGoing"></dd></div>
                         <div id="factMealsRow" hidden><dt><span data-icon="clock"></span><span data-i18n="event.meals-label">Just for a meal</span></dt><dd id="factMeals"></dd></div>
+                        <div id="factVolunteersRow" hidden><dt><span data-icon="heart"></span><span data-i18n="event.volunteers-label">Volunteers</span></dt><dd id="factVolunteers"></dd></div>
                     </dl>
 
                     <div class="rsvp" id="rsvpBox">
                         <p class="rsvp-status" id="rsvpStatus" hidden><span data-icon="check"></span><span id="rsvpStatusText">You are going</span></p>
+                        <p class="rsvp-number" id="rsvpNumber" hidden></p>
                         <fieldset class="rsvp-meals" id="rsvpMeals" hidden>
                             <legend class="visually-hidden" data-i18n="event.meals-legend">What you are coming for</legend>
                             <label class="check">
@@ -129,6 +131,11 @@
                             </div>
                             <p class="small muted" id="rsvpMealsHint" hidden data-i18n="event.meals-pick-one">Tick at least one meal.</p>
                         </fieldset>
+                        <label class="check rsvp-volunteer" id="rsvpVolunteerRow" hidden>
+                            <input type="checkbox" id="rsvpVolunteer">
+                            <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
+                        </label>
+                        <p class="callout ok small rsvp-volunteer-note" id="rsvpVolunteerNote" hidden></p>
                         <button class="btn btn-primary btn-block" type="button" id="rsvpBtn" hidden></button>
                         <a class="btn btn-primary btn-block" id="rsvpSignIn" href="/login" hidden><span data-icon="lock"></span><span data-i18n="event.sign-in-to-rsvp">Sign in to RSVP</span></a>
                         <p class="small muted" id="rsvpNote"></p>

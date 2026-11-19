@@ -3,7 +3,7 @@
 // a public request; the serializers then pick the fields each caller may see.
 
 import { database, TABLES } from './supabase.js';
-import { releasedFilter, isSlug, storedMeals } from './event-rules.js';
+import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive } from './event-rules.js';
 
 // "going" on cards and pages counts the people coming to the whole event,
 // who take its spaces (gftvevents_full_attendees, migrations/009); people
@@ -18,7 +18,8 @@ export const CARD_COLUMNS =
 
 export const DETAIL_COLUMNS =
   `${CARD_COLUMNS}, price_note, description, description_zh, venue_address, locations, address_attendees_only, online_url, ` +
-  'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers';
+  'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers, ' +
+  'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -107,12 +108,14 @@ export async function withMealCounts(row) {
   return row;
 }
 
-// Whether someone is going, and the meals they are coming for (empty for the
-// whole event, migrations/007): { going, meals }.
+// Whether someone is going, the meals they are coming for (empty for the
+// whole event, migrations/007), whether they signed up to volunteer
+// (migrations/012) and their RSVP ID for this event (migrations/013):
+// { going, meals, volunteer, rsvpNumber }.
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select('meals')
+    .select('meals, volunteer, rsvp_number')
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -120,11 +123,95 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [] };
+    return { going: false, meals: [], volunteer: false, rsvpNumber: null };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
     meals = data.meals;
   }
-  return { going: true, meals };
+  let rsvpNumber = null;
+  if (Number.isInteger(data.rsvp_number)) {
+    rsvpNumber = data.rsvp_number;
+  }
+  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber };
+}
+
+// Adds to an event row the earlier convention whose volunteers get its
+// volunteer benefit (row.volunteer_source: { id, slug, title, status,
+// publish_at }, or null), for the event page to name. Nothing is asked
+// while the benefit is not in effect.
+export async function withVolunteerSource(row) {
+  if (!row) {
+    return row;
+  }
+  row.volunteer_source = null;
+  if (!volunteerDiscountActive(row)) {
+    return row;
+  }
+  const { data, error } = await database()
+    .from(TABLES.events)
+    .select('id, slug, title, status, publish_at')
+    .eq('id', row.volunteer_discount_from)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (data !== null && data !== undefined) {
+    row.volunteer_source = data;
+  }
+  return row;
+}
+
+// The confirmed volunteers (migrations/012) among userIds at one event, as
+// a Set of their ids. eventId null or no one asked about: an empty Set.
+// The event's volunteers are read whole and matched here, since there are
+// far fewer of them than attendees, and a filter naming every attendee
+// would make a very long request.
+export async function confirmedVolunteers(eventId, userIds) {
+  if (!eventId || userIds.length === 0) {
+    return new Set();
+  }
+  const { data, error } = await database()
+    .from(TABLES.volunteers)
+    .select('user_id')
+    .eq('event_id', eventId)
+    .limit(5000);
+  if (error) {
+    throw error;
+  }
+  let rows = [];
+  if (Array.isArray(data)) {
+    rows = data;
+  }
+  const wanted = new Set(userIds);
+  return new Set(rows.map((each) => each.user_id).filter((id) => wanted.has(id)));
+}
+
+// One person's volunteering as it touches this event: whether an editor
+// confirmed they volunteered at it, and whether they volunteered at the
+// earlier convention its benefit is for (so they get it):
+// { volunteered, discount }. row: the event, after withVolunteerSource.
+export async function volunteerStanding(row, userId) {
+  const ids = [row.id];
+  if (row.volunteer_source) {
+    ids.push(row.volunteer_source.id);
+  }
+  const { data, error } = await database()
+    .from(TABLES.volunteers)
+    .select('event_id')
+    .eq('user_id', userId)
+    .in('event_id', ids);
+  if (error) {
+    throw error;
+  }
+  let rows = [];
+  if (Array.isArray(data)) {
+    rows = data;
+  }
+  const at = new Set(rows.map((each) => each.event_id));
+  let discount = false;
+  if (row.volunteer_source && at.has(row.volunteer_source.id)) {
+    discount = true;
+  }
+  return { volunteered: at.has(row.id), discount };
 }

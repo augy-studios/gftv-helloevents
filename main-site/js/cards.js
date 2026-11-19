@@ -41,9 +41,14 @@ function metaItem(iconName, text) {
 
 // The card links to the event page and shows the cover, the kind (and
 // "cancelled" or "full"), the title, the summary when there is one, and the
-// when, where, price and how many are going (when anyone is).
-export function eventCard(event) {
+// when, where, price and how many are going (when anyone is). On the
+// account page's My events, rsvpNumber adds the person's RSVP ID for it
+// (migrations/013).
+export function eventCard(event, { rsvpNumber = null } = {}) {
   const chips = [createElement('span', { class: `chip kind-${event.kind}`, text: translate(`kind.${event.kind}`) })];
+  if (rsvpNumber !== null) {
+    chips.push(createElement('span', { class: 'chip chip-rsvp-number', text: translate('event.rsvp-number-chip', { number: rsvpNumber }) }));
+  }
   if (event.cancelled) {
     chips.push(createElement('span', { class: 'chip chip-danger', text: translate('event.state.cancelled') }));
   } else if (event.rsvp === 'full') {

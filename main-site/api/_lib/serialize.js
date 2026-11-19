@@ -16,6 +16,9 @@
 //   Staff notes, who created or edited an event, and attendee identities go
 //   only to editors, and an attendee is a display name and username, never
 //   an email.
+//   Whether someone signed up to volunteer, or volunteered, goes only to
+//   them and to editors (migrations/012); the public page says only whether
+//   a convention takes volunteers and what its volunteer benefit is.
 //   Password hashes, TOTP secrets, code and token hashes, Telegram chat ids,
 //   emails, notification choices of other people and IP hashes have no
 //   serializer at all, so they cannot reach a browser. Public accounts are
@@ -30,7 +33,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive } from './event-rules.js';
 import { roleOf, canManage } from './users.js';
 import { coverUrl } from './covers.js';
 
@@ -121,11 +124,16 @@ export function selfView(user) {
 }
 
 // An attendee, for an editor's attendee list: a name, a username, whether
-// it is a staff or a public account, and the meals they are coming for
-// (empty for the whole event). Never an email or an id.
-// row: { created_at, meals, account: { kind, username, display_name, staff: {...} } }
+// it is a staff or a public account, the meals they are coming for (empty
+// for the whole event), and their volunteering (migrations/012): signed up
+// to volunteer here, confirmed as having volunteered here, and confirmed at
+// the earlier convention this event's volunteer benefit is for (so they get
+// it). Never an email or an id.
+// row: { created_at, meals, volunteer, account: { kind, username, display_name, staff: {...} } }
 // event: the event's row, for the meals it still offers.
-export function attendeeView(row, event = {}) {
+// standing: { volunteered, pastVolunteer }, looked up by the caller.
+// rsvpNumber is their RSVP ID for this event (migrations/013).
+export function attendeeView(row, event = {}, standing = {}) {
   let account = row.account;
   if (account === null || account === undefined) {
     account = {};
@@ -147,10 +155,14 @@ export function attendeeView(row, event = {}) {
     displayName = null;
   }
   return {
+    rsvpNumber: missingToNull(row.rsvp_number),
     username: missingToNull(person.username),
     displayName,
     staff: isStaff,
     meals: offeredMeals(event, row.meals),
+    volunteer: row.volunteer === true,
+    volunteered: standing.volunteered === true,
+    pastVolunteer: standing.pastVolunteer === true,
     rsvpAt: row.created_at,
   };
 }
@@ -358,6 +370,40 @@ function managedTier(tier) {
   };
 }
 
+// Volunteers on the event page (migrations/012): whether the convention
+// takes volunteer sign-ups, and its benefit for the people who volunteered
+// at an earlier convention while that is in effect (null otherwise): a
+// percentage or an amount in the event's currency (SGD when it has none, as
+// for a paid event), and the earlier convention's title and link, both null
+// while that event is not public.
+function volunteersView(row) {
+  let discount = null;
+  if (volunteerDiscountActive(row)) {
+    const source = row.volunteer_source;
+    let fromTitle = null;
+    let fromSlug = null;
+    if (source && isReleased(source)) {
+      fromTitle = source.title;
+      fromSlug = source.slug;
+    }
+    let currency = null;
+    if (row.volunteer_discount_type === 'amount') {
+      currency = emptyToNull(row.currency);
+      if (!currency) {
+        currency = 'SGD';
+      }
+    }
+    discount = {
+      type: row.volunteer_discount_type,
+      value: Number(row.volunteer_discount_value),
+      currency,
+      fromTitle,
+      fromSlug,
+    };
+  }
+  return { wanted: takesVolunteers(row), discount };
+}
+
 // The count of people going to the whole event (who take its spaces), from
 // an embedded aggregate (gftvevents_full_attendees(count), migrations/009;
 // gftvevents_attendees(count) before it) or a number.
@@ -426,9 +472,14 @@ export function publicEventCard(row, now = Date.now()) {
   };
 }
 
-// The event page. viewer: { signedIn, going, meals, canManage } (meals: the
-// ones this person is coming for, empty for the whole event). Only call this
-// for a released event, or for an editor.
+// The event page. viewer: { signedIn, going, meals, canManage, volunteer,
+// volunteered, discount, rsvpNumber } (rsvpNumber: their RSVP ID for this
+// event, migrations/013; meals: the ones this person is coming for, empty
+// for the whole event; volunteer: they signed up to volunteer here;
+// volunteered: an editor confirmed they did; discount: they volunteered at
+// the earlier convention this one's benefit is for). Only call this for a
+// released event, or for an editor. Call events.js withVolunteerSource on
+// the row first, for the benefit's convention.
 //
 // It is the card plus the price note, the spaces left, the descriptions (in
 // English and Chinese), the organiser, the link, every location, the ticket
@@ -472,6 +523,21 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     myMeals = offeredMeals(row, viewer.meals);
   }
 
+  // Volunteering is shown only to someone going (signed up) and to whoever
+  // volunteered; the benefit only while it is in effect.
+  let volunteer = false;
+  if (viewer.going === true && viewer.volunteer === true) {
+    volunteer = true;
+  }
+  let rsvpNumber = null;
+  if (viewer.going === true && Number.isInteger(viewer.rsvpNumber)) {
+    rsvpNumber = viewer.rsvpNumber;
+  }
+  let volunteerDiscount = false;
+  if (viewer.discount === true && volunteerDiscountActive(row)) {
+    volunteerDiscount = true;
+  }
+
   return {
     ...card,
     price: priceView(row, { withNote: true }),
@@ -489,24 +555,29 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     },
     tiers: tiersView(row),
     meals: mealsView(row, addressShown),
+    volunteers: volunteersView(row),
     viewer: {
       signedIn: viewer.signedIn === true,
       going: viewer.going === true,
+      rsvpNumber,
       meals: myMeals,
       canManage: viewer.canManage === true,
+      volunteer,
+      volunteered: viewer.volunteered === true,
+      volunteerDiscount,
     },
   };
 }
 
-// One of my RSVPs, for the account page: the event's card. The page shows
-// no RSVP date, so none is sent.
+// One of my RSVPs, for the account page: the event's card and my RSVP ID
+// for it (migrations/013). The page shows no RSVP date, so none is sent.
 export function myRsvpView(row, now = Date.now()) {
   const event = row.event;
   let card = null;
   if (event) {
     card = publicEventCard(event, now);
   }
-  return { event: card };
+  return { event: card, rsvpNumber: missingToNull(row.rsvp_number) };
 }
 
 // An editor's list row: what the list on /manage shows (title, status, kind,
@@ -582,6 +653,19 @@ export function managedEvent(row) {
       limit: stringOrBlank(meal.limit),
       locations: meal.locations.map(managedLocation),
     })),
+    volunteersWanted: row.volunteers_wanted === true,
+    volunteerDiscountEnabled: row.volunteer_discount_enabled === true,
+    volunteerDiscountFrom: emptyToBlank(row.volunteer_discount_from),
+    volunteerDiscountType: volunteerDiscountType(row),
+    volunteerDiscountValue: stringOrBlank(row.volunteer_discount_value),
     staffNotes: emptyToBlank(row.staff_notes),
   };
+}
+
+// The kind of volunteer benefit, 'percent' unless it is stored as 'amount'.
+function volunteerDiscountType(row) {
+  if (row.volunteer_discount_type === 'amount') {
+    return 'amount';
+  }
+  return 'percent';
 }

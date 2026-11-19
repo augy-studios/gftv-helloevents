@@ -146,8 +146,11 @@ const DETAIL = [
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
-  ...nest('viewer', ['signedIn', 'going', 'meals', 'canManage']),
+  ...nest('volunteers', ['wanted', 'discount']),
+  ...nest('viewer', ['signedIn', 'going', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount']),
 ];
+// The event page of a convention whose volunteer benefit is in effect.
+const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
 
 // /manage: a row of the event list, the edit form, an attendee.
 const SUMMARY = ['id', 'slug', 'title', 'kind', 'status', 'released', 'startsAt', 'datesHidden', 'going', 'capacity'];
@@ -158,10 +161,11 @@ const EDITOR = [
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
   ...listOf('ticketTiers', ['name', 'price', 'benefits', 'includesPrevious', 'previousDisplay']), 'rsvpOpen',
-  ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]), 'staffNotes',
+  ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]),
+  'volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue', 'staffNotes',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
-const ATTENDEE = ['username', 'displayName', 'staff', 'meals', 'rsvpAt'];
+const ATTENDEE = ['rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt'];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];
 const FILTER = ['id', 'term'];
@@ -396,8 +400,32 @@ test('event cards, the event page and an RSVP carry only what those pages show',
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true } }), nest('event', DETAIL));
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, meals: ['lunch'] } }), nest('event', DETAIL));
   assertKeys(await b.call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
-  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', nest('event', CARD))]);
+  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber'])]);
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: false } }), nest('event', DETAIL));
+});
+
+test('a convention with volunteers, and its volunteer benefit, carry only what the event page and /manage show', async () => {
+  const lastYear = addEvent({ slug: 'mega-con-2025', title: 'Mega Con 2025', kind: 'convention', starts_at: '2025-11-01T02:00:00.000Z' });
+  addEvent({
+    slug: 'mega-con-2026', title: 'Mega Con 2026', kind: 'convention', volunteers_wanted: true,
+    volunteer_discount_enabled: true, volunteer_discount_from: lastYear.id, volunteer_discount_type: 'percent', volunteer_discount_value: 20,
+    // Every list on the page has an item, so its item keys are pinned too.
+    meal_options: [{ id: 'lunch', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat', venue_address: '18 Raffles Quay', city: 'Singapore', country: 'SG', maps_url: null }] }],
+    tiers_enabled: true,
+    ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
+  });
+  const { b, id: otterId } = await member();
+  db.table('gftvevents_volunteers').push({ event_id: lastYear.id, user_id: otterId, confirmed_by: null, confirmed_at: new Date().toISOString() });
+
+  assertKeys(await on().call(detail, { query: { slug: 'mega-con-2026' } }), ['preview', ...nest('event', DETAIL_WITH_DISCOUNT)]);
+  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'mega-con-2026', going: true, volunteer: true } }), nest('event', DETAIL_WITH_DISCOUNT));
+  assertKeys(await b.call(detail, { query: { slug: 'mega-con-2026' } }), ['preview', ...nest('event', DETAIL_WITH_DISCOUNT)]);
+
+  const { b: editor } = await staff('editor', { is_editor: true });
+  const id = db.table('gftvevents_events').find((row) => row.slug === 'mega-con-2026').id;
+  assertKeys(await editor.call(manage, { query: { id } }), [...nest('event', EDITOR), ...listOf('attendees', ATTENDEE)]);
+  const confirmed = await editor.call(manage, { method: 'POST', body: { action: 'volunteer-confirm', id, username: 'otter', staff: false, volunteered: true } });
+  assertKeys(confirmed, listOf('attendees', ATTENDEE));
 });
 
 // ---------------------------------------------------------------------------

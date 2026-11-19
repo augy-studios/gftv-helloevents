@@ -302,10 +302,10 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'meals', 'rsvpAt', 'staff', 'username']);
+  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'meals', 'pastVolunteer', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
   assert.equal(staff.staff, true);
-  const member = ser.attendeeView({ user_id: 'p1', created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', staff: false, meals: [], rsvpAt: 'x' });
+  const member = ser.attendeeView({ user_id: 'p1', rsvp_number: 7, created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
+  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], volunteer: false, volunteered: false, pastVolunteer: false, rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
 });
 
