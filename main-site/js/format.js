@@ -85,7 +85,7 @@ export function dateBadge(when) {
 
 // An amount in its currency (SGD when none is given); "CODE amount" if the
 // browser does not know the currency.
-function formatMoney(amount, currency) {
+export function formatMoney(amount, currency) {
   try {
     let currencyCode = currency;
     if (!currencyCode) {
@@ -117,6 +117,15 @@ export function priceText(price) {
   return formatMoney(price.min, price.currency);
 }
 
+// One ticket tier's price: "Free" for 0, otherwise the amount in the
+// event's currency.
+export function tierPriceText(amount, currency) {
+  if (amount === 0) {
+    return translate('event.price-free');
+  }
+  return formatMoney(amount, currency);
+}
+
 // "Venue, City, Country" for a place (an event's main place, or one of its
 // locations), the country by name.
 export function locationText(place) {
@@ -134,6 +143,37 @@ export function locationLabel(location) {
     label = 'event';
   }
   return translate(`location.${label}`);
+}
+
+// A meal people can come to on its own: the editor's name for it, or
+// breakfast, lunch or dinner in the reader's language.
+export function mealLabel(meal) {
+  if (meal.label) {
+    return meal.label;
+  }
+  return translate(`meal.${meal.id}`);
+}
+
+// A meal with its places left, when it has a limit: "Lunch (6 left)",
+// "Lunch (full)", or just "Dinner".
+export function mealPlacesText(meal) {
+  const name = mealLabel(meal);
+  if (meal.left === null || meal.left === undefined) {
+    return name;
+  }
+  if (meal.left === 0) {
+    return translate('event.meal-full', { meal: name });
+  }
+  return translate('event.meal-left', { meal: name, count: meal.left });
+}
+
+// The meals someone is coming for (ids), named and joined in the event's
+// order: "Lunch, Dinner".
+export function mealsText(meals, chosen) {
+  return meals
+    .filter((meal) => chosen.includes(meal.id))
+    .map((meal) => mealLabel(meal))
+    .join(', ');
 }
 
 export function placeText(where) {

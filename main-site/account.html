@@ -64,18 +64,18 @@
                     <button class="btn" type="button" id="signOut"><span data-icon="logout"></span><span data-i18n="account.sign-out">Sign out</span></button>
                     <button class="btn btn-quiet" type="button" id="signOutOthers"><span data-i18n="account.sign-out-others">Sign out everywhere else</span></button>
                 </div>
-                <form class="u-mt-1" id="nameForm" novalidate hidden>
-                    <label class="field">
-                        <span data-i18n="field.display-name">Display name</span>
-                        <input id="nameInput" type="text" autocomplete="nickname" maxlength="60" required>
-                    </label>
-                    <div class="actions inline"><button class="btn" type="submit" id="nameSubmit"><span data-i18n="account.name-save">Save display name</span></button></div>
-                    <div class="callout danger" id="nameError" role="alert"></div>
-                </form>
+                <div class="callout danger" id="profileError" role="alert"></div>
                 <div class="callout ok" id="accountNotice" role="status"></div>
             </section>
 
-            <section class="glass-card page-card">
+            <div class="tabs" role="tablist" id="accountTabs" aria-label="Account" data-i18n-attr="aria-label:account.tabs-label">
+                <button class="tab" type="button" role="tab" id="tab-going" data-tab="going" aria-controls="panel-going" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="account.tab.going">My events</span></button>
+                <button class="tab" type="button" role="tab" id="tab-notifications" data-tab="notifications" aria-controls="panel-notifications" aria-selected="false" tabindex="-1"><span data-icon="bell"></span><span data-i18n="notify.title">Notifications</span></button>
+                <button class="tab" type="button" role="tab" id="tab-security" data-tab="security" aria-controls="panel-security" aria-selected="false" tabindex="-1"><span data-icon="shield"></span><span data-i18n="security.title">Security</span></button>
+                <button class="tab" type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="account.tab.profile">Profile</span></button>
+            </div>
+
+            <section class="glass-card page-card" role="tabpanel" id="panel-going" aria-labelledby="tab-going">
                 <h2 data-i18n="account.going-title">Events you are going to</h2>
                 <div class="event-grid compact u-mt-1" id="rsvpUpcoming"></div>
                 <p class="muted" id="rsvpEmpty" hidden><span data-i18n="account.going-empty">Nothing yet.</span> <a class="text-link" href="/" data-i18n="account.find-events">Find an event</a></p>
@@ -85,7 +85,7 @@
                 </details>
             </section>
 
-            <section class="glass-card page-card" aria-labelledby="notifyTitle">
+            <section class="glass-card page-card" role="tabpanel" id="panel-notifications" aria-labelledby="tab-notifications" hidden>
                 <h2 id="notifyTitle" data-i18n="notify.title">Notifications</h2>
                 <p class="muted small" data-i18n="notify.lede">Only about events. Nothing else is ever sent.</p>
                 <label class="check u-mt-1"><input type="checkbox" id="prefUpdates"><span data-i18n="notify.updates">When an event I am going to changes time or place, or is cancelled</span></label>
@@ -108,7 +108,7 @@
                 <div class="callout danger" id="notifyError" role="alert"></div>
             </section>
 
-            <section class="glass-card page-card" aria-labelledby="securityTitle">
+            <section class="glass-card page-card" role="tabpanel" id="panel-security" aria-labelledby="tab-security" hidden>
                 <h2 id="securityTitle" data-i18n="security.title">Security</h2>
                 <p class="muted small" id="securityLede"></p>
 
@@ -158,11 +158,25 @@
                 <div class="callout danger" id="securityError" role="alert"></div>
             </section>
 
+            <div role="tabpanel" id="panel-profile" aria-labelledby="tab-profile" class="account-panel-stack" hidden>
+            <section class="glass-card page-card" aria-labelledby="nameTitle">
+                <h2 id="nameTitle" data-i18n="account.name-title">Display name</h2>
+                <form class="u-mt-1" id="nameForm" novalidate>
+                    <label class="field">
+                        <span data-i18n="field.display-name">Display name</span>
+                        <input id="nameInput" type="text" autocomplete="nickname" maxlength="60" required>
+                    </label>
+                    <div class="actions inline"><button class="btn" type="submit" id="nameSubmit"><span data-i18n="account.name-save">Save display name</span></button></div>
+                    <div class="callout danger" id="nameError" role="alert"></div>
+                </form>
+            </section>
+
             <section class="glass-card page-card" id="deleteBox" hidden aria-labelledby="deleteTitle">
                 <h2 id="deleteTitle" data-i18n="account.delete-title">Delete my account</h2>
                 <p class="muted small" data-i18n="account.delete-lede">Removes your account, your RSVPs and your notification settings for good.</p>
                 <div class="actions inline"><button class="btn btn-danger" type="button" id="deleteAccount"><span data-icon="trash"></span><span data-i18n="account.delete">Delete my account</span></button></div>
             </section>
+            </div>
         </div>
 
         <section class="glass-card page-card loading-card" id="accountLoading" aria-busy="true">

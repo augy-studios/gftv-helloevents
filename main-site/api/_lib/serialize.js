@@ -30,7 +30,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, datesAnnounced, utcToWall, storedLocations } from './event-rules.js';
+import { isOver, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers } from './event-rules.js';
 import { roleOf, canManage } from './users.js';
 import { coverUrl } from './covers.js';
 
@@ -120,10 +120,12 @@ export function selfView(user) {
   };
 }
 
-// An attendee, for an editor's attendee list: a name, a username and
-// whether it is a staff or a public account. Never an email or an id.
-// row: { created_at, account: { kind, username, display_name, staff: {...} } }
-export function attendeeView(row) {
+// An attendee, for an editor's attendee list: a name, a username, whether
+// it is a staff or a public account, and the meals they are coming for
+// (empty for the whole event). Never an email or an id.
+// row: { created_at, meals, account: { kind, username, display_name, staff: {...} } }
+// event: the event's row, for the meals it still offers.
+export function attendeeView(row, event = {}) {
   let account = row.account;
   if (account === null || account === undefined) {
     account = {};
@@ -148,6 +150,7 @@ export function attendeeView(row) {
     username: missingToNull(person.username),
     displayName,
     staff: isStaff,
+    meals: offeredMeals(event, row.meals),
     rsvpAt: row.created_at,
   };
 }
@@ -268,10 +271,92 @@ function managedLocation(location) {
   };
 }
 
-// The count of people going, from an embedded aggregate
-// (gftvevents_attendees(count)) or a number.
+// The meals an event offers for meal-only RSVPs, in order, for the event
+// page: { id, label, limit, left }, label null for breakfast, lunch and
+// dinner (the page names those in the reader's language); limit and the
+// places left null for a meal with no limit. row.meal_taken holds how many
+// are coming for each (events.js withMealCounts).
+function mealsView(row) {
+  let taken = row.meal_taken;
+  if (taken === null || taken === undefined) {
+    taken = {};
+  }
+  return storedMeals(row).map((meal) => {
+    let left = null;
+    if (meal.limit !== null) {
+      left = Math.max(0, meal.limit - numberOrZero(taken[meal.id]));
+    }
+    return { id: meal.id, label: meal.label, limit: meal.limit, left };
+  });
+}
+
+// Of the meals someone chose (ids), the ones the event still offers, in its
+// order. A meal the editor has stopped offering is left out, and someone
+// left with none is coming to the whole event (migrations/007).
+export function offeredMeals(row, chosen) {
+  if (!Array.isArray(chosen) || chosen.length === 0) {
+    return [];
+  }
+  return storedMeals(row)
+    .map((meal) => meal.id)
+    .filter((id) => chosen.includes(id));
+}
+
+// The ticket tiers on the event page, in order, while they are on (a paid
+// event only; none otherwise). Each is its name, its price (null while the
+// price is hidden: the page then shows the tiers without prices), its own
+// benefits, and, when it includes the tier before it, either those benefits
+// in full (includedBenefits, everything the earlier tiers give, in order)
+// or that tier's name (includesTier), as the editor chose.
+function tiersView(row) {
+  if (row.tiers_enabled !== true || row.price_type !== 'paid') {
+    return [];
+  }
+  const tiers = storedTiers(row);
+  const priceShown = row.price_hidden !== true;
+  // Everything each tier gives, its own benefits after the ones it includes.
+  const everything = [];
+  return tiers.map((tier, index) => {
+    let included = [];
+    if (tier.includes_previous) {
+      included = everything[index - 1];
+    }
+    everything.push([...included, ...tier.benefits]);
+    let includedBenefits = [];
+    let includesTier = null;
+    if (tier.includes_previous && tier.previous_display === 'full') {
+      includedBenefits = included;
+    } else if (tier.includes_previous) {
+      includesTier = tiers[index - 1].name;
+    }
+    let price = null;
+    if (priceShown) {
+      price = tier.price;
+    }
+    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier };
+  });
+}
+
+// One tier on the edit form, its price and benefits as the fields hold
+// them (the benefits one per line).
+function managedTier(tier) {
+  return {
+    name: tier.name,
+    price: String(tier.price),
+    benefits: tier.benefits.join('\n'),
+    includesPrevious: tier.includes_previous,
+    previousDisplay: tier.previous_display,
+  };
+}
+
+// The count of people going to the whole event (who take its spaces), from
+// an embedded aggregate (gftvevents_full_attendees(count), migrations/009;
+// gftvevents_attendees(count) before it) or a number.
 export function goingCount(row) {
-  const embedded = row.gftvevents_attendees;
+  let embedded = row.gftvevents_full_attendees;
+  if (embedded === undefined) {
+    embedded = row.gftvevents_attendees;
+  }
   if (Array.isArray(embedded)) {
     const aggregate = embedded[0];
     let count;
@@ -332,11 +417,13 @@ export function publicEventCard(row, now = Date.now()) {
   };
 }
 
-// The event page. viewer: { signedIn, going, canManage }. Only call this for
-// a released event, or for an editor.
+// The event page. viewer: { signedIn, going, meals, canManage } (meals: the
+// ones this person is coming for, empty for the whole event). Only call this
+// for a released event, or for an editor.
 //
 // It is the card plus the price note, the spaces left, the descriptions (in
-// English and Chinese), the organiser, the link and every location. People going
+// English and Chinese), the organiser, the link, every location, the ticket
+// tiers and the meals people can come to on their own. People going
 // and editors ("insiders") also get attendees-only addresses and map links,
 // and the online link; everyone else gets only a flag saying there is one
 // for attendees.
@@ -370,6 +457,10 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (row.is_online && row.online_url && !insider) {
     onlineUrlForAttendees = true;
   }
+  let myMeals = [];
+  if (viewer.going === true) {
+    myMeals = offeredMeals(row, viewer.meals);
+  }
 
   return {
     ...card,
@@ -386,9 +477,12 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       onlineUrl,
       onlineUrlForAttendees,
     },
+    tiers: tiersView(row),
+    meals: mealsView(row),
     viewer: {
       signedIn: viewer.signedIn === true,
       going: viewer.going === true,
+      meals: myMeals,
       canManage: viewer.canManage === true,
     },
   };
@@ -469,7 +563,10 @@ export function managedEvent(row) {
     priceMax: stringOrBlank(row.price_max),
     currency: emptyToBlank(row.currency),
     priceNote: emptyToBlank(row.price_note),
+    tiersEnabled: row.tiers_enabled === true,
+    ticketTiers: storedTiers(row).map(managedTier),
     rsvpOpen: row.rsvp_open !== false,
+    meals: storedMeals(row).map((meal) => ({ id: meal.id, label: emptyToBlank(meal.label), limit: stringOrBlank(meal.limit) })),
     staffNotes: emptyToBlank(row.staff_notes),
   };
 }

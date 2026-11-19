@@ -28,8 +28,9 @@ const DEFAULTS = {
     capacity: null, rsvp_open: true, staff_notes: null, created_by: null, updated_by: null, updated_at: now(),
     description_zh: null, start_time_tbc: false, end_time_tbc: false, locations: [],
     cover_image_url: null, cover_image_path: null, announced_at: null,
-    notice_base: null, notice_due_at: null,
+    notice_base: null, notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
   }),
+  gftvevents_attendees: () => ({ meals: [] }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
   gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
@@ -73,6 +74,8 @@ const FKS = {
   gftvevents_telegram_links: [toAccount('user_id')],
   gftvevents_telegram_link_tokens: [toAccount('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
   gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id')],
+  // migrations/009: a view of the attendees coming to the whole event.
+  gftvevents_full_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }],
   gftvevents_audit_logs: [toAccount('actor_id', 'set null'), { column: 'event_id', parent: 'gftvevents_events', onDelete: 'set null' }],
   gftvhello_backup_codes: [{ column: 'user_id', parent: 'gftvhello_users', onDelete: 'cascade' }],
   // migrations/003
@@ -105,7 +108,11 @@ function likeToRegex(pattern, flags) {
 
 export function createFakeDb() {
   const tables = {};
-  const table = (name) => (tables[name] ??= []);
+  // Views (migrations/009), read-only, worked out from their table.
+  const VIEWS = {
+    gftvevents_full_attendees: () => (tables.gftvevents_attendees ?? []).filter((r) => !(r.meals ?? []).length),
+  };
+  const table = (name) => (VIEWS[name] ? VIEWS[name]() : (tables[name] ??= []));
 
   function project(name, row, select) {
     if (!select || select.trim() === '*') return { ...row };
@@ -304,18 +311,39 @@ export function createFakeDb() {
       row.hits += 1;
       return row.hits;
     },
-    // The same rules as the SQL function in migrations/001.
-    gftvevents_rsvp({ p_event_id, p_user_id }) {
+    // The same rules as the SQL function in migrations/001, 007, 009 and 010.
+    gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [] }) {
+      const meals = p_meals ?? [];
       const e = table('gftvevents_events').find((r) => r.id === p_event_id);
       if (!e) return 'not_found';
       if (!['published', 'cancelled'].includes(e.status) || (e.publish_at && e.publish_at > now())) return 'not_found';
-      if (e.status === 'cancelled' || !e.rsvp_open) return 'rsvp_closed';
-      if (e.last_at && e.last_at < now()) return 'event_over';
+      if (e.status === 'cancelled') return 'rsvp_closed';
       const going = table('gftvevents_attendees').filter((r) => r.event_id === p_event_id);
-      if (going.some((r) => r.user_id === p_user_id)) return 'already';
-      if (e.capacity !== null && going.length >= e.capacity) return 'event_full';
-      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now() });
+      const mine = going.find((r) => r.user_id === p_user_id);
+      const current = mine ? (mine.meals ?? []) : null;
+      if (!e.rsvp_open && !mine) return 'rsvp_closed';
+      if (e.last_at && e.last_at < now()) return 'event_over';
+      if (mine && JSON.stringify(current) === JSON.stringify(meals)) return 'already';
+      if (!e.rsvp_open && !meals.length) return 'rsvp_closed';
+      const full = going.filter((r) => !(r.meals ?? []).length);
+      if (!meals.length && e.capacity !== null && (!mine || current.length) && full.length >= e.capacity) return 'event_full';
+      for (const option of e.meal_options ?? []) {
+        if (typeof option.limit !== 'number' || !meals.includes(option.id) || (mine && current.includes(option.id))) continue;
+        if (going.filter((r) => (r.meals ?? []).includes(option.id)).length >= option.limit) return 'meal_full';
+      }
+      if (mine) {
+        mine.meals = [...meals];
+        return 'changed';
+      }
+      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals] });
       return 'ok';
+    },
+    gftvevents_meal_counts({ p_event_id }) {
+      const counts = new Map();
+      for (const r of table('gftvevents_attendees').filter((a) => a.event_id === p_event_id)) {
+        for (const meal of r.meals ?? []) counts.set(meal, (counts.get(meal) ?? 0) + 1);
+      }
+      return [...counts].map(([meal, taken]) => ({ meal, taken }));
     },
   };
 

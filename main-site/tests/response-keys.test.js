@@ -144,7 +144,9 @@ const LOCATION = ['label', 'customLabel', 'venueName', 'city', 'country', 'addre
 const DETAIL = [
   ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
-  ...nest('viewer', ['signedIn', 'going', 'canManage']),
+  ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier']),
+  ...listOf('meals', ['id', 'label', 'limit', 'left']),
+  ...nest('viewer', ['signedIn', 'going', 'meals', 'canManage']),
 ];
 
 // /manage: a row of the event list, the edit form, an attendee.
@@ -154,10 +156,12 @@ const EDITOR = [
   'id', 'slug', 'title', 'kind', 'status', 'datesHidden', 'timezone', 'capacity', 'summary', 'description',
   'descriptionZh', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
-  'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'rsvpOpen', 'staffNotes',
+  'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
+  ...listOf('ticketTiers', ['name', 'price', 'benefits', 'includesPrevious', 'previousDisplay']), 'rsvpOpen',
+  ...listOf('meals', ['id', 'label', 'limit']), 'staffNotes',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
-const ATTENDEE = ['username', 'displayName', 'staff', 'rsvpAt'];
+const ATTENDEE = ['username', 'displayName', 'staff', 'meals', 'rsvpAt'];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];
 const FILTER = ['id', 'term'];
@@ -373,7 +377,12 @@ test('a reset for a public account lists its ways back in, and each step answers
 // ---------------------------------------------------------------------------
 
 test('event cards, the event page and an RSVP carry only what those pages show', async () => {
-  addEvent({ slug: 'paid-meet' });
+  addEvent({
+    slug: 'paid-meet',
+    meal_options: [{ id: 'lunch', label: null }, { id: 'm-tea123', label: 'High tea' }],
+    tiers_enabled: true,
+    ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
+  });
   addEvent({ slug: 'tba-meet', dates_hidden: true, starts_at: null, price_type: 'free', price_min: null, price_max: null, currency: null });
 
   assertKeys(await on().call(feed, { query: { when: 'upcoming' } }), ['nextOffset', ...listOf('events', CARD)]);
@@ -382,6 +391,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
 
   const { b } = await member();
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true } }), nest('event', DETAIL));
+  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, meals: ['lunch'] } }), nest('event', DETAIL));
   assertKeys(await b.call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
   assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', nest('event', CARD))]);
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: false } }), nest('event', DETAIL));
@@ -400,6 +410,8 @@ test('the event list, the edit form, attendees and the cover answer only what /m
       event: {
         title: 'Mega Con', description: 'About the con.', descriptionZh: '关于大会。', kind: 'convention', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', startTime: '10:00',
         priceType: 'free', capacity: '50', locations: [{ label: 'event', venueName: 'Expo Hall', city: 'Singapore', country: 'SG' }],
+        meals: [{ id: 'lunch' }, { id: 'm-tea123', label: 'High tea' }],
+        ticketTiers: [{ name: 'Basic', price: '0', benefits: 'Entry' }],
       },
     },
 
@@ -412,6 +424,7 @@ test('the event list, the edit form, attendees and the cover answer only what /m
   await otter.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
   await editor.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
   assertKeys(await editor.call(manage), listOf('events', SUMMARY));
+  assertKeys(await editor.call(manage, { query: { checkSlug: 'mega-con', id } }), ['free']);
   assertKeys(await editor.call(manage, { query: { id } }), [...nest('event', EDITOR), ...listOf('attendees', ATTENDEE)]);
 
   assertKeys(await editor.call(cover, { method: 'POST', body: { id, image: await webp() } }), nest('event', COVER));

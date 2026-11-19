@@ -82,6 +82,7 @@
             </header>
 
             <div class="event-layout">
+                <div class="event-main">
                 <section class="glass-card event-section">
                     <div class="row between">
                         <h2 data-i18n="event.about">About this event</h2>
@@ -94,6 +95,12 @@
                     <p class="muted small u-mt-1" id="eventOrganiser" hidden></p>
                 </section>
 
+                <section class="glass-card event-section" id="ticketsBox" hidden aria-labelledby="ticketsTitle">
+                    <h2 id="ticketsTitle" data-i18n="event.tickets">Tickets</h2>
+                    <div class="tier-grid" id="ticketTiers"></div>
+                </section>
+                </div>
+
                 <aside class="glass-card event-aside" aria-labelledby="factsTitle">
                     <h2 class="visually-hidden" id="factsTitle" data-i18n="event.facts">Details</h2>
                     <dl class="facts">
@@ -101,10 +108,27 @@
                         <div><dt><span data-icon="map"></span><span data-i18n="event.where">Where</span></dt><dd id="factWhere"></dd></div>
                         <div><dt><span data-icon="ticket"></span><span data-i18n="event.price">Price</span></dt><dd id="factPrice"></dd></div>
                         <div><dt><span data-icon="users"></span><span data-i18n="event.going-label">Going</span></dt><dd id="factGoing"></dd></div>
+                        <div id="factMealsRow" hidden><dt><span data-icon="clock"></span><span data-i18n="event.meals-label">Just for a meal</span></dt><dd id="factMeals"></dd></div>
                     </dl>
 
                     <div class="rsvp" id="rsvpBox">
-                        <p class="rsvp-status" id="rsvpStatus" hidden><span data-icon="check"></span><span data-i18n="event.you-are-going">You are going</span></p>
+                        <p class="rsvp-status" id="rsvpStatus" hidden><span data-icon="check"></span><span id="rsvpStatusText">You are going</span></p>
+                        <fieldset class="rsvp-meals" id="rsvpMeals" hidden>
+                            <legend class="visually-hidden" data-i18n="event.meals-legend">What you are coming for</legend>
+                            <label class="check">
+                                <input type="radio" name="rsvpFor" value="event" id="rsvpForEvent" checked>
+                                <span data-i18n="event.for-event">The whole event</span>
+                            </label>
+                            <label class="check">
+                                <input type="radio" name="rsvpFor" value="meals" id="rsvpForMeals">
+                                <span data-i18n="event.for-meals">I only want to show up for the meal</span>
+                            </label>
+                            <div class="rsvp-meal-list" id="rsvpMealList" role="group" aria-labelledby="rsvpMealListLabel" hidden>
+                                <span class="small muted" id="rsvpMealListLabel" data-i18n="event.meals-pick">Which meals?</span>
+                                <div id="rsvpMealChecks"></div>
+                            </div>
+                            <p class="small muted" id="rsvpMealsHint" hidden data-i18n="event.meals-pick-one">Tick at least one meal.</p>
+                        </fieldset>
                         <button class="btn btn-primary btn-block" type="button" id="rsvpBtn" hidden></button>
                         <a class="btn btn-primary btn-block" id="rsvpSignIn" href="/login" hidden><span data-icon="lock"></span><span data-i18n="event.sign-in-to-rsvp">Sign in to RSVP</span></a>
                         <p class="small muted" id="rsvpNote"></p>

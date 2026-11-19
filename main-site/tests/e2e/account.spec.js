@@ -1,9 +1,9 @@
-// The account page of a public account with 2FA: the profile, the events
-// it is going to, notifications, and the Security section, including each
-// passkey's "Last used" line (help desk #18, job 01).
+// The account page of a public account with 2FA: the profile, then its tabs
+// (the events it is going to, notifications, Security with each passkey's
+// "Last used" line (help desk #18, job 01), and Profile).
 
-import { test, expect, serverOrigin, signInWithBackupCode } from './fixtures.js';
-import { EVENTS, PASSKEY_MEMBER, PASSKEYS, BACKUP_CODES } from './seed.js';
+import { test, expect, serverOrigin, signInWithBackupCode, signInAsStaff } from './fixtures.js';
+import { EVENTS, PASSKEY_MEMBER, PASSKEYS, BACKUP_CODES, STAFF } from './seed.js';
 
 test('the account page shows the profile, RSVPs, and when each passkey was last used', async ({ page }) => {
   await page.goto('/login?next=/account');
@@ -12,18 +12,23 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(page.locator('#accountView')).toBeVisible();
   await expect(page.locator('#accountLoading')).toBeHidden();
 
-  // Who you are. Public accounts can rename themselves and delete the account.
+  // Who you are, above the tabs.
   await expect(page.locator('#displayName')).toHaveText(PASSKEY_MEMBER.displayName);
   await expect(page.locator('#username')).toHaveText(PASSKEY_MEMBER.username);
   await expect(page.locator('#role')).toHaveText('Member');
-  await expect(page.locator('#nameInput')).toHaveValue(PASSKEY_MEMBER.displayName);
-  await expect(page.locator('#deleteBox')).toBeVisible();
+  const tabs = page.getByRole('tab');
+  await expect(tabs).toHaveText(['My events', 'Notifications', 'Security', 'Profile']);
 
-  // The events you are going to.
+  // The events you are going to, in the first tab; the others are hidden.
+  await expect(page.getByRole('tab', { name: 'My events' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#panel-security')).toBeHidden();
   await expect(page.locator('#rsvpUpcoming .event-card-title')).toHaveText([EVENTS.furmeet.title]);
   await expect(page.locator('#rsvpEmpty')).toBeHidden();
 
   // Notifications: the stored choices, and push offered on this device.
+  await page.getByRole('tab', { name: 'Notifications' }).click();
+  await expect(page).toHaveURL(/\/account#notifications$/);
+  await expect(page.locator('#panel-going')).toBeHidden();
   await expect(page.locator('#prefUpdates')).toBeChecked();
   await expect(page.locator('#prefReminders')).toBeChecked();
   await expect(page.locator('#prefNewEvents')).not.toBeChecked();
@@ -32,6 +37,7 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(page.locator('#notifyTelegramBox')).toBeHidden();
 
   // Security.
+  await page.getByRole('tab', { name: 'Security' }).click();
   await expect(page.locator('#securityLede')).toHaveText('A second step is optional for your account, but it keeps it safe if your password leaks.');
   await expect(page.locator('#totpState')).toHaveText('Not set up.');
   const passkeys = page.locator('#passkeyList li');
@@ -50,4 +56,23 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   // One of the ten backup codes went on signing in.
   await expect(page.locator('#backupState')).toHaveText('9 unused backup codes from this site.');
   await expect(page.locator('#telegramBox')).toBeHidden();
+
+  // Public accounts can rename themselves and delete the account, in Profile.
+  await page.getByRole('tab', { name: 'Profile' }).click();
+  await expect(page.locator('#nameInput')).toHaveValue(PASSKEY_MEMBER.displayName);
+  await expect(page.locator('#deleteBox')).toBeVisible();
+
+  // A reload opens the same tab, from the address.
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#nameInput')).toBeVisible();
+});
+
+test('a staff account has no Profile tab', async ({ page }) => {
+  await page.goto('/login?next=/account');
+  await signInAsStaff(page, STAFF.username);
+  await page.waitForURL(`${serverOrigin()}/account`);
+  await expect(page.getByRole('tab')).toHaveText(['My events', 'Notifications', 'Security']);
+  await page.goto('/account#profile');
+  await expect(page.getByRole('tab', { name: 'My events' })).toHaveAttribute('aria-selected', 'true');
 });

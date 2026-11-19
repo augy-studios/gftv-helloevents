@@ -1,11 +1,17 @@
-// Turning a chosen picture into a compressed WebP in the browser, before it
-// is uploaded (api/manage/cover.js checks and re-encodes it again).
+// Turning a chosen picture into a compressed WebP cover in the browser,
+// before it is uploaded (api/manage/cover.js checks and re-encodes it again).
 //
-// The longest side is cut to MAX_SIDE, then quality steps down until the
-// file fits MAX_BYTES. A browser that cannot encode WebP from a canvas
-// (canvas.toBlob gives back PNG instead) is told so rather than sending
-// something else.
+// Every cover is cut to the shape of the event cards' thumbnail, 16:9
+// (COVER_RATIO): decodeCover reads the file, the crop dialog
+// (cover-crop.js) picks the part to keep, and cropToWebp draws that part at
+// most MAX_SIDE wide, then steps the quality down until the file fits
+// MAX_BYTES. A browser that cannot encode WebP from a canvas (canvas.toBlob
+// gives back PNG instead) is told so rather than sending something else.
 
+export const COVER_RATIO = 16 / 9;
+// The event page's banner is wider (.event-cover.large in style.css): it
+// shows the middle band of a cover, trimming its top and bottom.
+export const BANNER_RATIO = 21 / 9;
 export const MAX_SIDE = 1600;
 export const MAX_BYTES = 1_000_000;
 export const MIN_WIDTH = 320;
@@ -27,12 +33,17 @@ function toDataUrl(blob) {
   });
 }
 
-// { dataUrl, width, height, bytes } for a File from an <input type=file>.
-// Refuses anything that is not a picture, over 40 MB, or too small once
-// scaled; draws it on a canvas at most MAX_SIDE on its longest side; then
-// tries each quality in QUALITIES, best first, and keeps the first WebP that
-// fits MAX_BYTES.
-export async function coverToWebp(file) {
+// The widest 16:9 area that fits in a picture of this size, in its pixels:
+// the crop at no zoom.
+export function widestCrop(width, height) {
+  const cropWidth = Math.min(width, height * COVER_RATIO);
+  return { width: cropWidth, height: cropWidth / COVER_RATIO };
+}
+
+// The decoded picture (an ImageBitmap, turned the way its camera meant) for
+// a File from an <input type=file>. Refuses anything that is not a picture,
+// over 40 MB, or too small to give a cover MIN_WIDTH by MIN_HEIGHT.
+export async function decodeCover(file) {
   if (!file || !String(file.type).startsWith('image/')) {
     throw fail('cover_invalid');
   }
@@ -45,21 +56,26 @@ export async function coverToWebp(file) {
   } catch {
     throw fail('cover_invalid');
   }
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
-  const width = Math.round(bitmap.width * scale);
-  const height = Math.round(bitmap.height * scale);
-  if (width < MIN_WIDTH || height < MIN_HEIGHT) {
+  if (widestCrop(bitmap.width, bitmap.height).width < MIN_WIDTH) {
+    bitmap.close();
     throw fail('cover_too_small');
   }
+  return bitmap;
+}
 
+// { dataUrl, width, height, bytes } for the part of the picture inside crop
+// ({ x, y, width, height } in its pixels, 16:9): drawn at most MAX_SIDE wide,
+// then each quality in QUALITIES tried, best first, keeping the first WebP
+// that fits MAX_BYTES.
+export async function cropToWebp(bitmap, crop) {
+  const width = Math.max(MIN_WIDTH, Math.min(MAX_SIDE, Math.round(crop.width)));
+  const height = Math.round(width / COVER_RATIO);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
-  // Free the decoded picture, in browsers that have close().
-  if (bitmap.close !== null && bitmap.close !== undefined) {
-    bitmap.close();
-  }
+  const context = canvas.getContext('2d');
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(bitmap, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
 
   for (const quality of QUALITIES) {
     const blob = await toBlob(canvas, quality);

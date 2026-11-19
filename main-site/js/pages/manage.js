@@ -17,12 +17,16 @@ import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
 import { iconNode } from '../icons.js';
-import { coverToWebp } from '../cover-upload.js';
+import { decodeCover, cropToWebp } from '../cover-upload.js';
+import { cropCover } from '../cover-crop.js';
 import { startTools } from '../manage-tools.js';
 import { startTabs } from '../tabs.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
+import { setMeals, readMeals, startMeals, relabelMeals, MEALS_CHANGED } from '../manage-meals.js';
+import { setTiers, readTiers, startTiers, relabelTiers, addTier, TIERS_CHANGED } from '../manage-tiers.js';
+import { mealLabel } from '../format.js';
 
 const byId = (id) => document.getElementById(id);
 const form = byId('eventForm');
@@ -30,13 +34,13 @@ const form = byId('eventForm');
 const PAGE_SIZE = 10;
 
 // The form's plain fields, by the name the server takes. The time zone,
-// currency and locations have their own handling below.
+// currency, locations, ticket tiers and meals have their own handling below.
 const TEXT_FIELDS = [
-  'title', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
+  'title', 'slug', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'rsvpOpen'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -52,6 +56,8 @@ const BLANK = {
   rsvpOpen: true,
   timezone: browserTimeZone,
   locations: [{ label: 'event' }],
+  meals: [],
+  ticketTiers: [],
 };
 
 let currentUser = null;
@@ -59,7 +65,13 @@ let events = [];
 let page = 0; // the list page shown, from 0
 let editing = null; // { id, slug } of the event in the form, or null for a new one
 let attendees = [];
+// The meals the open event offers as last saved ([{ id, label }]), for
+// naming the meals attendees are coming for.
+let savedMeals = [];
 let cover = { url: '', has: false };
+// The picture last chosen for this event's cover in this visit, and the crop
+// it was uploaded with, so "Adjust crop" can crop it again: { bitmap, crop }.
+let coverSource = null;
 let tabs = null;
 // The list is reloaded when its tab is opened after a save changed it.
 let listStale = false;
@@ -71,6 +83,7 @@ let listStale = false;
 let lastSaved = '';
 let saving = null;
 let again = false;
+let againForced = false;
 let failed = null;
 let refused = '';
 
@@ -163,6 +176,7 @@ function setForm(values) {
   }
   descriptionSwitch.select('en');
   markMissingDescriptions();
+  showSlugTaken(null);
   fillTimeZoneSelect(byId('f-timezone'), values.timezone);
   byId('f-currency').value = currencyLabel(values.currency);
   let locations = values.locations;
@@ -170,11 +184,22 @@ function setForm(values) {
     locations = [];
   }
   setLocations(locations);
+  let tiers = values.ticketTiers;
+  if (!Array.isArray(tiers)) {
+    tiers = [];
+  }
+  setTiers(tiers);
+  savedMeals = [];
+  if (Array.isArray(values.meals)) {
+    savedMeals = values.meals;
+  }
+  setMeals(savedMeals);
   let coverUrl = values.coverImageUrl;
   if (!coverUrl) {
     coverUrl = '';
   }
   cover = { url: coverUrl, has: values.hasCover === true };
+  forgetCoverSource();
   renderCover();
   syncDependent();
   lastSaved = JSON.stringify(readForm());
@@ -200,10 +225,53 @@ function renderCover() {
     canRemove = true;
   }
   byId('coverRemove').hidden = !canRemove;
+  let canAdjust = false;
+  if (canRemove && coverSource) {
+    canAdjust = true;
+  }
+  byId('coverAdjust').hidden = !canAdjust;
   byId('coverError').textContent = '';
 }
 
-byId('coverFile').addEventListener('change', () => {
+// Lets go of the picture kept for "Adjust crop".
+function forgetCoverSource() {
+  if (coverSource) {
+    coverSource.bitmap.close();
+  }
+  coverSource = null;
+}
+
+// Opens the crop dialog for a picture (at start, an earlier crop, or the
+// middle), then uploads the part chosen. Closing the dialog uploads nothing.
+async function cropAndUpload(bitmap, start = null) {
+  const crop = await cropCover(bitmap, start);
+  if (!crop || !editing) {
+    return false;
+  }
+  const done = await withBusy(byId('coverPick'), byId('coverError'), async () => {
+    const { dataUrl } = await cropToWebp(bitmap, crop);
+    const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl });
+    cover = { url: data.event.coverImageUrl, has: data.event.hasCover };
+    if (coverSource && coverSource.bitmap !== bitmap) {
+      forgetCoverSource();
+    }
+    coverSource = { bitmap, crop };
+    renderCover();
+    byId('manageNotice').textContent = translate('manage.cover-saved');
+    return true;
+  });
+  return done === true;
+}
+
+byId('coverAdjust').addEventListener('click', () => {
+  if (coverSource) {
+    cropAndUpload(coverSource.bitmap, coverSource.crop);
+  }
+});
+
+// A picture chosen is read, then cropped to the cards' 16:9 in the crop
+// dialog (starting on its middle), then uploaded.
+byId('coverFile').addEventListener('change', async () => {
   const files = byId('coverFile').files;
   let file;
   if (files !== null && files !== undefined) {
@@ -213,19 +281,21 @@ byId('coverFile').addEventListener('change', () => {
   if (!file || !editing) {
     return;
   }
-  withBusy(byId('coverPick'), byId('coverError'), async () => {
-    const { dataUrl } = await coverToWebp(file);
-    const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl });
-    cover = { url: data.event.coverImageUrl, has: data.event.hasCover };
-    renderCover();
-    byId('manageNotice').textContent = translate('manage.cover-saved');
-  });
+  const bitmap = await withBusy(byId('coverPick'), byId('coverError'), () => decodeCover(file));
+  if (!bitmap) {
+    return;
+  }
+  const uploaded = await cropAndUpload(bitmap);
+  if (!uploaded && (!coverSource || coverSource.bitmap !== bitmap)) {
+    bitmap.close();
+  }
 });
 
 byId('coverRemove').addEventListener('click', () => {
   withBusy(byId('coverRemove'), byId('coverError'), async () => {
     const data = await post('/api/manage/cover', { id: editing.id, remove: true });
     cover = { url: '', has: data.event.hasCover };
+    forgetCoverSource();
     renderCover();
   });
 });
@@ -241,15 +311,29 @@ function readForm() {
   values.timezone = byId('f-timezone').value;
   values.currency = currencyCodeFrom(byId('f-currency').value);
   values.locations = readLocations();
+  values.ticketTiers = readTiers();
+  values.meals = readMeals();
   return values;
 }
 
-// Fields that only mean something with another one switched on.
+// Fields that only mean something with another one switched on. Tiers are
+// for a paid event, and while they are on the price range comes from them.
 function syncDependent() {
   const paid = byId('f-priceType').value === 'paid';
-  for (const name of ['currency', 'priceMin', 'priceMax']) {
-    byId(`f-${name}`).disabled = !paid;
+  byId('f-currency').disabled = !paid;
+  byId('f-tiersEnabled').disabled = !paid;
+  let tiersOn = false;
+  if (paid && byId('f-tiersEnabled').checked) {
+    tiersOn = true;
   }
+  for (const name of ['priceMin', 'priceMax']) {
+    let rangeOff = tiersOn;
+    if (!paid) {
+      rangeOff = true;
+    }
+    byId(`f-${name}`).disabled = rangeOff;
+  }
+  byId('tierSection').hidden = !tiersOn;
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
 }
 
@@ -308,8 +392,18 @@ function savesOnChange(element) {
 }
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline'].includes(event.target.id)) {
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled'].includes(event.target.id)) {
     syncDependent();
+  }
+  // Tiers switched on with none yet: a first card to fill in.
+  if (event.target.id === 'f-tiersEnabled' && event.target.checked && readTiers().length === 0) {
+    addTier();
+  }
+  // A link typed with capitals, spaces or other signs is tidied into one
+  // the server takes before it is saved; a new one clears the "taken" note.
+  if (event.target.id === 'f-slug') {
+    event.target.value = tidySlug(event.target.value);
+    showSlugTaken(null);
   }
   // A currency typed as a code or a name shows as "SGD — Singapore Dollar".
   if (event.target.id === 'f-currency') {
@@ -320,23 +414,99 @@ form.addEventListener('change', (event) => {
     }
   }
   if (savesOnChange(event.target)) {
-    autosave();
+    // A box ticked or a choice made in a tier card saves even while the
+    // card is still being filled in.
+    autosave({ force: event.target.closest('.tier-edit-card') !== null });
   }
 });
 
-// Leaving a field saves it. The cover picture is uploaded on its own.
+// Whether the editor is in a ticket tier card (focus is in it, or moving
+// into it): a tier is saved once its card is left, so it is not refused for
+// its price while its name is still being typed.
+function inTierCard(element) {
+  if (!element || typeof element.closest !== 'function') {
+    return false;
+  }
+  return element.closest('.tier-edit-card') !== null;
+}
+
+// Leaving a field saves it, unless focus moves into a tier card (it is saved
+// when that card is left). The cover picture is uploaded on its own.
 form.addEventListener('focusout', (event) => {
   if (event.target.id === 'coverFile') {
+    return;
+  }
+  if (inTierCard(event.relatedTarget)) {
     return;
   }
   autosave();
 });
 form.addEventListener(LOCATIONS_CHANGED, () => autosave());
+form.addEventListener(MEALS_CHANGED, () => autosave());
+form.addEventListener(TIERS_CHANGED, () => autosave({ force: true }));
 
 // Enter in a text field saves at once, rather than sending the form.
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   autosave();
+});
+
+// The event link as the server takes it: lowercase letters, numbers and
+// single hyphens, at most 60 characters ('' to make it from the title).
+function tidySlug(value) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+    .replace(/-+$/g, '');
+}
+
+// The length of the random ending "Add eight random characters" puts on a
+// taken link, and the letters it is made of.
+const SLUG_ENDING = 8;
+const SLUG_LETTERS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+function randomEnding() {
+  const bytes = crypto.getRandomValues(new Uint8Array(SLUG_ENDING));
+  return [...bytes].map((byte) => SLUG_LETTERS[byte % SLUG_LETTERS.length]).join('');
+}
+
+// The note under the link field when another event already uses it (slug:
+// the link that was refused), with its two ways on; null hides it.
+function showSlugTaken(slug) {
+  byId('slugTaken').hidden = slug === null;
+  if (slug !== null) {
+    byId('slugTakenText').textContent = translate('manage.slug-taken', { link: `events.globalfurry.tv/e/${slug}` });
+  }
+}
+
+// The taken link with a random ending ("riverside-meet-k3x9q2ab"), cut so it
+// still fits in 60 characters, then saved.
+byId('slugRandom').addEventListener('click', () => {
+  const field = byId('f-slug');
+  let base = tidySlug(field.value);
+  if (!base) {
+    base = tidySlug(byId('f-title').value);
+  }
+  base = base.slice(0, 60 - SLUG_ENDING - 1).replace(/-+$/g, '');
+  let slug = randomEnding();
+  if (base) {
+    slug = `${base}-${slug}`;
+  }
+  field.value = slug;
+  showSlugTaken(null);
+  autosave();
+  field.focus();
+});
+
+// Back to the link field to try another; it is checked and saved when the
+// field is left.
+byId('slugEdit').addEventListener('click', () => {
+  byId('f-slug').focus();
+  byId('f-slug').select();
 });
 
 // The pill at the bottom of the form: saving, saved, why a save was refused,
@@ -404,13 +574,22 @@ function applySaved(saved, sent) {
 
 // Saves the form if it changed since the last save, one save at a time: a
 // change while one is on its way is saved straight after it. Resolves once
-// nothing is left to save (or a save was refused).
-function autosave() {
+// nothing is left to save (or a save was refused). While the editor is in a
+// tier card it waits for the card to be left, unless force says not to (a
+// change made in the card itself, or leaving or hiding the page).
+function autosave({ force = false } = {}) {
   if (form.hidden) {
+    return Promise.resolve();
+  }
+  if (!force && !saving && inTierCard(document.activeElement)) {
+    renderStatus();
     return Promise.resolve();
   }
   if (saving) {
     again = true;
+    if (force) {
+      againForced = true;
+    }
     return saving;
   }
   const sent = readForm();
@@ -443,7 +622,9 @@ function autosave() {
     renderStatus();
     if (again) {
       again = false;
-      return autosave();
+      const forced = againForced;
+      againForced = false;
+      return autosave({ force: forced });
     }
     return undefined;
   });
@@ -452,6 +633,26 @@ function autosave() {
 }
 
 async function saveForm(sent, body) {
+  // A link the editor typed is checked first, so a taken one is told about
+  // (with its two ways on) without trying to save it.
+  if (sent.slug && (!editing || sent.slug !== editing.slug)) {
+    let check = { free: true };
+    try {
+      let query = `checkSlug=${encodeURIComponent(sent.slug)}`;
+      if (editing) {
+        query = `${query}&id=${encodeURIComponent(editing.id)}`;
+      }
+      check = await api(`/api/manage/events?${query}`);
+    } catch {
+      // Saving tells the same thing, if the check could not.
+    }
+    if (!check.free) {
+      failed = translate('error.slug_taken');
+      refused = body;
+      showSlugTaken(sent.slug);
+      return;
+    }
+  }
   let request;
   if (editing) {
     request = { action: 'update', id: editing.id, event: sent };
@@ -464,12 +665,21 @@ async function saveForm(sent, body) {
   } catch (error) {
     failed = errorText(error);
     refused = body;
+    if (error.code === 'slug_taken') {
+      showSlugTaken(sent.slug);
+    }
     return;
   }
   failed = null;
   refused = '';
+  showSlugTaken(null);
   const created = !editing;
+  let moved = false;
+  if (editing && editing.slug !== data.event.slug) {
+    moved = true;
+  }
   editing = { id: data.event.id, slug: data.event.slug };
+  savedMeals = data.event.meals;
   const untouched = JSON.stringify(readForm()) === body;
   applySaved(data.event, sent);
   // Untouched since it was sent, the form now is what is saved, tidied by
@@ -482,7 +692,8 @@ async function saveForm(sent, body) {
   }
   byId('editorTitle').textContent = translate('manage.edit-title', { title: data.event.title });
   listStale = true;
-  if (created) {
+  renderAttendees();
+  if (created || moved) {
     showSavedControls();
     rememberOpenEvent();
   }
@@ -521,7 +732,7 @@ async function readyToLeave() {
   if (form.hidden) {
     return true;
   }
-  await autosave();
+  await autosave({ force: true });
   if (saving) {
     await saving;
   }
@@ -549,13 +760,26 @@ window.addEventListener('beforeunload', (event) => {
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    autosave();
+    autosave({ force: true });
   }
 });
 
+// The meals an attendee is coming for that the event still offers, named
+// ("Lunch, Dinner"); '' for the whole event.
+function attendeeMealsText(attendee) {
+  let chosen = [];
+  if (Array.isArray(attendee.meals)) {
+    chosen = attendee.meals;
+  }
+  return savedMeals
+    .filter((meal) => chosen.includes(meal.id))
+    .map((meal) => mealLabel(meal))
+    .join(', ');
+}
+
 // One attendee: the name (the username when there is no display name), the
-// username, staff or member, when they said they are going, and a Remove
-// button.
+// username, staff or member, the meals when they are coming only for those,
+// when they said they are going, and a Remove button.
 function attendeeRow(attendee) {
   let name = attendee.displayName;
   if (!name) {
@@ -565,11 +789,17 @@ function attendeeRow(attendee) {
   if (attendee.staff) {
     roleKey = 'role.staff';
   }
+  const details = [attendee.username, translate(roleKey)];
+  const meals = attendeeMealsText(attendee);
+  if (meals) {
+    details.push(translate('manage.attendee-meals', { meals }));
+  }
+  details.push(formatDate(attendee.rsvpAt));
   return createElement('li', { class: 'item-row' }, [
     iconNode('user'),
     createElement('span', { class: 'item-main' }, [
       createElement('span', { text: name }),
-      createElement('span', { class: 'muted small', text: `${attendee.username} · ${translate(roleKey)} · ${formatDate(attendee.rsvpAt)}` }),
+      createElement('span', { class: 'muted small', text: details.join(' · ') }),
     ]),
     createElement('button', {
       class: 'btn btn-small btn-quiet',
@@ -588,6 +818,7 @@ function renderAttendees() {
     return;
   }
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
+  renderMealCounts();
   let attendeeRows;
   if (attendees.length === 0) {
     attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
@@ -595,6 +826,31 @@ function renderAttendees() {
     attendeeRows = attendees.map((attendee) => attendeeRow(attendee));
   }
   byId('attendeeList').replaceChildren(...attendeeRows);
+}
+
+// Under the attendee count, how many are coming only for each meal
+// ("Just for a meal: Lunch 3 · Dinner 1"), for whoever orders the food.
+// Hidden while nobody is.
+function renderMealCounts() {
+  const parts = [];
+  for (const meal of savedMeals) {
+    const count = attendees.filter((attendee) => {
+      if (!Array.isArray(attendee.meals)) {
+        return false;
+      }
+      return attendee.meals.includes(meal.id);
+    }).length;
+    if (count > 0) {
+      if (meal.limit) {
+        parts.push(translate('manage.meal-count-of', { meal: mealLabel(meal), count, limit: meal.limit }));
+      } else {
+        parts.push(translate('manage.meal-count', { meal: mealLabel(meal), count }));
+      }
+    }
+  }
+  const box = byId('attendeesMeals');
+  box.hidden = parts.length === 0;
+  box.textContent = translate('manage.attendees-meals', { counts: parts.join(' · ') });
 }
 
 // The form opens in the Manage event tab, in place of its "No event open"
@@ -684,6 +940,8 @@ byId('newEvent').addEventListener('click', openNew);
 byId('editorEmptyNew').addEventListener('click', openNew);
 byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
+startMeals();
+startTiers();
 
 // Signed out: off to sign in, then back here. Signed in without the right to
 // manage: a message instead of the list. Otherwise the list and the staff
@@ -738,6 +996,8 @@ onChange(() => {
     renderAttendees();
     renderStatus();
     relabelLocations();
+    relabelMeals();
+    relabelTiers();
     fillTimeZoneSelect(byId('f-timezone'), byId('f-timezone').value);
     fillCurrencyList(byId('currencyList'));
   }

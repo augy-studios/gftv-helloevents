@@ -37,6 +37,9 @@ export const TABLES = Object.freeze({
   telegramTokens: 'gftvevents_telegram_link_tokens',
   events: 'gftvevents_events',
   attendees: 'gftvevents_attendees',
+  // The attendees coming to the whole event, who take its spaces: a view
+  // (migrations/009).
+  fullAttendees: 'gftvevents_full_attendees',
   audit: 'gftvevents_audit_logs',
   rateLimits: 'gftvevents_rate_limits',
   // migrations/003

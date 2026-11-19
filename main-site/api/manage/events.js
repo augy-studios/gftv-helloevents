@@ -3,6 +3,9 @@
 //
 // GET                         -> { events: [summary] }   every event, any status
 // GET ?id=<uuid>              -> { event, attendees }    one event, for editing
+// GET ?checkSlug=<slug>&id=<uuid> -> { free }            whether an event link is
+//                                                        free (id: the event asking,
+//                                                        whose own link counts as free)
 // POST { action: "create", event }                 -> { event }
 // POST { action: "update", id, event }             -> { event }
 // POST { action: "delete", id }                    admins only
@@ -20,7 +23,7 @@ import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
-import { validateEvent } from '../_lib/event-rules.js';
+import { validateEvent, isSlug } from '../_lib/event-rules.js';
 import { MANAGE_COLUMNS } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
@@ -46,14 +49,16 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
   return data;
 }
 
-// The event's attendees in RSVP order, as the edit page lists them.
-async function loadAttendees(eventId) {
+// The event's attendees in RSVP order, as the edit page lists them, each
+// with the meals they are coming for that the event still offers.
+// event: its row, with at least id and meal_options.
+async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `created_at, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`
+      `created_at, meals, account:${TABLES.accounts} ( kind, username, display_name, staff:${TABLES.users} ( username, display_name ) )`
     )
-    .eq('event_id', eventId)
+    .eq('event_id', event.id)
     .order('created_at', { ascending: true })
     .limit(2000);
   if (error) {
@@ -63,7 +68,7 @@ async function loadAttendees(eventId) {
   if (data !== null && data !== undefined) {
     rows = data;
   }
-  return rows.map(attendeeView);
+  return rows.map((row) => attendeeView(row, event));
 }
 
 // A failed save the editor can fix gets its own answer: a slug already in
@@ -88,15 +93,34 @@ async function showEvent(response, eventId) {
     return fail(response, 404, 'not_found');
   }
   const event = managedEvent(row);
-  const attendees = await loadAttendees(row.id);
+  const attendees = await loadAttendees(row);
   return ok(response, { event, attendees });
+}
+
+// GET ?checkSlug=: whether no other event has this link, so the edit form
+// can say so before saving. A link that is not a valid one answers free:
+// saving it then says what is wrong with it.
+async function checkSlug(response, slug, eventId) {
+  const wanted = String(slug).trim().toLowerCase();
+  if (!isSlug(wanted)) {
+    return ok(response, { free: true });
+  }
+  const { data, error } = await database().from(TABLES.events).select('id').eq('slug', wanted).maybeSingle();
+  if (error) {
+    throw error;
+  }
+  let free = !data;
+  if (data && UUID_PATTERN.test(eventId) && data.id === eventId) {
+    free = true;
+  }
+  return ok(response, { free });
 }
 
 // GET: every event, any status, most recently changed first.
 async function listEvents(response) {
   const { data, error } = await database()
     .from(TABLES.events)
-    .select('id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, gftvevents_attendees(count)')
+    .select(`id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, ${TABLES.fullAttendees}(count)`)
     .order('updated_at', { ascending: false })
     .limit(500);
   if (error) {
@@ -202,6 +226,9 @@ async function saveEvent(request, response, body, user) {
     if (check.location !== undefined) {
       detail.location = check.location;
     }
+    if (check.tier !== undefined) {
+      detail.tier = check.tier;
+    }
     return fail(response, 400, check.error, detail);
   }
   const fields = { ...check.fields, updated_by: user.id };
@@ -276,6 +303,10 @@ async function removeAttendee(request, response, body, user) {
   if (!username || username.length > 64) {
     return fail(response, 400, 'bad_request');
   }
+  const event = await loadEvent(body.id, 'id, meal_options');
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
   // Matched against this event's own list, so only someone on it can go.
   const { data: attendeeData, error: attendeesError } = await database()
     .from(TABLES.attendees)
@@ -301,7 +332,7 @@ async function removeAttendee(request, response, body, user) {
     throw error;
   }
   await audit(request, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
-  return ok(response, { attendees: await loadAttendees(body.id) });
+  return ok(response, { attendees: await loadAttendees(event) });
 }
 
 // Sends each request to its step. Every POST counts against the manageWrite
@@ -318,6 +349,11 @@ export default route('manage/events', async (request, response) => {
 
   if (request.method === 'GET') {
     const eventId = query(request, 'id');
+    const slugToCheck = query(request, 'checkSlug');
+    if (slugToCheck) {
+      await checkSlug(response, slugToCheck, eventId);
+      return;
+    }
     if (eventId) {
       await showEvent(response, eventId);
       return;

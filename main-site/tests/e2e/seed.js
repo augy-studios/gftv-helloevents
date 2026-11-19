@@ -17,7 +17,8 @@
 //               the furmeet
 //
 // Events: an upcoming furmeet (attendees-only address, 20 spaces), an
-// upcoming convention (paid), a past meet, one with dates to come, and a
+// upcoming convention (paid, with lunch, dinner and high tea people can come
+// to on their own), a past meet, one with dates to come, and a
 // draft that the public must never see.
 
 import bcrypt from 'bcryptjs';
@@ -105,6 +106,8 @@ export const EVENTS = {
     kind: 'convention',
     status: 'published',
     summary: 'Three days of panels, a dealers den and a dance.',
+    description: 'Panels, a dealers den and the Saturday dance.',
+    description_zh: '讨论会、商贩区和周六舞会。',
     starts_at: '2032-08-06T02:00:00.000Z',
     ends_at: '2032-08-08T10:00:00.000Z',
     timezone: 'Asia/Singapore',
@@ -116,6 +119,8 @@ export const EVENTS = {
     price_max: 120,
     currency: 'SGD',
     rsvp_open: true,
+    // People can come just for these meals (migrations/007).
+    meal_options: [{ id: 'lunch', label: null }, { id: 'dinner', label: null }, { id: 'm-hightea', label: 'High tea' }],
   },
   past: {
     id: '00000000-0000-4000-8000-0000000000e3',

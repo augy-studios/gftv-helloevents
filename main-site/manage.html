@@ -106,6 +106,21 @@
                             <span data-i18n="manage.field.title">Title</span>
                             <input id="f-title" name="title" type="text" maxlength="120" required>
                         </label>
+                        <div class="field span-2">
+                            <label for="f-slug" data-i18n="manage.field.slug-link">Event link</label>
+                            <div class="slug-input">
+                                <span class="slug-prefix" aria-hidden="true">events.globalfurry.tv/e/</span>
+                                <input id="f-slug" name="slug" type="text" maxlength="60" autocapitalize="none" autocomplete="off" spellcheck="false" aria-describedby="slugHint">
+                            </div>
+                            <span class="field-hint" id="slugHint" data-i18n="manage.hint.slug">Lowercase letters, numbers and hyphens. Left blank, it is made from the title. Changing it breaks links already shared.</span>
+                            <div class="callout warn slug-taken" id="slugTaken" role="alert" hidden>
+                                <p id="slugTakenText"></p>
+                                <div class="actions inline">
+                                    <button class="btn btn-small" type="button" id="slugRandom"><span data-icon="refresh"></span><span data-i18n="manage.slug-random">Add eight random characters</span></button>
+                                    <button class="btn btn-small btn-quiet" type="button" id="slugEdit"><span data-icon="edit"></span><span data-i18n="manage.slug-edit">Edit the link</span></button>
+                                </div>
+                            </div>
+                        </div>
                         <label class="field">
                             <span data-i18n="manage.field.kind">Kind</span>
                             <select id="f-kind" name="kind">
@@ -139,10 +154,11 @@
                         <div class="field span-2 cover-field">
                             <span data-i18n="manage.field.cover">Cover picture</span>
                             <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
-                            <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">A wide picture works best. Your browser turns it into a small WebP before it is uploaded.</p>
+                            <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">Any picture works: you choose the 16:9 part to show, then your browser turns it into a small WebP before it is uploaded.</p>
                             <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">A picture can be added once the event has saved.</p>
                             <div class="actions inline">
                                 <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
+                                <button class="btn" type="button" id="coverAdjust" hidden><span data-icon="edit"></span><span data-i18n="manage.cover-adjust">Adjust crop</span></button>
                                 <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
                             </div>
                             <div class="callout danger" id="coverError" role="alert"></div>
@@ -242,6 +258,17 @@
                             <input type="checkbox" id="f-priceHidden" name="priceHidden">
                             <span data-i18n="manage.field.priceHidden">Hide the price: show "to be announced" publicly</span>
                         </label>
+                        <label class="check span-2">
+                            <input type="checkbox" id="f-tiersEnabled" name="tiersEnabled" aria-describedby="tiersHint">
+                            <span data-i18n="manage.field.tiersEnabled">Sell tickets in tiers, each with its own name, price and benefits</span>
+                        </label>
+                        <p class="field-hint span-2 tiers-hint" id="tiersHint" data-i18n="manage.hint.tiers">For a paid event. The From and Up to prices then come from the tiers.</p>
+                    </div>
+                    <div id="tierSection" hidden>
+                        <div id="tierList" class="location-list"></div>
+                        <div class="actions inline">
+                            <button class="btn" type="button" id="tierAdd"><span data-icon="plus"></span><span data-i18n="manage.tier-add">Add a tier</span></button>
+                        </div>
                     </div>
                 </fieldset>
 
@@ -273,6 +300,48 @@
                 </fieldset>
 
                 <fieldset>
+                    <legend data-i18n="manage.section.meals">Coming just for a meal</legend>
+                    <p class="muted small" data-i18n="manage.meals-lede">Tick the meals people can RSVP for on their own, instead of the whole event. Leave them all off to take RSVPs for the whole event only.</p>
+                    <div class="meal-rows">
+                        <div class="meal-row">
+                            <label class="check">
+                                <input type="checkbox" id="f-meal-breakfast" data-meal="breakfast">
+                                <span data-i18n="meal.breakfast">Breakfast</span>
+                            </label>
+                            <label class="meal-limit">
+                                <span data-i18n="manage.field.mealPlaces">Places</span>
+                                <input type="number" id="f-meal-breakfast-limit" data-meal-limit="breakfast" min="1" step="1" inputmode="numeric">
+                            </label>
+                        </div>
+                        <div class="meal-row">
+                            <label class="check">
+                                <input type="checkbox" id="f-meal-lunch" data-meal="lunch">
+                                <span data-i18n="meal.lunch">Lunch</span>
+                            </label>
+                            <label class="meal-limit">
+                                <span data-i18n="manage.field.mealPlaces">Places</span>
+                                <input type="number" id="f-meal-lunch-limit" data-meal-limit="lunch" min="1" step="1" inputmode="numeric">
+                            </label>
+                        </div>
+                        <div class="meal-row">
+                            <label class="check">
+                                <input type="checkbox" id="f-meal-dinner" data-meal="dinner">
+                                <span data-i18n="meal.dinner">Dinner</span>
+                            </label>
+                            <label class="meal-limit">
+                                <span data-i18n="manage.field.mealPlaces">Places</span>
+                                <input type="number" id="f-meal-dinner-limit" data-meal-limit="dinner" min="1" step="1" inputmode="numeric">
+                            </label>
+                        </div>
+                    </div>
+                    <div id="mealCustomList" class="meal-custom-list"></div>
+                    <div class="actions inline">
+                        <button class="btn" type="button" id="mealAdd"><span data-icon="plus"></span><span data-i18n="manage.meal-add">Add another meal</span></button>
+                    </div>
+                    <p class="field-hint" data-i18n="manage.hint.meals">Name your own, such as "High tea" or "Supper", up to five. People coming only for a meal do not take one of the event's spaces; give a meal a number of places to limit it, or leave Places blank for no limit.</p>
+                </fieldset>
+
+                <fieldset>
                     <legend data-i18n="manage.section.notes">Staff notes</legend>
                     <label class="field">
                         <span class="visually-hidden" data-i18n="manage.field.staffNotes">Staff notes</span>
@@ -289,6 +358,7 @@
 
                 <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
                     <h3 id="attendeesTitle" class="section-label"></h3>
+                    <p class="muted small" id="attendeesMeals" hidden></p>
                     <ul class="item-list" id="attendeeList"></ul>
                 </section>
 
@@ -376,6 +446,27 @@
             </section>
         </div>
     </main>
+
+    <div class="modal-backdrop hidden" id="cropModal">
+        <div class="modal glass-card crop-modal" role="dialog" aria-modal="true" aria-labelledby="cropTitle" aria-describedby="cropLede">
+            <div class="modal-head">
+                <h2 id="cropTitle" data-i18n="manage.crop-title">Crop the cover picture</h2>
+                <button class="icon-btn small" type="button" data-close-modal="cropModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <p class="small" id="cropLede"></p>
+            <canvas class="crop-frame" id="cropCanvas" tabindex="0" role="img" aria-label="Cover picture as it will be cropped" data-i18n-attr="aria-label:manage.crop-frame" aria-describedby="cropHelp"></canvas>
+            <p class="field-hint" id="cropHelp"><span data-i18n="manage.crop-help">Drag the picture, or use the arrow keys, to move it. Zoom with the slider, the mouse wheel, a pinch, or the + and - keys. 0 goes back to the middle.</span> <span data-i18n="manage.crop-banner">The whole frame shows on event cards; the shaded strips at the top and bottom are left out of the wider banner on the event page, so keep faces and text between the dashed lines.</span></p>
+            <label class="crop-zoom">
+                <span data-i18n="manage.crop-zoom">Zoom</span>
+                <input type="range" id="cropZoom" min="1" max="4" step="0.01" value="1">
+            </label>
+            <div class="actions inline">
+                <button class="btn btn-primary" type="button" id="cropUse"><span data-icon="check"></span><span data-i18n="manage.crop-use">Use this crop</span></button>
+                <button class="btn" type="button" id="cropReset"><span data-icon="refresh"></span><span data-i18n="manage.crop-reset">Back to the middle</span></button>
+                <button class="btn btn-quiet" type="button" data-close-modal="cropModal" data-i18n="common.cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <div class="modal-backdrop hidden" id="deleteModal">
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">

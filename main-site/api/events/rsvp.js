@@ -1,20 +1,26 @@
-// POST /api/events/rsvp  { slug, going: true | false }
+// POST /api/events/rsvp  { slug, going: true | false, meals?: [id] }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
+// meals: when the event offers meals people can come to on their own, the
+// ones this person is coming for instead of the whole event (empty or left
+// out: the whole event). Sending going: true again with another choice
+// changes it; after RSVPs close, someone going can still change their meals
+// but not take one of the event's spaces (migrations/010).
 // Joining goes through the gftvevents_rsvp database function, which locks the
 // event row, so two people cannot both take the last space. Only released,
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
 // -> { event } as the person now sees it (event.viewer.going says whether
-// they are going).
+// they are going, event.viewer.meals what for).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
-import { releasedEventBySlug } from '../_lib/events.js';
+import { releasedEventBySlug, withMealCounts } from '../_lib/events.js';
+import { chooseMeals } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
@@ -22,9 +28,11 @@ import { publicEventDetail } from '../_lib/serialize.js';
 const RESULTS = {
   ok: null,
   already: null,
+  changed: null,
   not_found: [404, 'not_found'],
   rsvp_closed: [409, 'rsvp_closed'],
   event_full: [409, 'event_full'],
+  meal_full: [409, 'meal_full'],
   event_over: [409, 'event_over'],
 };
 
@@ -55,8 +63,14 @@ export default route('events/rsvp', async (request, response) => {
     return fail(response, 404, 'not_found');
   }
 
+  let meals = [];
   if (body.going === true) {
-    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id });
+    const choice = chooseMeals(event, body.meals);
+    if (!choice.ok) {
+      return fail(response, 400, 'meal_not_offered');
+    }
+    meals = choice.meals;
+    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals });
     if (error) {
       throw error;
     }
@@ -71,7 +85,10 @@ export default route('events/rsvp', async (request, response) => {
       return fail(response, status, errorCode);
     }
     if (result === 'ok') {
-      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id });
+      await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details: { meals } });
+    }
+    if (result === 'changed') {
+      await audit(request, { action: 'rsvp.meals_changed', actorId: session.user.id, eventId: event.id, details: { meals } });
     }
   } else if (body.going === false) {
     const { error } = await database()
@@ -94,10 +111,12 @@ export default route('events/rsvp', async (request, response) => {
   if (fresh !== null && fresh !== undefined) {
     shown = fresh;
   }
+  await withMealCounts(shown);
   ok(response, {
     event: publicEventDetail(shown, {
       signedIn: true,
       going: body.going === true,
+      meals,
       canManage: canManage(session.user),
     }),
   });

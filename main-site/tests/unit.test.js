@@ -302,11 +302,116 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'rsvpAt', 'staff', 'username']);
+  assert.deepEqual(Object.keys(staff).sort(), ['displayName', 'meals', 'rsvpAt', 'staff', 'username']);
   assert.equal(staff.staff, true);
   const member = ser.attendeeView({ user_id: 'p1', created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', staff: false, rsvpAt: 'x' });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', staff: false, meals: [], rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
+});
+
+test('meals offered are checked, put in order, and blank named ones dropped', () => {
+  const meals = (list) => rules.validateEvent(form({ meals: list }));
+  const ok = meals([{ id: 'dinner', limit: '40' }, { id: 'm-tea123', label: '  High tea ', limit: ' ' }, { id: 'breakfast', label: 'ignored' }, { id: 'm-blank1', label: '   ' }]);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.fields.meal_options, [
+    { id: 'breakfast', label: null, limit: null },
+    { id: 'dinner', label: null, limit: 40 },
+    { id: 'm-tea123', label: 'High tea', limit: null },
+  ]);
+  assert.equal(meals([{ id: 'lunch', limit: '0' }]).field, 'mealLimit');
+  assert.equal(meals([{ id: 'lunch', limit: '2.5' }]).field, 'mealLimit');
+  assert.equal(meals([{ id: 'lunch', limit: 'ten' }]).field, 'mealLimit');
+  assert.deepEqual(meals([]).fields.meal_options, []);
+  assert.equal('meal_options' in rules.validateEvent(form()).fields, false, 'no meals field keeps the stored ones');
+  assert.equal(meals([{ id: 'supper' }]).field, 'meals');
+  assert.equal(meals([{ id: 'lunch' }, { id: 'lunch' }]).field, 'meals');
+  assert.equal(meals([{ id: 'm-tea123', label: 'x'.repeat(41) }]).field, 'mealLabel');
+  assert.equal(meals('lunch').field, 'meals');
+  const six = Array.from({ length: 6 }, (_, i) => ({ id: `m-meal${i}`, label: `Meal ${i}` }));
+  assert.equal(meals(six).field, 'meals', 'at most five named meals');
+});
+
+test('a meal choice must be meals the event offers, and leaves out ones no longer offered', () => {
+  const event = row({
+    meal_options: [{ id: 'lunch', label: null, limit: 10 }, { id: 'dinner', label: null }, { id: 'm-tea123', label: 'High tea' }],
+    meal_taken: { lunch: 4, dinner: 2 },
+  });
+  assert.deepEqual(rules.chooseMeals(event, undefined), { ok: true, meals: [] });
+  assert.deepEqual(rules.chooseMeals(event, ['m-tea123', 'lunch', 'lunch']), { ok: true, meals: ['lunch', 'm-tea123'] });
+  assert.equal(rules.chooseMeals(event, ['breakfast']).ok, false);
+  assert.equal(rules.chooseMeals(event, 'lunch').ok, false);
+  assert.equal(rules.chooseMeals(row(), ['lunch']).ok, false, 'an event offering no meals takes none');
+
+  const page = ser.publicEventDetail(event, { signedIn: true, going: true, meals: ['dinner', 'breakfast'] }, now);
+  assert.deepEqual(page.meals, [
+    { id: 'lunch', label: null, limit: 10, left: 6 },
+    { id: 'dinner', label: null, limit: null, left: null },
+    { id: 'm-tea123', label: 'High tea', limit: null, left: null },
+  ]);
+  assert.deepEqual(page.viewer.meals, ['dinner'], 'breakfast is no longer offered');
+  assert.deepEqual(ser.publicEventDetail(event, { signedIn: true, going: false, meals: ['lunch'] }, now).viewer.meals, []);
+  const attendee = ser.attendeeView({ created_at: 'x', meals: ['breakfast'], account: { kind: 'public', username: 'otter' } }, event);
+  assert.deepEqual(attendee.meals, [], 'left with none: the whole event');
+  assert.deepEqual(ser.managedEvent(event).meals, [{ id: 'lunch', label: '', limit: '10' }, { id: 'dinner', label: '', limit: '' }, { id: 'm-tea123', label: 'High tea', limit: '' }]);
+});
+
+test('ticket tiers are checked, set the price range, and are only on for a paid event', () => {
+  const tiers = [
+    { name: ' Day pass ', price: '45', benefits: 'Entry on one day\n\n  Lanyard ', includesPrevious: true },
+    { name: '', price: '', benefits: '  ' },
+    { name: 'Weekend', price: '80', benefits: 'All three days', includesPrevious: true, previousDisplay: 'full' },
+    { name: 'Sponsor', price: '120.5', benefits: 'Sponsor badge', includesPrevious: true },
+  ];
+  const paid = rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: tiers, priceMin: 'ignored' }));
+  assert.equal(paid.ok, true, JSON.stringify(paid));
+  assert.equal(paid.fields.tiers_enabled, true);
+  assert.equal(paid.fields.price_min, 45);
+  assert.equal(paid.fields.price_max, 120.5);
+  assert.deepEqual(paid.fields.ticket_tiers.map((tier) => [tier.name, tier.price, tier.benefits, tier.includes_previous, tier.previous_display]), [
+    ['Day pass', 45, ['Entry on one day', 'Lanyard'], false, 'reference'],
+    ['Weekend', 80, ['All three days'], true, 'full'],
+    ['Sponsor', 120.5, ['Sponsor badge'], true, 'reference'],
+  ]);
+
+  // Kept but off for a free event; the From field is not needed while on.
+  const free = rules.validateEvent(form({ priceType: 'free', tiersEnabled: true, ticketTiers: tiers }));
+  assert.equal(free.fields.tiers_enabled, false);
+  assert.equal(free.fields.ticket_tiers.length, 3);
+  assert.equal('ticket_tiers' in rules.validateEvent(form()).fields, false, 'no tiers field keeps the stored ones');
+
+  const bad = (list) => rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: list }));
+  assert.deepEqual(bad([{ name: 'A', price: '1' }, { name: 'B', price: '' }]), { ok: false, error: 'invalid_field', field: 'tierPrice', tier: 1 });
+  assert.equal(bad([{ price: '5' }]).field, 'tierName');
+  assert.equal(bad([{ name: 'A', price: '-1' }]).field, 'tierPrice');
+  assert.equal(bad([{ name: 'A', price: '1', benefits: 'x'.repeat(201) }]).field, 'tierBenefits');
+  const none = bad([]);
+  assert.equal(none.ok, true);
+  assert.equal(none.fields.price_min, null, 'on with no tiers yet: price to be announced');
+  assert.equal(bad(Array.from({ length: 11 }, () => ({ name: 'A', price: '1' }))).field, 'ticketTiers');
+});
+
+test('the event page shows tiers with earlier benefits in full or by name, and hides prices when the price is', () => {
+  const event = row({
+    tiers_enabled: true,
+    ticket_tiers: [
+      { name: 'Day', price: 45, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' },
+      { name: 'Weekend', price: 80, benefits: ['Three days'], includes_previous: true, previous_display: 'full' },
+      { name: 'Sponsor', price: 120, benefits: ['Badge'], includes_previous: true, previous_display: 'full' },
+      { name: 'Super', price: 300, benefits: ['Dinner'], includes_previous: true, previous_display: 'reference' },
+      { name: 'Solo', price: 10, benefits: ['Sticker'], includes_previous: false, previous_display: 'full' },
+    ],
+  });
+  assert.deepEqual(ser.publicEventDetail(event, {}, now).tiers, [
+    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null },
+    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null },
+    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null },
+    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor' },
+    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null },
+  ]);
+  assert.deepEqual(ser.publicEventDetail(row({ ...event, price_hidden: true }), {}, now).tiers.map((tier) => tier.price), [null, null, null, null, null]);
+  assert.deepEqual(ser.publicEventDetail(row({ ...event, tiers_enabled: false }), {}, now).tiers, []);
+  assert.deepEqual(ser.publicEventDetail(row({ ...event, price_type: 'free' }), {}, now).tiers, []);
+  assert.deepEqual(ser.managedEvent(event).ticketTiers[1], { name: 'Weekend', price: '80', benefits: 'Three days', includesPrevious: true, previousDisplay: 'full' });
 });
 
 test('the signed-in view of yourself has no secrets', () => {

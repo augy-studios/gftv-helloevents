@@ -1,6 +1,7 @@
-// The account page: who you are, the events you are going to, notifications,
-// and the ways in (second factors). Public accounts can also delete
-// themselves here.
+// The account page: who you are at the top, then tabs for the events you
+// are going to, notifications, the ways in (second factors), and, for public
+// accounts, a Profile tab to rename or delete the account. The open tab is
+// kept in the address (/account#security).
 
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
@@ -12,6 +13,7 @@ import { showCodes } from '../codes.js';
 import { qrSvg } from '../qr.js';
 import { passkeysSupported, createPasskey, passkeyErrorCode } from '../passkeys.js';
 import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice } from '../push-client.js';
+import { startTabs } from '../tabs.js';
 
 const byId = (id) => document.getElementById(id);
 let currentUser = null;
@@ -22,6 +24,7 @@ let deviceOn = false;
 let totpSetup = null; // the set-up token while an authenticator is being added
 // The action waiting on the password dialog.
 let pendingAction = null;
+const tabs = startTabs(byId('accountTabs'));
 
 function renderProfile() {
   byId('displayName').textContent = currentUser.displayName;
@@ -32,9 +35,14 @@ function renderProfile() {
     byId('avatar').src = currentUser.avatarUrl;
     byId('avatar').hidden = false;
   }
-  byId('deleteBox').hidden = currentUser.kind !== 'public';
-  // Staff names come from gftv.asia.
-  byId('nameForm').hidden = currentUser.kind !== 'public';
+  // Staff names come from gftv.asia, and staff accounts are not deleted
+  // here, so the Profile tab is for public accounts only.
+  const isPublic = currentUser.kind === 'public';
+  byId('deleteBox').hidden = !isPublic;
+  if (byId('tab-profile').hidden === isPublic) {
+    byId('tab-profile').hidden = !isPublic;
+    tabs.refresh();
+  }
   if (document.activeElement !== byId('nameInput')) {
     byId('nameInput').value = currentUser.displayName;
   }
@@ -195,7 +203,7 @@ async function load() {
   } catch (error) {
     byId('accountLoading').hidden = true;
     byId('accountView').hidden = false;
-    byId('securityError').textContent = errorText(error);
+    byId('profileError').textContent = errorText(error);
     renderProfile();
     return;
   }
@@ -396,14 +404,14 @@ byId('telegramLink').addEventListener('click', () => {
 });
 
 byId('signOut').addEventListener('click', () => {
-  withBusy(byId('signOut'), byId('securityError'), async () => {
+  withBusy(byId('signOut'), byId('profileError'), async () => {
     await post('/api/auth/session', { action: 'logout' });
     location.replace('/');
   });
 });
 
 byId('signOutOthers').addEventListener('click', () => {
-  withBusy(byId('signOutOthers'), byId('securityError'), async () => {
+  withBusy(byId('signOutOthers'), byId('profileError'), async () => {
     await post('/api/auth/session', { action: 'logout-others' });
     byId('accountNotice').textContent = translate('account.signed-out-others');
   });

@@ -3,18 +3,22 @@
 // a public request; the serializers then pick the fields each caller may see.
 
 import { database, TABLES } from './supabase.js';
-import { releasedFilter, isSlug } from './event-rules.js';
+import { releasedFilter, isSlug, storedMeals } from './event-rules.js';
 
+// "going" on cards and pages counts the people coming to the whole event,
+// who take its spaces (gftvevents_full_attendees, migrations/009); people
+// coming only for a meal are counted per meal on the event page.
+//
 // The feed needs no description, address, online link, price note or staff
 // notes, so it does not even fetch them.
 export const CARD_COLUMNS =
   'id, slug, title, kind, summary, status, publish_at, starts_at, ends_at, start_time_tbc, end_time_tbc, timezone, dates_hidden, ' +
   'is_online, venue_name, city, country, cover_image_path, price_type, price_min, price_max, currency, ' +
-  'price_hidden, capacity, rsvp_open, gftvevents_attendees(count)';
+  'price_hidden, capacity, rsvp_open, gftvevents_full_attendees(count)';
 
 export const DETAIL_COLUMNS =
   `${CARD_COLUMNS}, price_note, description, description_zh, venue_address, locations, address_attendees_only, online_url, ` +
-  'organiser_name, external_url';
+  'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -78,15 +82,49 @@ export async function anyEventBySlug(slug, columns = MANAGE_COLUMNS) {
   return data;
 }
 
-export async function isGoing(eventId, userId) {
+// Adds to an event row how many people are coming for each of its meals
+// (row.meal_taken: { lunch: 3 }), for the places left the event page shows.
+// Nothing is asked for an event with no meals.
+export async function withMealCounts(row) {
+  if (!row) {
+    return row;
+  }
+  row.meal_taken = {};
+  if (storedMeals(row).length === 0) {
+    return row;
+  }
+  const { data, error } = await database().rpc('gftvevents_meal_counts', { p_event_id: row.id });
+  if (error) {
+    throw error;
+  }
+  let counts = [];
+  if (Array.isArray(data)) {
+    counts = data;
+  }
+  for (const count of counts) {
+    row.meal_taken[count.meal] = Number(count.taken);
+  }
+  return row;
+}
+
+// Whether someone is going, and the meals they are coming for (empty for the
+// whole event, migrations/007): { going, meals }.
+export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select('event_id')
+    .select('meals')
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
   if (error) {
     throw error;
   }
-  return Boolean(data);
+  if (!data) {
+    return { going: false, meals: [] };
+  }
+  let meals = [];
+  if (Array.isArray(data.meals)) {
+    meals = data.meals;
+  }
+  return { going: true, meals };
 }

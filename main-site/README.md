@@ -45,8 +45,12 @@ the functions with the service role key. No Supabase Auth, no request signing.
   everyone shares the venue's Wi-Fi, a staff member opens `/manage` on that Wi-Fi and raises the
   limit for that connection (its salted IP hash) for 2 to 12 hours, to 50 to 500 an hour. It ends
   by itself or with "End now", and is in the audit log.
-- **Cover pictures** are uploaded from `/manage`. The browser converts the picture to a compressed
-  WebP (longest side 1600 px, at most 1 MB); the server checks it really is a still WebP within the
+- **Cover pictures** are uploaded from `/manage`. Every picture first opens a crop dialog
+  (`js/cover-crop.js`) with a frame the shape of the cards' 16:9 thumbnail, starting on the
+  middle of the picture, with the strips the wider 21:9 banner on the event page leaves out shaded
+  and edged with dashed lines; the editor drags and zooms (slider, wheel, pinch or keyboard) to pick
+  the part to show, and "Adjust crop" re-crops the picture chosen in that visit. The browser
+  then converts the part kept to a compressed 16:9 WebP (at most 1600 px wide and 1 MB); the server checks it really is a still WebP within the
   size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
   Supabase Storage bucket `gftvevents_covers`. The event keeps the object's path; the old picture is
   deleted when it is replaced or the event is deleted.
@@ -55,11 +59,38 @@ the functions with the service role key. No Supabase Auth, no request signing.
   ticked; a pill at the bottom says "Saving…", "All changes saved" or why a change was refused.
   A new event is created once it has a title, both descriptions and a start date. The open event
   is kept in the address (`/manage?slug=...#editor`), so a reload reopens it.
+- **Event links.** The form's "Event link" field is the event's address (`/e/<link>`), made from
+  the title when left blank. A typed link is tidied (lowercase, hyphens) and checked
+  (`GET /api/manage/events?checkSlug=`) before it is saved; one another event has is not saved,
+  and the form offers to add eight random characters to its end or to edit it again.
+- **Ticket tiers** (migrations/008). A paid event can sell tickets in tiers: each has a name, a
+  price and benefits (one per line). From the second tier on, ticking "Includes everything in
+  <previous tier>" (off for a new tier) makes a tier include everything in the tier before it, and the event page either lists those benefits again in full or says
+  "Everything in <tier>, plus:". The From and Up to prices then come from the tiers. A hidden
+  price hides the tier prices too. Fields in a tier card save when the card is left.
+- **Coming just for a meal** (migrations/007). In the edit form's "Coming just for a meal"
+  section an editor ticks breakfast, lunch or dinner, and names up to five more ("High tea"). With
+  any on, a signed-in person on the event page picks "The whole event" or "I only want to show
+  up for the meal" and ticks one or more of the meals; while going they can change it, and it
+  saves at once. Meal-only attendees see what attendees see, but take none of the event's spaces
+  ("N going", the capacity and "Full" count only people coming to the whole event, through the
+  `gftvevents_full_attendees` view, migrations/009). Instead each meal can have its own number of
+  places; the event page shows the places left ("Lunch (6 places left)", "Dinner (full)"), and a
+  full event still takes people just for a meal while one has room. The attendee list on
+  `/manage` says who is coming for which meals, with a count per meal ("Lunch 3 of 10"). Once
+  RSVPs close (migrations/010), nobody new joins, but someone going can still change their
+  meals, within each meal's places, or go from the whole event to just meals; not the other way,
+  which would take a space. A cancelled or finished event takes no changes. A
+  meal the editor stops offering drops out of everyone's choice (kept in the database, so ticking
+  it again brings it back); someone left with none counts as coming to the whole event.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
   Timings' share pages). The cover goes out as a JPEG from `api/events/embed-image.js`, since not
   every app reads WebP. Drafts and events not released yet get the site's own tags.
+- **The account page** has the profile at the top and tabs below it: My events,
+  Notifications, Security, and (public accounts only) Profile, to rename or delete the account.
+  The open tab is kept in the address (`/account#security`).
 - **Notifications**, chosen on the account page: changes of time or place (or a cancellation) of
   events you are going to, a reminder the day before, and, off by default, new events. They go by
   Web Push to the browsers you switch on (subscriptions stored in Upstash Redis) and, if you choose,
@@ -76,9 +107,14 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 006) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 010) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
-   event needs its two columns.
+   event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
+   the event page and RSVPs read its columns, and it replaces the RSVP function. Run
+   `008_ticket_tiers.sql` before deploying ticket tiers: saving an event writes its columns. Run
+   `009_meal_limits.sql` before deploying meal limits: the feed and event pages count spaces
+   through its view, and it replaces the RSVP function again. `010_meal_changes_after_close.sql`
+   replaces it once more, so people going can change their meals after RSVPs close.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

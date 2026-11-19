@@ -56,15 +56,15 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   // Fewer than ten events: one page, no pager.
   await expect(page.locator('#listPager')).toBeHidden();
 
-  // Create. The form opens in its own tab; there is no address field and no
-  // Save button.
+  // Create. The form opens in its own tab, with no Save button; the link is
+  // blank, to be made from the title.
   await page.locator('#newEvent').click();
   await expect(page.locator('#editorTitle')).toHaveText('New event');
   await expect(page.getByRole('tab', { name: 'Manage event' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#listBox')).toBeHidden();
   await expect(page.locator('#editorSave')).toHaveCount(0);
   await expect(status(page)).toHaveText(/^Saves by itself once it has a title/);
-  await expect(page.locator('#f-slug')).toHaveCount(0);
+  await expect(page.locator('#f-slug')).toHaveValue('');
   await expect(page.locator('#f-timezone')).toHaveValue('Asia/Singapore');
   await expect(page.locator('#descriptionSwitch [data-lang="en"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#f-descriptionZh')).toBeHidden();
@@ -105,8 +105,9 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   // The open event is kept in the address.
   await expect(page).toHaveURL(new RegExp(`/manage\\?slug=${NEW_EVENT.slug}#editor$`));
   await expect(page.locator('#editorError')).toHaveText('');
-  // The address was made from the title.
+  // The address was made from the title, and shows in the link field.
   await expect(page.locator('#editorView')).toHaveAttribute('href', `/e/${NEW_EVENT.slug}`);
+  await expect(page.locator('#f-slug')).toHaveValue(NEW_EVENT.slug);
   await expect(page.locator('#f-startDate')).toHaveValue(NEW_EVENT.startDate);
   await expect(page.locator('#f-startTime')).toHaveValue(NEW_EVENT.startTime);
   // An end time with no end date ends on the start date.

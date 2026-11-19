@@ -363,6 +363,22 @@ img, svg { display: block; max-width: 100%; }
   transition: transform var(--motion) ease;
 }
 .modal.wide { max-width: 30rem; }
+/* manage: the cover crop dialog (js/cover-crop.js), its frame the shape of
+   the cards' thumbnail */
+.modal.crop-modal { max-width: 40rem; }
+.crop-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 0.75rem 0 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-frame:active { cursor: grabbing; }
+.crop-zoom { display: flex; align-items: center; gap: 0.75rem; margin: 0.75rem 0; font-weight: 600; font-size: 0.9375rem; }
+.crop-zoom input { flex: 1 1 auto; accent-color: var(--brand-dark); }
 .modal-backdrop.hidden .modal { transform: translateY(8px) scale(0.98); }
 .modal-head {
   display: flex;
@@ -965,6 +981,19 @@ main.wide > .page-card { margin-inline: auto; }
 .event-section, .event-aside { padding: 1.25rem 1.5rem; }
 .event-section h2 { font-size: 1.125rem; font-weight: 700; margin-bottom: 0.6rem; }
 .event-aside { display: grid; gap: 1rem; }
+.event-main { display: grid; gap: 1rem; min-width: 0; }
+
+/* event page: ticket tiers */
+.tier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; }
+.tier-card { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.tier-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 0.75rem; margin-bottom: 0.5rem; }
+.tier-name { font-size: 1rem; font-weight: 700; }
+.tier-price { font-weight: 700; color: var(--brand-text); }
+.tier-includes { font-size: 0.875rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; }
+.tier-benefits { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.3rem; font-size: 0.9375rem; }
+.tier-benefits li { display: flex; gap: 0.4rem; align-items: flex-start; }
+.tier-benefits svg { width: 16px; height: 16px; flex: none; margin-top: 0.2rem; color: var(--ok); }
+.tier-benefits .tier-included { color: var(--text-muted); }
 .facts { display: grid; gap: 0.85rem; }
 .facts dt {
   display: flex;
@@ -983,6 +1012,11 @@ main.wide > .page-card { margin-inline: auto; }
 .rsvp-status { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; color: var(--ok); }
 .rsvp-status svg { width: 18px; height: 18px; }
 .rsvp .small:empty { display: none; }
+/* The choice of the whole event or only some of its meals. */
+.rsvp-meals { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0.35rem; }
+.rsvp-meals .check { margin-bottom: 0; }
+.rsvp-meal-list { display: grid; gap: 0.35rem; padding-inline-start: 1.6rem; }
+#rsvpMealChecks { display: grid; gap: 0.35rem; }
 .event-aside .actions { margin-top: 0; }
 
 @media (max-width: 800px) {
@@ -994,6 +1028,8 @@ main.wide > .page-card { margin-inline: auto; }
 .account-layout { display: grid; gap: 1rem; width: 100%; max-width: 44rem; margin: 0 auto; }
 .account-layout .page-card { max-width: none; }
 .account-layout h2 { font-size: 1.25rem; font-weight: 700; }
+.account-layout > .tabs { margin-bottom: 0; }
+.account-panel-stack { display: grid; gap: 1rem; }
 .profile-row { display: flex; align-items: center; gap: 1rem; }
 .profile-row h1 { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
 .avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; background: var(--surface-active); }
@@ -1182,6 +1218,34 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .location-card .form-grid { margin-top: 0.6rem; }
 .location-card .row .grow { flex: 1 1 14rem; min-width: 0; }
 .location-card .location-error:empty, .location-status:empty { display: none; }
+
+/* manage: the event link, with the site's address in front */
+.slug-input { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.slug-prefix { color: var(--text-muted); font-size: 0.875rem; white-space: nowrap; }
+.field .slug-input input { flex: 1 1 12rem; width: auto; min-width: 0; }
+.slug-taken p { margin-bottom: 0.5rem; }
+
+/* manage: the meals people can come to on their own (js/manage-meals.js) */
+.meal-rows { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
+.meal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
+.meal-row .check { margin-bottom: 0; min-width: 8rem; }
+.meal-limit { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-muted); }
+.meal-limit input, .field.meal-custom-limit input { width: 7rem; }
+.meal-limit input {
+  min-height: 40px;
+  padding: 0.4rem 0.6rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--surface-active);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.meal-limit input:disabled { opacity: 0.5; }
+.field.meal-custom-limit { margin-bottom: 0; flex: none; }
+.meal-custom-list { display: grid; gap: 0.5rem; margin-bottom: 0.75rem; }
+.meal-custom-list:empty { display: none; }
+.meal-custom .field.grow { flex: 1 1 14rem; margin-bottom: 0; }
+.meal-custom { align-items: flex-end; }
 
 /* event page: a location's label above its place */
 .location-heading { font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); margin-top: 0.35rem; }

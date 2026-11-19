@@ -229,6 +229,10 @@ export function errorText(error) {
   if (field && Number.isInteger(error.detail.location)) {
     return translate('error.invalid_location_field', { ...placeholders, number: error.detail.location + 1 });
   }
+  // And a field of one ticket tier says which tier.
+  if (field && Number.isInteger(error.detail.tier)) {
+    return translate('error.invalid_tier_field', { ...placeholders, number: error.detail.tier + 1 });
+  }
   const text = translate(`error.${code}`, placeholders);
   // A code with no sentence of its own comes back as the key itself.
   if (text === `error.${code}`) {

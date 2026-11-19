@@ -262,6 +262,162 @@ test('RSVP needs a session, respects capacity, and reveals the online link only 
   assert.equal((await b.call(rsvp, { method: 'POST', body: { slug: 'small-meet', going: true } })).status, 200);
 });
 
+test('someone can come only for the meals an event offers, change their choice, and editors see it', async () => {
+  const event = addEvent({
+    slug: 'meal-meet', capacity: 2, description: 'About the meet.', description_zh: '关于聚会。',
+    meal_options: [{ id: 'lunch', label: null }, { id: 'dinner', label: null }, { id: 'm-tea123', label: 'High tea' }],
+  });
+  await addUser({ username: 'diner', totp_secret: SHARED_SECRET });
+  await addUser({ username: 'boss', totp_secret: SHARED_SECRET, is_editor: true, is_approved: true });
+  const b = browser();
+  await signIn(b, 'diner');
+
+  const page = await b.call(detail, { query: { slug: 'meal-meet' } });
+  assert.deepEqual(page.json.event.meals.map((meal) => meal.id), ['lunch', 'dinner', 'm-tea123']);
+  assert.deepEqual(page.json.event.viewer.meals, []);
+
+  const notOffered = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['breakfast'] } });
+  assert.equal(notOffered.status, 400);
+  assert.equal(notOffered.json.error, 'meal_not_offered');
+  assert.equal(db.table('gftvevents_attendees').length, 0);
+
+  const going = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['m-tea123', 'lunch'] } });
+  assert.equal(going.status, 200);
+  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, meals: ['lunch', 'm-tea123'], canManage: false });
+  assert.equal(going.json.event.going, 0, 'a meal-only attendee takes no space');
+
+  const changed = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['dinner'] } });
+  assert.deepEqual(changed.json.event.viewer.meals, ['dinner']);
+  assert.equal(db.table('gftvevents_attendees').length, 1);
+  assert.ok(db.table('gftvevents_audit_logs').some((row) => row.action === 'rsvp.meals_changed'));
+  assert.deepEqual((await b.call(detail, { query: { slug: 'meal-meet' } })).json.event.viewer.meals, ['dinner']);
+
+  const whole = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: [] } });
+  assert.deepEqual(whole.json.event.viewer.meals, []);
+  await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['lunch'] } });
+
+  const editor = browser();
+  await signIn(editor, 'boss');
+  const managed = await editor.call(manage, { query: { id: event.id } });
+  assert.deepEqual(managed.json.event.meals, [{ id: 'lunch', label: '', limit: '' }, { id: 'dinner', label: '', limit: '' }, { id: 'm-tea123', label: 'High tea', limit: '' }]);
+  assert.deepEqual(managed.json.attendees.map((a) => [a.username, a.meals]), [['diner', ['lunch']]]);
+
+  // Lunch is no longer offered: the attendee's choice is kept, but not shown.
+  const saved = await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...managed.json.event, meals: [{ id: 'dinner' }] } } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.json));
+  assert.deepEqual(saved.json.event.meals, [{ id: 'dinner', label: '', limit: '' }]);
+  assert.deepEqual((await editor.call(manage, { query: { id: event.id } })).json.attendees[0].meals, []);
+  assert.deepEqual((await b.call(detail, { query: { slug: 'meal-meet' } })).json.event.viewer.meals, []);
+  // A save from a page that knows nothing about meals leaves them as they are.
+  const { meals: _meals, ...withoutMeals } = saved.json.event;
+  const untouched = await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: withoutMeals } });
+  assert.deepEqual(untouched.json.event.meals, [{ id: 'dinner', label: '', limit: '' }]);
+});
+
+test('each meal has its own limit, and a full event still takes people just for a meal', async () => {
+  addEvent({
+    slug: 'busy-meet', capacity: 1,
+    meal_options: [{ id: 'lunch', label: null, limit: 1 }, { id: 'dinner', label: null, limit: null }],
+  });
+  for (const username of ['one', 'two', 'three']) {
+    await addUser({ username, totp_secret: SHARED_SECRET });
+  }
+  const [one, two, three] = [browser(), browser(), browser()];
+  await signIn(one, 'one');
+  await signIn(two, 'two');
+  await signIn(three, 'three');
+  const rsvpTo = (b, meals) => b.call(rsvp, { method: 'POST', body: { slug: 'busy-meet', going: true, meals } });
+
+  // One takes the only space; the event is full, but lunch still has a place.
+  const whole = await rsvpTo(one, []);
+  assert.equal(whole.json.event.rsvp, 'full');
+  assert.deepEqual(whole.json.event.meals.map((meal) => [meal.id, meal.limit, meal.left]), [['lunch', 1, 1], ['dinner', null, null]]);
+  assert.equal((await rsvpTo(two, [])).json.error, 'event_full');
+  const lunch = await rsvpTo(two, ['lunch']);
+  assert.equal(lunch.status, 200);
+  assert.equal(lunch.json.event.going, 1, 'only the whole-event attendee counts as going');
+  assert.equal(lunch.json.event.meals[0].left, 0);
+
+  // Lunch is now full; dinner has no limit.
+  const refused = await rsvpTo(three, ['lunch', 'dinner']);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error, 'meal_full');
+  assert.equal((await rsvpTo(three, ['dinner'])).status, 200);
+  // Someone already at lunch keeps their place when adding dinner, but
+  // cannot take the whole event's space while it is full.
+  assert.equal((await rsvpTo(two, ['lunch', 'dinner'])).status, 200);
+  assert.equal((await rsvpTo(two, [])).json.error, 'event_full');
+  // With RSVPs closed, nobody new joins and nobody takes a space, but
+  // someone going can still change their meals.
+  const row = db.table('gftvevents_events').find((r) => r.slug === 'busy-meet');
+  row.rsvp_open = false;
+  await addUser({ username: 'four', totp_secret: SHARED_SECRET });
+  const four = browser();
+  await signIn(four, 'four');
+  assert.equal((await rsvpTo(four, ['dinner'])).json.error, 'rsvp_closed');
+  assert.equal((await rsvpTo(three, [])).json.error, 'rsvp_closed');
+  const switched = await rsvpTo(three, ['dinner', 'lunch']);
+  assert.equal(switched.json.error, 'meal_full', 'the meal limits still hold');
+  assert.equal((await rsvpTo(two, ['dinner'])).status, 200);
+  assert.deepEqual((await rsvpTo(three, ['lunch'])).json.event.viewer.meals, ['lunch']);
+  assert.equal((await rsvpTo(one, ['dinner'])).status, 200, 'whole event to just a meal frees a space');
+  row.rsvp_open = true;
+
+  // When the space frees up, a meal-only attendee can move to the whole event.
+  await one.call(rsvp, { method: 'POST', body: { slug: 'busy-meet', going: false } });
+  const moved = await rsvpTo(two, []);
+  assert.equal(moved.status, 200);
+  assert.equal(moved.json.event.going, 1);
+  assert.deepEqual(moved.json.event.viewer.meals, []);
+});
+
+test('an editor sets a custom link, is told when it is taken, and saves ticket tiers', async () => {
+  addEvent({ slug: 'taken-link' });
+  await addUser({ username: 'boss', totp_secret: SHARED_SECRET, is_editor: true, is_approved: true });
+  const editor = browser();
+  await signIn(editor, 'boss');
+  const base = {
+    title: 'Tiered Con', description: 'About.', descriptionZh: '关于。', kind: 'convention', status: 'published',
+    timezone: 'Asia/Singapore', startDate: '2030-01-01', priceType: 'paid', currency: 'SGD', priceMin: '5',
+  };
+  const taken = await editor.call(manage, { method: 'POST', body: { action: 'create', event: { ...base, slug: 'taken-link' } } });
+  assert.equal(taken.status, 409);
+  assert.equal(taken.json.error, 'slug_taken');
+  const made = await editor.call(manage, { method: 'POST', body: { action: 'create', event: { ...base, slug: 'My Own Link', priceMin: '5' } } });
+  assert.equal(made.status, 400, 'a slug with spaces is refused, the form tidies it first');
+  const created = await editor.call(manage, { method: 'POST', body: { action: 'create', event: { ...base, slug: 'my-own-link', priceMin: '5' } } });
+  assert.equal(created.json.event.slug, 'my-own-link');
+  const id = created.json.event.id;
+
+  // The form asks first whether a link is free; the event's own counts.
+  assert.equal((await editor.call(manage, { query: { checkSlug: 'taken-link', id } })).json.free, false);
+  assert.equal((await editor.call(manage, { query: { checkSlug: 'my-own-link', id } })).json.free, true);
+  assert.equal((await editor.call(manage, { query: { checkSlug: 'Taken-Link' } })).json.free, false);
+  assert.equal((await editor.call(manage, { query: { checkSlug: 'unused-link' } })).json.free, true);
+
+  // Renaming onto a link in use is refused; a free one moves the event.
+  const clash = await editor.call(manage, { method: 'POST', body: { action: 'update', id, event: { ...created.json.event, slug: 'taken-link' } } });
+  assert.equal(clash.json.error, 'slug_taken');
+  const moved = await editor.call(manage, { method: 'POST', body: { action: 'update', id, event: { ...created.json.event, slug: 'taken-link-k3x9q2ab' } } });
+  assert.equal(moved.json.event.slug, 'taken-link-k3x9q2ab');
+
+  const tiers = [
+    { name: 'Day', price: '45', benefits: 'Entry' },
+    { name: 'Weekend', price: '80', benefits: 'All days', includesPrevious: true, previousDisplay: 'reference' },
+  ];
+  const tiered = await editor.call(manage, { method: 'POST', body: { action: 'update', id, event: { ...moved.json.event, tiersEnabled: true, ticketTiers: tiers } } });
+  assert.equal(tiered.status, 200, JSON.stringify(tiered.json));
+  assert.equal(tiered.json.event.priceMin, '45');
+  assert.equal(tiered.json.event.priceMax, '80');
+  const badTier = await editor.call(manage, { method: 'POST', body: { action: 'update', id, event: { ...tiered.json.event, ticketTiers: [...tiers, { name: 'Sponsor' }] } } });
+  assert.equal(badTier.json.field, 'tierPrice');
+  assert.equal(badTier.json.tier, 2);
+
+  const page = await browser().call(detail, { query: { slug: 'taken-link-k3x9q2ab' } });
+  assert.deepEqual(page.json.event.tiers.map((tier) => [tier.name, tier.price, tier.includesTier]), [['Day', 45, null], ['Weekend', 80, 'Day']]);
+  assert.deepEqual(page.json.event.price, { type: 'paid', min: 45, max: 80, currency: 'SGD', note: null });
+});
+
 test('drafts and cancelled events cannot be joined', async () => {
   addEvent({ slug: 'draft-one', status: 'draft' });
   addEvent({ slug: 'cancelled-one', status: 'cancelled' });

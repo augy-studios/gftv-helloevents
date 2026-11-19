@@ -11,6 +11,17 @@ export const DEFAULT_TIMEZONE = 'Asia/Singapore';
 // label the editor types.
 export const LOCATION_LABELS = ['event', 'meeting', 'custom'];
 export const MAX_LOCATIONS = 10;
+// The meals someone can come to on their own, instead of the whole event
+// (migrations/007): these three, ticked on the form, plus up to
+// MAX_CUSTOM_MEALS the editor names.
+export const BUILT_IN_MEALS = ['breakfast', 'lunch', 'dinner'];
+export const MAX_CUSTOM_MEALS = 5;
+// Ticket tiers on a paid event (migrations/008): at most MAX_TIERS, each with
+// at most MAX_TIER_BENEFITS benefits. A tier that includes the one before it
+// shows those benefits again in full, or names the tier ("reference").
+export const MAX_TIERS = 10;
+export const MAX_TIER_BENEFITS = 20;
+export const PREVIOUS_DISPLAYS = ['full', 'reference'];
 
 export const LIMITS = Object.freeze({
   title: 120,
@@ -25,6 +36,9 @@ export const LIMITS = Object.freeze({
   staffNotes: 4000,
   url: 500,
   label: 60,
+  mealLabel: 40,
+  tierName: 60,
+  tierBenefit: 200,
 });
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -40,6 +54,10 @@ const DAY_START = '00:00';
 const DAY_END = '23:59';
 // A two-letter ISO 3166 country code, as the form's country list sends it.
 const COUNTRY_CODE = /^[A-Za-z]{2}$/;
+// The id of a meal the editor named: "m-" and a few letters and digits, made
+// by the edit form when the meal is added and kept from then on, so the
+// people coming for it stay with it when it is renamed.
+const CUSTOM_MEAL_ID = /^m-[a-z0-9]{4,16}$/;
 
 // Every currency code this runtime knows (ISO 4217), for checking the form's
 // currency. Empty if the runtime cannot list them, and then any three
@@ -620,23 +638,28 @@ function readPrice(body, fields) {
   }
   fields.price_hidden = body.priceHidden === true;
 
-  const minimumPrice = parseMoney(body.priceMin);
-  if (!minimumPrice.ok) {
-    return 'priceMin';
-  }
-  const maximumPrice = parseMoney(body.priceMax);
-  if (!maximumPrice.ok) {
-    return 'priceMax';
-  }
   const isPaid = fields.price_type === 'paid';
-  if (isPaid) {
+  // With ticket tiers on, the range comes from the tiers (readTiers), and
+  // the form's own From and Up to fields are not read at all.
+  let tiered = false;
+  if (isPaid && body.tiersEnabled === true && body.ticketTiers !== undefined) {
+    tiered = true;
+  }
+  fields.price_min = null;
+  fields.price_max = null;
+  if (isPaid && !tiered) {
+    const minimumPrice = parseMoney(body.priceMin);
+    if (!minimumPrice.ok) {
+      return 'priceMin';
+    }
+    const maximumPrice = parseMoney(body.priceMax);
+    if (!maximumPrice.ok) {
+      return 'priceMax';
+    }
     fields.price_min = minimumPrice.value;
     fields.price_max = maximumPrice.value;
-  } else {
-    fields.price_min = null;
-    fields.price_max = null;
   }
-  if (isPaid && fields.price_min === null) {
+  if (isPaid && !tiered && fields.price_min === null) {
     return 'priceMin';
   }
   if (fields.price_max !== null && fields.price_min !== null && fields.price_max < fields.price_min) {
@@ -676,15 +699,295 @@ function readCapacity(body, fields) {
   return null;
 }
 
+// Whether a meal id is one an event can offer: breakfast, lunch, dinner, or
+// a named meal's id.
+function isMealId(id) {
+  if (typeof id !== 'string') {
+    return false;
+  }
+  if (BUILT_IN_MEALS.includes(id)) {
+    return true;
+  }
+  return CUSTOM_MEAL_ID.test(id);
+}
+
+// An event's meals as stored (migrations/007 and 009), each { id, label,
+// limit } (label null for breakfast, lunch and dinner; limit null for no
+// limit), skipping anything malformed.
+export function storedMeals(row) {
+  if (!row || !Array.isArray(row.meal_options)) {
+    return [];
+  }
+  const meals = [];
+  for (const meal of row.meal_options) {
+    if (!meal || !isMealId(meal.id)) {
+      continue;
+    }
+    const limit = storedLimit(meal.limit);
+    if (BUILT_IN_MEALS.includes(meal.id)) {
+      meals.push({ id: meal.id, label: null, limit });
+    } else if (typeof meal.label === 'string' && meal.label !== '') {
+      meals.push({ id: meal.id, label: meal.label, limit });
+    }
+  }
+  return meals;
+}
+
+// The most a meal's limit can be.
+const MAX_MEAL_LIMIT = 1_000_000;
+
+// A meal's limit as stored: a whole number from 1, or null for none.
+function storedLimit(value) {
+  if (Number.isInteger(value) && value >= 1 && value <= MAX_MEAL_LIMIT) {
+    return value;
+  }
+  return null;
+}
+
+// { ok: true, limit } for a meal's limit from the form (blank: null, no
+// limit), or { ok: false }.
+function readMealLimit(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { ok: true, limit: null };
+  }
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MEAL_LIMIT) {
+    return { ok: false };
+  }
+  return { ok: true, limit };
+}
+
+// A choice of meals (ids) for an event: { ok: true, meals } with the ids in
+// the event's own order and each once (an empty list is the whole event),
+// or { ok: false } when it is not a list or names a meal the event does
+// not offer.
+export function chooseMeals(row, chosen) {
+  if (chosen === undefined || chosen === null) {
+    return { ok: true, meals: [] };
+  }
+  if (!Array.isArray(chosen) || chosen.length > BUILT_IN_MEALS.length + MAX_CUSTOM_MEALS) {
+    return { ok: false };
+  }
+  const offered = storedMeals(row).map((meal) => meal.id);
+  if (chosen.some((id) => !offered.includes(id))) {
+    return { ok: false };
+  }
+  return { ok: true, meals: offered.filter((id) => chosen.includes(id)) };
+}
+
+// The meals people can come to on their own: [{ id, label, limit }] from
+// the form, breakfast, lunch and dinner by id (and limit), a named meal with
+// its id and name. A limit is how many can come for that meal alone (blank:
+// no limit); people coming to the whole event do not count against it. They are stored with the three first, in that order, then the named
+// ones as given. A named meal left blank is dropped, like an untouched
+// location. With no meals field at all the stored ones are kept, so a page
+// from before meal-only RSVPs cannot wipe what another editor set.
+function readMeals(body, fields) {
+  if (body.meals === undefined) {
+    return null;
+  }
+  let entries = body.meals;
+  if (entries === null) {
+    entries = [];
+  }
+  if (!Array.isArray(entries) || entries.length > BUILT_IN_MEALS.length + MAX_CUSTOM_MEALS) {
+    return 'meals';
+  }
+  const ticked = new Map();
+  const named = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return 'meals';
+    }
+    const id = stringOrEmpty(entry.id);
+    if (!isMealId(id) || seen.has(id)) {
+      return 'meals';
+    }
+    seen.add(id);
+    const limit = readMealLimit(entry.limit);
+    if (!limit.ok) {
+      return 'mealLimit';
+    }
+    if (BUILT_IN_MEALS.includes(id)) {
+      ticked.set(id, limit.limit);
+      continue;
+    }
+    const label = cleanText(entry.label, LIMITS.mealLabel);
+    if (label.length > LIMITS.mealLabel) {
+      return 'mealLabel';
+    }
+    if (label !== '') {
+      named.push({ id, label, limit: limit.limit });
+    }
+  }
+  if (named.length > MAX_CUSTOM_MEALS) {
+    return 'meals';
+  }
+  fields.meal_options = [
+    ...BUILT_IN_MEALS.filter((id) => ticked.has(id)).map((id) => ({ id, label: null, limit: ticked.get(id) })),
+    ...named,
+  ];
+  return null;
+}
+
+// One ticket tier from the form: { name, price, benefits (one per line),
+// includesPrevious, previousDisplay }, as { ok: true, tier } (tier null when
+// it is left wholly blank, so an untouched card is dropped) or
+// { ok: false, field }. A tier needs a name and a price (0 for a free tier).
+function readTier(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, field: 'ticketTiers' };
+  }
+  const name = cleanText(entry.name, LIMITS.tierName);
+  if (name.length > LIMITS.tierName) {
+    return { ok: false, field: 'tierName' };
+  }
+  let benefitText = entry.benefits;
+  if (Array.isArray(benefitText)) {
+    benefitText = benefitText.join('\n');
+  }
+  const benefits = [];
+  for (const line of cleanText(benefitText, LIMITS.tierBenefit * MAX_TIER_BENEFITS * 2).split('\n')) {
+    const benefit = line.trim();
+    if (benefit.length > LIMITS.tierBenefit) {
+      return { ok: false, field: 'tierBenefits' };
+    }
+    if (benefit !== '') {
+      benefits.push(benefit);
+    }
+  }
+  if (benefits.length > MAX_TIER_BENEFITS) {
+    return { ok: false, field: 'tierBenefits' };
+  }
+  const price = parseMoney(entry.price);
+  if (!price.ok) {
+    return { ok: false, field: 'tierPrice' };
+  }
+  if (name === '' && price.value === null && benefits.length === 0) {
+    return { ok: true, tier: null };
+  }
+  if (name === '') {
+    return { ok: false, field: 'tierName' };
+  }
+  if (price.value === null) {
+    return { ok: false, field: 'tierPrice' };
+  }
+  let previousDisplay = allowedOrNull(PREVIOUS_DISPLAYS, entry.previousDisplay);
+  if (!previousDisplay) {
+    previousDisplay = 'reference';
+  }
+  return {
+    ok: true,
+    tier: { name, price: price.value, benefits, includes_previous: entry.includesPrevious === true, previous_display: previousDisplay },
+  };
+}
+
+// Ticket tiers (migrations/008): the list, each checked, and whether they are
+// on. They are on only for a paid event, and then there must be at least
+// and the cheapest and dearest prices become the price range the feed cards
+// show. The first tier has no tier before it to include. With no
+// ticketTiers field at all the stored tiers are kept, so a page from before
+// tiers cannot wipe them.
+//
+// It returns the form field at the first problem, and sets fields.badTier to
+// that tier's place in the list, so the answer can say which one.
+function readTiers(body, fields) {
+  if (body.ticketTiers === undefined) {
+    return null;
+  }
+  let entries = body.ticketTiers;
+  if (entries === null) {
+    entries = [];
+  }
+  if (!Array.isArray(entries) || entries.length > MAX_TIERS) {
+    return 'ticketTiers';
+  }
+  const tiers = [];
+  for (const [index, entry] of entries.entries()) {
+    const check = readTier(entry);
+    if (!check.ok) {
+      fields.badTier = index;
+      return check.field;
+    }
+    if (check.tier) {
+      tiers.push(check.tier);
+    }
+  }
+  if (tiers.length) {
+    tiers[0].includes_previous = false;
+  }
+  fields.ticket_tiers = tiers;
+  fields.tiers_enabled = false;
+  if (body.tiersEnabled === true && fields.price_type === 'paid') {
+    fields.tiers_enabled = true;
+  }
+  // On with no tiers yet (just switched on, nothing typed): no range, so
+  // the price reads "to be announced" until the first tier is filled in.
+  if (!fields.tiers_enabled || tiers.length === 0) {
+    return null;
+  }
+  const prices = tiers.map((tier) => tier.price);
+  fields.price_min = Math.min(...prices);
+  fields.price_max = null;
+  if (Math.max(...prices) > fields.price_min) {
+    fields.price_max = Math.max(...prices);
+  }
+  return null;
+}
+
+// An event's tiers as stored, each with every key, skipping anything
+// malformed.
+export function storedTiers(row) {
+  if (!row || !Array.isArray(row.ticket_tiers)) {
+    return [];
+  }
+  const tiers = [];
+  for (const tier of row.ticket_tiers) {
+    if (!tier || typeof tier.name !== 'string' || tier.name === '') {
+      continue;
+    }
+    let benefits = [];
+    if (Array.isArray(tier.benefits)) {
+      benefits = tier.benefits.filter((benefit) => {
+        if (typeof benefit !== 'string') {
+          return false;
+        }
+        return benefit !== '';
+      });
+    }
+    let previousDisplay = 'reference';
+    if (tier.previous_display === 'full') {
+      previousDisplay = 'full';
+    }
+    let price = Number(tier.price);
+    if (!Number.isFinite(price)) {
+      price = 0;
+    }
+    tiers.push({
+      name: tier.name,
+      price,
+      benefits,
+      includes_previous: tier.includes_previous === true,
+      previous_display: previousDisplay,
+    });
+  }
+  // The first tier has no tier before it to include.
+  if (tiers.length) {
+    tiers[0].includes_previous = false;
+  }
+  return tiers;
+}
+
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readCapacity];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readPrice, readTiers, readCapacity, readMeals];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
 // that is wrong, plus location (its place in the list, from 0) when that
-// field is one location's.
+// field is one location's, or tier when it is one ticket tier's.
 export function validateEvent(input) {
   let body = {};
   if (input && typeof input === 'object') {
@@ -697,6 +1000,9 @@ export function validateEvent(input) {
       const problem = { ok: false, error: 'invalid_field', field: badField };
       if (fields.badLocation !== undefined) {
         problem.location = fields.badLocation;
+      }
+      if (fields.badTier !== undefined) {
+        problem.tier = fields.badTier;
       }
       return problem;
     }
