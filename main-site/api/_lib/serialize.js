@@ -45,6 +45,8 @@ import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedM
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
+import { galleryImageUrl } from './gallery.js';
+import { displayDescription } from './rich-text.js';
 import { qrUrl } from './payments.js';
 
 // ---------------------------------------------------------------------------
@@ -765,8 +767,9 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     ...card,
     price: priceView(row, { withNote: true }),
     ...spacesView(row, card.going),
-    description: emptyToNull(row.description),
-    descriptionZh: emptyToNull(row.description_zh),
+    // Rich text (rich-text.js), its pictures as this site's addresses.
+    description: emptyToNull(displayDescription(row, row.description)),
+    descriptionZh: emptyToNull(displayDescription(row, row.description_zh)),
     organiserName: emptyToNull(row.organiser_name),
     externalLink: externalLinkView(row, viewer),
     crossBorder: row.cross_border === true,
@@ -777,6 +780,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       onlineUrl,
       onlineUrlForAttendees,
     },
+    gallery: galleryView(row),
     tiers: tiersView(row),
     meals: mealsView(row, addressShown),
     lepak: lepakView(row),
@@ -834,12 +838,69 @@ export function managedSummary(row, now = Date.now()) {
   };
 }
 
+// The event page's gallery (migrations/019): each picture's address and its
+// size, so the page lays it out in its own shape before it loads. row.gallery
+// is added by gallery.js withGallery; none when it was not.
+function galleryView(row) {
+  if (!Array.isArray(row.gallery)) {
+    return [];
+  }
+  const pictures = [];
+  for (const image of row.gallery) {
+    const url = galleryImageUrl(row.slug, image.path);
+    if (url) {
+      pictures.push({ url, width: image.width, height: image.height });
+    }
+  }
+  return pictures;
+}
+
+// One gallery picture in the edit form: its id for the buttons, its address
+// and its size.
+export function managedGalleryImage(image, slug) {
+  return {
+    id: image.id,
+    url: emptyToBlank(galleryImageUrl(slug, image.path)),
+    width: image.width,
+    height: image.height,
+  };
+}
+
+// The crop a cover was cut with ({ x, y, width, height } in the gallery
+// picture's pixels), or null.
+function storedCrop(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const crop = {};
+  for (const key of ['x', 'y', 'width', 'height']) {
+    if (!Number.isFinite(value[key])) {
+      return null;
+    }
+    crop[key] = value[key];
+  }
+  return crop;
+}
+
 // The cover picture alone, for the answer to an upload or removal
 // (api/manage/cover.js): the edit form redraws only its cover preview.
+// coverSourceId is the gallery picture it was cut from ('' when none is
+// known, or that picture has gone) and coverCrop the crop, so "Adjust crop"
+// can start from it.
 export function managedCover(row) {
+  let sourceId = emptyToBlank(row.cover_source_image_id);
+  if (!row.cover_image_path) {
+    sourceId = '';
+  }
+  let crop = null;
+  if (sourceId) {
+    crop = storedCrop(row.cover_crop);
+  }
   return {
     coverImageUrl: emptyToBlank(coverUrl(row)),
     hasCover: Boolean(row.cover_image_path),
+    coverSourceId: sourceId,
+    coverCrop: crop,
   };
 }
 
@@ -858,8 +919,8 @@ export function managedEvent(row) {
     timezone: row.timezone,
     capacity: missingToNull(row.capacity),
     summary: emptyToBlank(row.summary),
-    description: emptyToBlank(row.description),
-    descriptionZh: emptyToBlank(row.description_zh),
+    description: emptyToBlank(displayDescription(row, row.description)),
+    descriptionZh: emptyToBlank(displayDescription(row, row.description_zh)),
     ...managedWhen(row),
     publishLocal: utcToWall(row.publish_at, row.timezone),
     isOnline: row.is_online === true,

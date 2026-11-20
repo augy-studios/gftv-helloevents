@@ -25,7 +25,7 @@ export const DETAIL_COLUMNS =
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
-export const MANAGE_COLUMNS = `${DETAIL_COLUMNS}, staff_notes`;
+export const MANAGE_COLUMNS = `${DETAIL_COLUMNS}, staff_notes, cover_source_image_id, cover_crop`;
 
 export const FEED_PAGE = 24;
 

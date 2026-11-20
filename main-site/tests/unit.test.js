@@ -155,7 +155,7 @@ test('bad input is refused with the field named', () => {
   assert.equal(rules.validateEvent(form({ startTime: '25:00' })).field, 'startTime');
   assert.equal(rules.validateEvent(form({ description: '  ' })).field, 'description', 'English is required');
   assert.equal(rules.validateEvent(form({ descriptionZh: '' })).field, 'descriptionZh', 'and Chinese too');
-  assert.equal(rules.validateEvent(form({ descriptionZh: 'x'.repeat(8001) })).field, 'descriptionZh');
+  assert.equal(rules.validateEvent(form({ descriptionZh: 'x'.repeat(20001) })).field, 'descriptionZh');
   assert.equal(rules.validateEvent(form({ priceType: 'paid', priceMin: '5', currency: 'ZZZ' })).field, 'currency');
   assert.equal(rules.validateEvent(form({ externalUrl: 'http://example.com/a' })).field, 'externalUrl');
   assert.equal(rules.validateEvent(form({ onlineUrl: 'javascript:alert(1)' })).field, 'onlineUrl');
@@ -511,8 +511,9 @@ test('the editor view round-trips the form fields, including staff notes', () =>
   assert.equal(view.staffNotes, 'internal only');
   assert.equal(view.startDate, '2026-11-14');
   assert.equal(view.startTime, '14:00');
-  assert.equal(view.description, 'Long text');
-  assert.equal(view.descriptionZh, '长文');
+  // Plain text from before rich descriptions is read as paragraphs.
+  assert.equal(view.description, '<p>Long text</p>');
+  assert.equal(view.descriptionZh, '<p>长文</p>');
   // An event saved before the locations list has its place as its one location.
   assert.deepEqual(view.locations, [{ label: 'event', customLabel: '', venueName: 'Hall', venueAddress: '1 Secret Road', city: 'Singapore', country: 'Singapore', mapsUrl: '' }]);
   const again = rules.validateEvent(view);

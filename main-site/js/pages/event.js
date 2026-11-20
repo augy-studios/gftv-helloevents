@@ -8,6 +8,8 @@ import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 import { renderTimetable } from '../timetable.js';
+import { renderEventGallery } from '../event-gallery.js';
+import { renderRichText } from '../rich-dom.js';
 import { startTours } from '../tour.js';
 
 const byId = (id) => document.getElementById(id);
@@ -15,6 +17,8 @@ const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(
 let event = null;
 let preview = false;
 let descriptionLang = preferredDescriptionLang();
+// The language and description last drawn.
+let descriptionShown = '';
 // What this person is coming for: mode 'event' (the whole event, with a
 // ticket where the event sells them), 'meals' (only some of the meals the
 // event offers) or 'lepak' ("Just Lepak Only", migrations/017: no ticket,
@@ -128,8 +132,10 @@ function renderWhere() {
 
 // The description in the language picked on the switcher, which shows only
 // when the event has both (an event saved before both were required may
-// have one). The text is marked with its language, so the right font and
-// screen reader voice are used; the placeholder is the page's own language.
+// have one). It is rich text (rich-dom.js), marked with its language, so
+// the right font and screen reader voice are used; the placeholder is the
+// page's own language. It is drawn again only when the language or the
+// description changes, so a playing sticker is not restarted by an RSVP.
 function renderDescription() {
   const texts = { en: event.description, zh: event.descriptionZh };
   const box = byId('eventDescription');
@@ -148,9 +154,17 @@ function renderDescription() {
   for (const button of descriptionSwitch.buttons) {
     button.setAttribute('aria-pressed', String(button.dataset.lang === lang));
   }
+  let shown = `none:${translate('event.no-description')}`;
+  if (texts[lang]) {
+    shown = `${lang}:${texts[lang]}`;
+  }
+  if (descriptionShown === shown) {
+    return;
+  }
+  descriptionShown = shown;
   if (texts[lang]) {
     box.lang = lang;
-    box.textContent = texts[lang];
+    renderRichText(box, texts[lang]);
   } else {
     box.removeAttribute('lang');
     box.textContent = translate('event.no-description');
@@ -654,7 +668,7 @@ function renderExternalLink() {
 }
 
 // Draws the whole event: title, chips, cover, summary, description,
-// organiser, the facts (when, where, price, going), the outside and manage
+// gallery, organiser, the facts (when, where, price, going), the outside and manage
 // links, the preview note, and the RSVP box.
 function render() {
   document.title = translate('event.page-title', { title: event.title });
@@ -677,6 +691,7 @@ function render() {
   }
   byId('eventSummary').textContent = summary;
   renderDescription();
+  renderEventGallery(event.gallery);
   byId('eventOrganiser').hidden = !event.organiserName;
   let organiserText = '';
   if (event.organiserName) {

@@ -3,6 +3,8 @@
 //
 // Pure functions, no database, so tests/unit.test.js can run them directly.
 
+import { cleanDescription } from './rich-text.js';
+
 export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
 export const PRICE_TYPES = ['free', 'paid', 'tba'];
@@ -48,7 +50,6 @@ export const TIMETABLE_DEFAULT_MINUTES = 30;
 export const LIMITS = Object.freeze({
   title: 120,
   summary: 280,
-  description: 8000,
   venueName: 160,
   venueAddress: 300,
   city: 80,
@@ -401,8 +402,6 @@ function readIdentity(body, fields) {
 // fields are per location (readLocations).
 const TEXT_FIELDS = [
   ['summary', 'summary', LIMITS.summary],
-  ['description', 'description', LIMITS.description],
-  ['descriptionZh', 'description_zh', LIMITS.description],
   ['organiserName', 'organiser_name', LIMITS.organiserName],
   ['priceNote', 'price_note', LIMITS.priceNote],
   ['staffNotes', 'staff_notes', LIMITS.staffNotes],
@@ -431,12 +430,24 @@ const REQUIRED_DESCRIPTIONS = [
   ['descriptionZh', 'description_zh'],
 ];
 
-// Each free-text field, length-checked; then both descriptions, which may
-// not be blank.
+// Each free-text field, length-checked; then both descriptions, rich text
+// cleaned to what a description may hold (rich-text.js), which may not be
+// blank.
 function readTextFields(body, fields) {
   for (const [formField, column, maximumLength] of TEXT_FIELDS) {
     if (!putText(fields, column, body[formField], maximumLength).ok) {
       return formField;
+    }
+  }
+  for (const [formField, column] of REQUIRED_DESCRIPTIONS) {
+    const cleaned = cleanDescription(body[formField]);
+    if (!cleaned.ok) {
+      return formField;
+    }
+    if (cleaned.html === '') {
+      fields[column] = null;
+    } else {
+      fields[column] = cleaned.html;
     }
   }
   for (const [formField, column] of REQUIRED_DESCRIPTIONS) {

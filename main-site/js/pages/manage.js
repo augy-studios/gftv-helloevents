@@ -15,16 +15,25 @@
 // The form's sections are tabs of their own (Basics, When and where, Price
 // and RSVP, Meals, Timetable, Attendees and notes), so a section is a click away rather
 // than a long scroll; the tab holding a field the pill asks about is marked.
-// A picture pasted anywhere in the open form (Ctrl+V, or Cmd+V) is used as
-// the cover, exactly as if it had been chosen with "Choose a picture".
+// The two descriptions are rich text, written in a Word-like editor
+// (rich-editor.js); a picture pasted into the editor goes into the gallery
+// and in at the cursor. A picture pasted anywhere else in the open form
+// (Ctrl+V, or Cmd+V) is added to the gallery, exactly as if it had been chosen with "Add pictures". The
+// cover is cut from a gallery picture ("Use as cover"), in the crop dialog.
 
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
 import { iconNode } from '../icons.js';
-import { decodeCover, cropToWebp } from '../cover-upload.js';
+import { cropToWebp, widestCrop, MIN_WIDTH } from '../cover-upload.js';
 import { cropCover } from '../cover-crop.js';
+import { fetchPicture } from '../gallery-upload.js';
+import { startGallery, loadGallery, addGalleryFiles, setGalleryCover, galleryImage, galleryImages, galleryReady, copyGalleryPicture } from '../manage-gallery.js';
+import { startRichEditors, showEditor as showDescriptionEditor, setDescription, readDescription, descriptionBlank, insertPictures, focusEditor } from '../rich-editor.js';
+import { hydrateRichIcons } from '../rich-icons.js';
+import { startPicturePicker, openPicturePicker } from '../picture-picker.js';
+import { startEmojiPicker } from '../emoji-picker.js';
 import { startTools } from '../manage-tools.js';
 import { startEditors, loadEditors } from '../manage-editors.js';
 import { startTabs } from '../tabs.js';
@@ -48,7 +57,7 @@ const PAGE_SIZE = 10;
 // volunteer benefit is for and the timetable's rooms and items have their
 // own handling below.
 const TEXT_FIELDS = [
-  'title', 'slug', 'kind', 'summary', 'description', 'descriptionZh', 'organiserName', 'externalUrl',
+  'title', 'slug', 'kind', 'summary', 'organiserName', 'externalUrl',
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
   'volunteerDiscountType', 'volunteerDiscountValue', 'timetableView', 'externalUrlLabel', 'externalUrlCustomLabel',
@@ -94,10 +103,10 @@ let savedMeals = [];
 // Whether the open event is cross-border as last saved (migrations/015): its
 // attendee list then says where each person is from.
 let savedCrossBorder = false;
-let cover = { url: '', has: false };
-// The picture last chosen for this event's cover in this visit, and the crop
-// it was uploaded with, so "Adjust crop" can crop it again: { bitmap, crop }.
-let coverSource = null;
+// The cover as last saved: its address, whether there is one, the gallery
+// picture it was cut from ('' when none is known) and the crop, so "Adjust
+// crop" can start from it.
+let cover = { url: '', has: false, sourceId: '', crop: null };
 let tabs = null;
 // The edit form's own section tabs.
 let editorTabs = null;
@@ -254,6 +263,8 @@ function setForm(values) {
   for (const name of CHECK_FIELDS) {
     byId(`f-${name}`).checked = values[name] === true;
   }
+  setDescription('en', values.description);
+  setDescription('zh', values.descriptionZh);
   descriptionSwitch.select('en');
   markMissingDescriptions();
   showSlugTaken(null);
@@ -286,21 +297,35 @@ function setForm(values) {
   setTimetable(rooms, items);
   setPayment(values);
   fillVolunteerSources(values.volunteerDiscountFrom);
-  let coverUrl = values.coverImageUrl;
-  if (!coverUrl) {
-    coverUrl = '';
-  }
-  cover = { url: coverUrl, has: values.hasCover === true };
-  forgetCoverSource();
-  renderCover();
+  setCover(values);
   syncDependent();
   lastSaved = JSON.stringify(readForm());
   failed = null;
   refused = '';
 }
 
-// The cover picture is uploaded on its own (api/manage/cover.js), so a new
-// event is saved first.
+// The cover from an answer (the edit form's, or api/manage/cover.js's).
+function setCover(values) {
+  let url = values.coverImageUrl;
+  if (!url) {
+    url = '';
+  }
+  let sourceId = values.coverSourceId;
+  if (!sourceId) {
+    sourceId = '';
+  }
+  let crop = values.coverCrop;
+  if (!crop) {
+    crop = null;
+  }
+  cover = { url, has: values.hasCover === true, sourceId, crop };
+  renderCover();
+  setGalleryCover(sourceId);
+}
+
+// The cover is uploaded on its own (api/manage/cover.js), cut from a gallery
+// picture, so a new event is saved first. "Adjust crop" shows while the
+// picture it was cut from is still in the gallery.
 function renderCover() {
   const box = byId('coverPreview');
   box.replaceChildren();
@@ -310,82 +335,65 @@ function renderCover() {
   } else {
     box.append(iconNode('image'));
   }
-  byId('coverPick').hidden = !editing;
-  byId('coverPasteHint').hidden = !editing;
-  byId('coverSaveFirst').hidden = Boolean(editing);
   let canRemove = false;
   if (editing && cover.has) {
     canRemove = true;
   }
   byId('coverRemove').hidden = !canRemove;
   let canAdjust = false;
-  if (canRemove && coverSource) {
+  if (canRemove && cover.sourceId) {
     canAdjust = true;
   }
   byId('coverAdjust').hidden = !canAdjust;
   byId('coverError').textContent = '';
 }
 
-// Lets go of the picture kept for "Adjust crop".
-function forgetCoverSource() {
-  if (coverSource) {
-    coverSource.bitmap.close();
-  }
-  coverSource = null;
-}
-
-// Opens the crop dialog for a picture (at start, an earlier crop, or the
-// middle), then uploads the part chosen. Closing the dialog uploads nothing.
-async function cropAndUpload(bitmap, start = null) {
-  const crop = await cropCover(bitmap, start);
-  if (!crop || !editing) {
-    return false;
-  }
-  const done = await withBusy(byId('coverPick'), byId('coverError'), async () => {
-    const { dataUrl } = await cropToWebp(bitmap, crop);
-    const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl });
-    cover = { url: data.event.coverImageUrl, has: data.event.hasCover };
-    if (coverSource && coverSource.bitmap !== bitmap) {
-      forgetCoverSource();
-    }
-    coverSource = { bitmap, crop };
-    renderCover();
-    byId('manageNotice').textContent = translate('manage.cover-saved');
-    return true;
-  });
-  return done === true;
-}
-
-byId('coverAdjust').addEventListener('click', () => {
-  if (coverSource) {
-    cropAndUpload(coverSource.bitmap, coverSource.crop);
-  }
-});
-
-// A picture chosen or pasted is read, then cropped to the cards' 16:9 in the
-// crop dialog (starting on its middle), then uploaded.
-async function useCoverFile(file) {
-  if (!file || !editing) {
+// "Use as cover" on a gallery picture: it is fetched and decoded, the crop
+// dialog opens on it (on the earlier crop when the cover was cut from this
+// picture, otherwise on its middle), and the part chosen is uploaded as the
+// cover, with the picture and crop it came from. Closing the dialog uploads
+// nothing.
+async function useAsCover(image, button) {
+  if (!editing || !image) {
     return;
   }
-  const bitmap = await withBusy(byId('coverPick'), byId('coverError'), () => decodeCover(file));
+  const errorBox = byId('galleryError');
+  const bitmap = await withBusy(button, errorBox, async () => {
+    const decoded = await fetchPicture(image.url);
+    if (widestCrop(decoded.width, decoded.height).width < MIN_WIDTH) {
+      decoded.close();
+      throw Object.assign(new Error('gallery_too_small_for_cover'), { code: 'gallery_too_small_for_cover' });
+    }
+    return decoded;
+  });
   if (!bitmap) {
     return;
   }
-  const uploaded = await cropAndUpload(bitmap);
-  if (!uploaded && (!coverSource || coverSource.bitmap !== bitmap)) {
+  let start = null;
+  if (cover.sourceId === image.id && cover.crop) {
+    start = cover.crop;
+  }
+  try {
+    const crop = await cropCover(bitmap, start);
+    if (!crop || !editing) {
+      return;
+    }
+    const done = await withBusy(button, errorBox, async () => {
+      const { dataUrl } = await cropToWebp(bitmap, crop);
+      const data = await post('/api/manage/cover', { id: editing.id, image: dataUrl, sourceImageId: image.id, crop });
+      setCover(data.event);
+      return true;
+    });
+    if (done) {
+      byId('manageNotice').textContent = translate('manage.cover-saved');
+    }
+  } finally {
     bitmap.close();
   }
 }
 
-byId('coverFile').addEventListener('change', () => {
-  const files = byId('coverFile').files;
-  let file;
-  if (files !== null && files !== undefined) {
-    file = files[0];
-  }
-  byId('coverFile').value = '';
-  useCoverFile(file);
+byId('coverAdjust').addEventListener('click', () => {
+  useAsCover(galleryImage(cover.sourceId), byId('coverAdjust'));
 });
 
 // The picture on the clipboard of a paste, as a File, or null. Pasting into
@@ -417,10 +425,14 @@ function pastedPicture(event) {
 }
 
 // Ctrl+V (or Cmd+V) with a picture on the clipboard, anywhere in the open
-// form, does what "Choose a picture" does with it. Basics opens, so the
-// cover can be seen; before the event has saved, it says a picture can be
-// added once it has. Not while a dialog (the crop dialog) is open.
+// form, does what "Add pictures" does with it. Basics opens, so the gallery
+// can be seen; before the event has saved, it says a picture can be added
+// once it has. Not while a dialog (the crop dialog) is open.
 document.addEventListener('paste', (event) => {
+  // The description editor takes its own pastes.
+  if (event.defaultPrevented) {
+    return;
+  }
   if (form.hidden || byId('panel-editor').hidden || document.querySelector('.modal-backdrop:not(.hidden)')) {
     return;
   }
@@ -431,21 +443,27 @@ document.addEventListener('paste', (event) => {
   event.preventDefault();
   editorTabs.open('basics');
   if (!editing) {
-    byId('coverError').textContent = translate('manage.hint.cover-save-first');
-    byId('coverSaveFirst').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    byId('galleryError').textContent = translate('manage.hint.cover-save-first');
+    byId('gallerySaveFirst').scrollIntoView({ block: 'center', behavior: 'smooth' });
     return;
   }
-  byId('coverError').textContent = '';
-  useCoverFile(file);
+  byId('galleryError').textContent = '';
+  addGalleryFiles([file]);
+  byId('galleryList').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 });
 
 byId('coverRemove').addEventListener('click', () => {
   withBusy(byId('coverRemove'), byId('coverError'), async () => {
     const data = await post('/api/manage/cover', { id: editing.id, remove: true });
-    cover = { url: '', has: data.event.hasCover };
-    forgetCoverSource();
-    renderCover();
+    setCover(data.event);
   });
+});
+
+startGallery({
+  useAsCover,
+  // Taking out the picture the cover was cut from keeps the cover and
+  // forgets where it came from.
+  onCoverChange: (saved) => setCover(saved),
 });
 
 function readForm() {
@@ -456,6 +474,8 @@ function readForm() {
   for (const name of CHECK_FIELDS) {
     values[name] = byId(`f-${name}`).checked;
   }
+  values.description = readDescription('en');
+  values.descriptionZh = readDescription('zh');
   values.timezone = byId('f-timezone').value;
   values.currency = currencyCodeFrom(byId('f-currency').value);
   values.locations = readLocations();
@@ -560,31 +580,44 @@ function syncDependent() {
   syncPayment();
 }
 
-// The two descriptions, both required: [language, text box, form field].
-// The switcher shows one at a time, and marks a language still blank.
+// The two descriptions, both required: [language, form field]. The switcher
+// shows one editor at a time, and marks a language still blank.
 const DESCRIPTIONS = [
-  ['en', byId('f-description'), 'description'],
-  ['zh', byId('f-descriptionZh'), 'descriptionZh'],
+  ['en', 'description'],
+  ['zh', 'descriptionZh'],
 ];
-const descriptionSwitch = startLangSwitch(byId('descriptionSwitch'), (lang) => {
-  for (const [boxLang, box] of DESCRIPTIONS) {
-    box.hidden = boxLang !== lang;
-    if (boxLang === lang) {
-      byId('descriptionLabel').htmlFor = box.id;
-    }
-  }
-});
+const descriptionSwitch = startLangSwitch(byId('descriptionSwitch'), (lang) => showDescriptionEditor(lang));
 
 function markMissingDescriptions() {
-  for (const [lang, box] of DESCRIPTIONS) {
+  for (const [lang] of DESCRIPTIONS) {
     const button = descriptionSwitch.buttons.find((each) => each.dataset.lang === lang);
-    button.querySelector('.missing-mark').hidden = box.value.trim() !== '';
+    button.querySelector('.missing-mark').hidden = !descriptionBlank(lang);
   }
 }
 
-for (const [, box] of DESCRIPTIONS) {
-  box.addEventListener('input', markMissingDescriptions);
-}
+// The editor's pictures go into this event's gallery.
+hydrateRichIcons(byId('richToolbar'));
+startRichEditors({ en: byId('f-description'), zh: byId('f-descriptionZh') }, {
+  onChange: markMissingDescriptions,
+  openPicturePicker,
+  uploadFiles: (files) => addGalleryFiles(files),
+  copyPicture: (address) => copyGalleryPicture(address),
+  canAddPictures: () => galleryReady(),
+});
+startPicturePicker({
+  galleryImages,
+  canAddPictures: () => galleryReady(),
+  uploadFiles: (files) => addGalleryFiles(files),
+  insert: (pictures) => {
+    insertPictures(pictures);
+    autosave({ force: true });
+  },
+});
+byId('descriptionLabel').addEventListener('click', focusEditor);
+startEmojiPicker();
+// A picture copied into the gallery after a paste changes the description
+// without the editor being left: it is saved when it lands.
+form.addEventListener('rich-pictures-settled', () => autosave({ force: true }));
 
 // The first field the server needs that is still blank (a title, both
 // descriptions, and a start date unless the dates are to be announced), or
@@ -671,10 +704,10 @@ function inDraftCard(element) {
 }
 
 // Leaving a field saves it, unless focus moves into one of those cards (it
-// is saved when that card is left). The cover picture is uploaded on its
+// is saved when that card is left). Gallery pictures are uploaded on their
 // own.
 form.addEventListener('focusout', (event) => {
-  if (event.target.id === 'coverFile') {
+  if (event.target.id === 'galleryFile') {
     return;
   }
   if (inDraftCard(event.relatedTarget)) {
@@ -1019,8 +1052,8 @@ async function saveForm(sent, body) {
   }
 }
 
-// Once an event exists: its page link, the cover picture and attendee
-// list, and Delete for admins.
+// Once an event exists: its page link, the cover picture, the gallery and
+// attendee list, and Delete for admins.
 function showSavedControls() {
   let canDelete = false;
   if (editing && currentUser.role === 'admin') {
@@ -1036,6 +1069,7 @@ function showSavedControls() {
     loadEditors();
   }
   renderCover();
+  loadGallery(editing);
   renderAttendees();
 }
 

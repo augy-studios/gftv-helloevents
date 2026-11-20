@@ -12,6 +12,7 @@
 
     <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/assets/fonts/emoji/emoji.css">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/GHE-180.png">
@@ -94,8 +95,13 @@
                             <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文</button>
                         </div>
                     </div>
-                    <p class="prewrap" id="eventDescription"></p>
+                    <div class="rich-text event-description" id="eventDescription"></div>
                     <p class="muted small u-mt-1" id="eventOrganiser" hidden></p>
+                </section>
+
+                <section class="glass-card event-section" id="galleryBox" hidden aria-labelledby="galleryTitle">
+                    <h2 id="galleryTitle" data-i18n="event.gallery">Gallery</h2>
+                    <ul class="event-gallery" id="eventGallery"></ul>
                 </section>
 
                 <section class="glass-card event-section" id="ticketsBox" hidden aria-labelledby="ticketsTitle">
@@ -213,6 +219,22 @@
             <p class="mode-note" id="modeNote" hidden></p>
             <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
             <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="galleryModal">
+        <div class="modal glass-card gallery-modal" role="dialog" aria-modal="true" aria-labelledby="galleryModalTitle">
+            <div class="modal-head">
+                <h2 id="galleryModalTitle"></h2>
+                <button class="icon-btn small" type="button" data-close-modal="galleryModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <img class="gallery-view" id="galleryView" alt="" referrerpolicy="no-referrer">
+            <div class="actions inline gallery-nav" id="galleryNav">
+                <button class="btn" type="button" id="galleryPrev"><span data-icon="arrow-left"></span><span data-i18n="event.gallery-prev">Previous</span></button>
+                <button class="btn" type="button" id="galleryNext"><span data-i18n="event.gallery-next">Next</span><span data-icon="arrow-right"></span></button>
+            </div>
         </div>
     </div>
 

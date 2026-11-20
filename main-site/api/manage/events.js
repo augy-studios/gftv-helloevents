@@ -39,6 +39,8 @@ import { validateEvent, isSlug, volunteerDiscountActive, storedTiers, VOLUNTEER_
 import { MANAGE_COLUMNS, PAYMENT_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
+import { galleryRows, deleteGalleryFiles } from '../_lib/gallery.js';
+import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, proofPaths } from '../_lib/payments.js';
 import { editableEventIds } from '../_lib/event-editors.js';
 import { background, queueEventChange, sendEventChangeWhenDue, sendPaymentConfirmed } from '../_lib/notify.js';
@@ -142,6 +144,7 @@ async function showEvent(response, eventId) {
   if (!row) {
     return fail(response, 404, 'not_found');
   }
+  await withDescriptionPictures(row);
   const event = managedEvent(row);
   const attendees = await loadAttendees(row);
   return ok(response, { event, attendees });
@@ -234,6 +237,7 @@ async function createEvent(request, response, fields, user, { numberSlug }) {
     return answerSaveError(response, error);
   }
   await audit(request, { action: 'event.created', actorId: user.id, eventId: data.id, details: { status: data.status } });
+  await withDescriptionPictures(data);
   return ok(response, { event: managedEvent(data) });
 }
 
@@ -286,6 +290,7 @@ async function updateEvent(request, response, body, fields, user) {
   if (changes.notice_due_at) {
     background(sendEventChangeWhenDue(data.id));
   }
+  await withDescriptionPictures(data);
   return ok(response, { event: managedEvent(data) });
 }
 
@@ -331,7 +336,7 @@ async function saveEvent(request, response, body, user) {
   return updateEvent(request, response, body, fields, user);
 }
 
-// "delete", admins only: the event and its cover picture.
+// "delete", admins only: the event, its cover picture and its gallery.
 async function deleteEvent(request, response, body, user) {
   if (!isAdmin(user)) {
     return fail(response, 403, 'admin_only');
@@ -341,6 +346,8 @@ async function deleteEvent(request, response, body, user) {
   }
   // The attendees' payment screenshots go with the event.
   const proofs = await proofPaths(body.id);
+  // So are the gallery's files; its rows go with the event.
+  const galleryPaths = (await galleryRows(body.id)).map((image) => image.path);
   const { data, error } = await database()
     .from(TABLES.events)
     .delete()
@@ -354,6 +361,7 @@ async function deleteEvent(request, response, body, user) {
   }
   const deleted = data[0];
   await deleteCover(deleted.cover_image_path);
+  await deleteGalleryFiles(galleryPaths);
   const tierQrs = storedTiers(deleted).map((tier) => tier.payment_qr_path);
   await deletePaymentFiles([deleted.payment_qr_path, ...tierQrs, ...proofs]);
   // event_id is set null on the audit rows by the foreign key, so the slug
@@ -601,9 +609,9 @@ export default route('manage/events', async (request, response) => {
     return;
   }
 
-  // A whole form, with a con's timetable (a few hundred items) and both
-  // descriptions in it, fits well inside this.
-  const body = await readJson(request, response, { maxBytes: 256 * 1024 });
+  // A whole form, with a con's timetable (a few hundred items) and both rich
+  // text descriptions as the editor sends them, fits well inside this.
+  const body = await readJson(request, response, { maxBytes: 1024 * 1024 });
   if (!body) {
     return;
   }

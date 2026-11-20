@@ -9,6 +9,7 @@
 //   - /api/<path> runs the real handler in api/<path>.js, with the request
 //     shaped the way Vercel's Node runtime shapes it (req.query, req.cookies,
 //     a parsed JSON req.body, x-forwarded-for);
+//   - pictures pasted from other websites are made here (useTestPictureFetcher);
 //   - the handlers talk to the same in-memory database (tests/fake-db.js)
 //     and Redis (tests/fake-redis.js) as `npm test`, through the same hooks
 //     the unit tests use (useTestClient, useTestRedis, useTestPushSender);
@@ -98,6 +99,7 @@ const { useTestClient } = await import('../../api/_lib/supabase.js');
 const { useTestRedis } = await import('../../api/_lib/redis.js');
 const { useTestPushSender } = await import('../../api/_lib/push.js');
 const { forgetNameFilters } = await import('../../api/_lib/name-filter.js');
+const { useTestPictureFetcher } = await import('../../api/_lib/fetch-picture.js');
 
 // ---------------------------------------------------------------------------
 // State: the fake database and Redis, and what the stubs saw. Replaced
@@ -119,6 +121,19 @@ await resetState();
 
 useTestPushSender(async (subscription, body) => {
   observed.pushes.push({ endpoint: subscription.endpoint, payload: JSON.parse(body) });
+});
+
+// Pictures pasted from other websites (api/_lib/fetch-picture.js): one made
+// here for https://pictures.e2e.test/<width>x<height>.png, in a teal; any
+// other address is refused, as an unreachable site would be.
+useTestPictureFetcher(async (address) => {
+  const match = /^https:\/\/pictures\.e2e\.test\/(\d+)x(\d+)\.png$/.exec(String(address));
+  if (!match) {
+    observed.refusedFetches.push(String(address));
+    throw Object.assign(new Error('picture_fetch_failed'), { code: 'picture_fetch_failed' });
+  }
+  const { default: sharp } = await import('sharp');
+  return sharp({ create: { width: Number(match[1]), height: Number(match[2]), channels: 3, background: '#2a9d8f' } }).png().toBuffer();
 });
 
 // Turnstile's siteverify, answered here. A token from the browser stub passes,

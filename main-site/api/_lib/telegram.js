@@ -46,6 +46,64 @@ async function callBot(method, payload) {
   }
 }
 
+// Whether the bot token is set, which reading sticker packs needs (the
+// webhook settings are not: stickers.js only reads from the Bot API).
+export function botTokenSet() {
+  return optionalEnv('TELEGRAM_BOT_TOKEN') !== '';
+}
+
+// A Bot API method's result, for reading (getStickerSet, getFile). Throws
+// { code: 'telegram_refused', description } when Telegram answers ok: false
+// (an unknown sticker pack, say), or an Error for anything else.
+export async function botResult(method, payload) {
+  const token = optionalEnv('TELEGRAM_BOT_TOKEN');
+  if (!token) {
+    throw new Error('TELEGRAM_BOT_TOKEN is not set');
+  }
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify(payload),
+  });
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (data && data.ok === true) {
+    return data.result;
+  }
+  if (data && data.ok === false && response.status < 500) {
+    throw Object.assign(new Error(`telegram ${method} refused`), { code: 'telegram_refused', description: String(data.description).slice(0, 200) });
+  }
+  throw new Error(`telegram ${method} ${response.status}`);
+}
+
+// The bytes of a file the Bot API named (getFile's file_path), at most
+// maxBytes, or null when it is larger or cannot be fetched.
+export async function botFile(filePath, maxBytes) {
+  const token = optionalEnv('TELEGRAM_BOT_TOKEN');
+  if (!token || !/^[A-Za-z0-9_./-]{1,200}$/.test(String(filePath)) || String(filePath).includes('..')) {
+    return null;
+  }
+  let response;
+  try {
+    response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`, { signal: AbortSignal.timeout(15000) });
+  } catch {
+    return null;
+  }
+  if (!response.ok) {
+    return null;
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxBytes) {
+    return null;
+  }
+  return bytes;
+}
+
 // Plain text, no parse_mode. For one-line notices ("Linked.", "Unlinked.").
 export function sendTelegram(chatId, text) {
   return callBot('sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } });

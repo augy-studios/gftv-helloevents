@@ -13,6 +13,7 @@
     "@upstash/redis": "^1.40.0",
     "@vercel/functions": "^2.2.13",
     "bcryptjs": "^2.4.3",
+    "htmlparser2": "^9.1.0",
     "sharp": "^0.34.5",
     "web-push": "^3.6.7"
   },

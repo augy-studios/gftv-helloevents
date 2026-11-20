@@ -2,8 +2,9 @@
 // before it is uploaded (api/manage/cover.js checks and re-encodes it again).
 //
 // Every cover is cut to the shape of the event cards' thumbnail, 16:9
-// (COVER_RATIO): decodeCover reads the file, the crop dialog
-// (cover-crop.js) picks the part to keep, and cropToWebp draws that part at
+// (COVER_RATIO), from one of the event's gallery pictures (gallery-upload.js
+// fetchPicture reads it back): the crop dialog (cover-crop.js) picks the
+// part to keep, and cropToWebp draws that part at
 // most MAX_SIDE wide, then steps the quality down until the file fits
 // MAX_BYTES. A browser that cannot encode WebP from a canvas (canvas.toBlob
 // gives back PNG instead) is told so rather than sending something else.
@@ -38,29 +39,6 @@ function toDataUrl(blob) {
 export function widestCrop(width, height) {
   const cropWidth = Math.min(width, height * COVER_RATIO);
   return { width: cropWidth, height: cropWidth / COVER_RATIO };
-}
-
-// The decoded picture (an ImageBitmap, turned the way its camera meant) for
-// a File from an <input type=file>. Refuses anything that is not a picture,
-// over 40 MB, or too small to give a cover MIN_WIDTH by MIN_HEIGHT.
-export async function decodeCover(file) {
-  if (!file || !String(file.type).startsWith('image/')) {
-    throw fail('cover_invalid');
-  }
-  if (file.size > 40 * 1024 * 1024) {
-    throw fail('cover_too_large');
-  }
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  } catch {
-    throw fail('cover_invalid');
-  }
-  if (widestCrop(bitmap.width, bitmap.height).width < MIN_WIDTH) {
-    bitmap.close();
-    throw fail('cover_too_small');
-  }
-  return bitmap;
 }
 
 // { dataUrl, width, height, bytes } for the part of the picture inside crop

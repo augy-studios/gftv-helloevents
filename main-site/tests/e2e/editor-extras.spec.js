@@ -1,6 +1,7 @@
 // The edit form's own event link (and what happens when another event has
-// it), ticket tiers shown on the event page, cropping a cover picture to the
-// cards' 16:9, and pasting one in.
+// it), ticket tiers shown on the event page, the gallery (pictures in their
+// own shape, chosen or pasted in), and cropping a cover picture cut from it
+// to the cards' 16:9.
 
 import sharp from 'sharp';
 import { test, expect, serverOrigin, signInAsStaff, openSection } from './fixtures.js';
@@ -136,31 +137,116 @@ async function uploaded(request) {
   return { width, height, middle: [...middle.subarray(0, 3)] };
 }
 
-test('a portrait cover is cropped to 16:9, from the middle, and can be cropped again', async ({ page }) => {
+// Adds pictures to the gallery the way "Add pictures" does, and waits for
+// the gallery to show count of them.
+async function addToGallery(page, files, count) {
+  await page.locator('#galleryFile').setInputFiles(files);
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(count);
+}
+
+// The size of a gallery picture the page uploaded.
+async function uploadedSize(request) {
+  const image = Buffer.from(request.postDataJSON().image.split(',')[1], 'base64');
+  const { width, height } = await sharp(image).metadata();
+  return { width, height };
+}
+
+test('gallery pictures go up in their own shape, with no crop, and show on the event page', async ({ page }) => {
   await openEvent(page);
-  await page.locator('#coverFile').setInputFiles({ name: 'tall.png', mimeType: 'image/png', buffer: await portraitPng() });
-  await expect(page.locator('#cropModal')).toBeVisible();
+  const wide = await sharp({ create: { width: 1200, height: 500, channels: 3, background: '#c8285a' } }).png().toBuffer();
+  const uploads = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/manage/gallery') && request.method() === 'POST') {
+      uploads.push(request);
+    }
+  });
+  await addToGallery(page, [
+    { name: 'tall.png', mimeType: 'image/png', buffer: await portraitPng() },
+    { name: 'wide.png', mimeType: 'image/png', buffer: wide },
+  ], 2);
+  // No crop dialog for the gallery, and the cover is left as it was.
+  await expect(page.locator('#cropModal')).toBeHidden();
+  await expect(page.locator('#coverPreview img')).toHaveCount(0);
+  expect(await Promise.all(uploads.map(uploadedSize))).toEqual([{ width: 600, height: 900 }, { width: 1200, height: 500 }]);
+  await expect(page.locator('#galleryCount')).toHaveText('2 of 100 pictures');
+  const shown = page.locator('#galleryList img');
+  await expect(shown.nth(0)).toHaveAttribute('src', new RegExp(`^/api/events/gallery-image\\?slug=${event.slug}&v=`));
+  await expect.poll(() => shown.nth(0).evaluate((image) => image.naturalHeight / image.naturalWidth)).toBe(1.5);
+
+  // A picture too small for the gallery is named, and the others still go.
+  const tiny = await sharp({ create: { width: 200, height: 150, channels: 3, background: '#000000' } }).png().toBuffer();
+  await page.locator('#galleryFile').setInputFiles([{ name: 'tiny.png', mimeType: 'image/png', buffer: tiny }]);
+  await expect(page.locator('#galleryError')).toHaveText(/^tiny\.png: That picture is too small\./);
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(2);
+
+  // The event page lays them out in their own shape, and opens each larger.
+  await page.goto(`/e/${event.slug}`);
+  const thumbs = page.locator('#eventGallery .gallery-thumb');
+  await expect(page.locator('#galleryBox')).toBeVisible();
+  await expect(thumbs).toHaveCount(2);
+  await expect(thumbs.nth(1).locator('img')).toHaveAttribute('width', '1200');
+  await expect(thumbs.nth(1).locator('img')).toHaveAttribute('height', '500');
+  await thumbs.nth(0).click();
+  await expect(page.locator('#galleryModal')).toBeVisible();
+  await expect(page.locator('#galleryModalTitle')).toHaveText('Picture 1 of 2');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#galleryModalTitle')).toHaveText('Picture 2 of 2');
+  await page.locator('#galleryNext').click();
+  await expect(page.locator('#galleryModalTitle')).toHaveText('Picture 1 of 2');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#galleryModal')).toBeHidden();
+
+  // Removing asks once more, then takes it off the page too.
+  await page.goto(`/manage?slug=${event.slug}#editor`);
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(2);
+  const remove = page.locator('#galleryList .gallery-remove').first();
+  await remove.click();
+  await expect(remove).toHaveText('Remove?');
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(2);
+  await remove.click();
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(1);
+  await page.goto(`/e/${event.slug}`);
+  await expect(page.locator('#eventGallery .gallery-thumb')).toHaveCount(1);
+});
+
+test('a gallery picture used as the cover is cropped to 16:9, from the middle, and can be cropped again', async ({ page }) => {
+  await openEvent(page);
+  await addToGallery(page, [{ name: 'tall.png', mimeType: 'image/png', buffer: await portraitPng() }], 1);
+  await expect(page.locator('#cropModal')).toBeHidden();
+  await expect(page.locator('#coverAdjust')).toBeHidden();
+
+  await page.locator('#galleryList .gallery-use-cover').click();
+  await expect(page.locator('#cropModal')).not.toHaveClass(/hidden/);
   await expect(page.locator('#cropLede')).toHaveText(/^This picture is not landscape/);
   await expect(page.locator('#cropCanvas')).toBeFocused();
 
   // As it starts: the middle of the picture, the green band.
   let upload = page.waitForRequest('**/api/manage/cover');
   await page.locator('#cropUse').click();
-  let cover = await uploaded(await upload);
+  let request = await upload;
+  let cover = await uploaded(request);
   expect(cover.width).toBe(600);
   expect(cover.height).toBe(Math.round(600 * 9 / 16));
   expect(cover.middle[1]).toBeGreaterThan(200);
+  expect(request.postDataJSON().sourceImageId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(request.postDataJSON().crop.width).toBeCloseTo(600, 0);
   await expect(page.locator('#cropModal')).toBeHidden();
   await expect(page.locator('#coverAdjust')).toBeVisible();
   await expect(page.locator('#coverRemove')).toBeVisible();
+  // The picture it came from is marked, its button now "Adjust crop".
+  await expect(page.locator('#galleryList .gallery-item.is-cover .gallery-cover-chip')).toHaveText('Cover');
+  await expect(page.locator('#galleryList .gallery-use-cover')).toHaveText('Adjust crop');
   // Shown from this site's own address, never the Storage bucket's.
   const preview = page.locator('#coverPreview img');
   await expect(preview).toHaveAttribute('src', new RegExp(`^/api/events/cover\\?slug=${event.slug}&v=`));
   await expect.poll(() => preview.evaluate((image) => image.naturalWidth)).toBe(600);
 
-  // Again, moved all the way down with the keyboard and zoomed in: blue.
+  // In a later visit, moved all the way down with the keyboard and zoomed
+  // in: blue.
+  await page.reload();
+  await expect(page.locator('#coverAdjust')).toBeVisible();
   await page.locator('#coverAdjust').click();
-  await expect(page.locator('#cropModal')).toBeVisible();
+  await expect(page.locator('#cropModal')).not.toHaveClass(/hidden/);
   for (let step = 0; step < 20; step += 1) {
     await page.locator('#cropCanvas').press('Shift+ArrowDown');
   }
@@ -173,17 +259,28 @@ test('a portrait cover is cropped to 16:9, from the middle, and can be cropped a
   expect(cover.middle[2]).toBeGreaterThan(200);
   expect(cover.middle[1]).toBeLessThan(60);
 
-  // Closing the dialog uploads nothing.
+  // Again: it starts where that crop left off (still blue), and closing the
+  // dialog uploads nothing.
   await page.locator('#coverAdjust').click();
+  await expect(page.locator('#cropModal')).not.toHaveClass(/hidden/);
   let sent = false;
-  page.on('request', (request) => {
-    if (request.url().endsWith('/api/manage/cover')) {
+  page.on('request', (each) => {
+    if (each.url().endsWith('/api/manage/cover')) {
       sent = true;
     }
   });
   await page.keyboard.press('Escape');
   await expect(page.locator('#cropModal')).toBeHidden();
   expect(sent).toBe(false);
+
+  // Taking the picture out of the gallery keeps the cover, without "Adjust crop".
+  const remove = page.locator('#galleryList .gallery-remove');
+  await remove.click();
+  await remove.click();
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(0);
+  await expect(page.locator('#coverPreview img')).toHaveCount(1);
+  await expect(page.locator('#coverAdjust')).toBeHidden();
+  await expect(page.locator('#coverRemove')).toBeVisible();
 });
 
 // Pastes a picture into the page the way Ctrl+V does: a paste event whose
@@ -199,34 +296,32 @@ async function pastePicture(page, target, buffer, { text = null } = {}) {
   }, { bytes: [...buffer], withText: text });
 }
 
-test('a picture pasted into the form becomes the cover, as if it had been chosen', async ({ page }) => {
+test('a picture pasted into the form goes into the gallery, as if it had been chosen', async ({ page }) => {
   await openEvent(page);
-  await expect(page.locator('#coverPasteHint')).toHaveText('Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).');
+  await expect(page.locator('#galleryPasteHint')).toHaveText('Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).');
   const picture = await portraitPng();
 
   // Pasted into a text field together with text, the text is pasted and
   // the picture left alone.
   await pastePicture(page, '#f-summary', picture, { text: 'https://example.org/cat.png' });
-  await expect(page.locator('#cropModal')).toBeHidden();
+  await expect(page.locator('#galleryCount')).toHaveText('');
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(0);
 
-  // Pasted from another section: Basics opens, then the crop dialog.
+  // Pasted from another section: Basics opens, and it joins the gallery,
+  // uncropped, with no crop dialog.
   await openSection(page, 'Meals');
+  const upload = page.waitForRequest((request) => request.url().endsWith('/api/manage/gallery') && request.method() === 'POST');
   await pastePicture(page, '#epanel-meals', picture);
-  await expect(page.locator('#cropModal')).toBeVisible();
   await expect(page.locator('#etab-basics')).toHaveAttribute('aria-selected', 'true');
-  const upload = page.waitForRequest('**/api/manage/cover');
-  await page.locator('#cropUse').click();
-  const cover = await uploaded(await upload);
-  expect(cover.width).toBe(600);
-  expect(cover.middle[1]).toBeGreaterThan(200);
+  expect(await uploadedSize(await upload)).toEqual({ width: 600, height: 900 });
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(1);
   await expect(page.locator('#cropModal')).toBeHidden();
-  await expect(page.locator('#coverAdjust')).toBeVisible();
 
   // A new event cannot take one until it has saved, and says so.
   await page.locator('#newEvent').click();
   await expect(page.locator('#editorTitle')).toHaveText('New event');
-  await expect(page.locator('#coverPasteHint')).toBeHidden();
+  await expect(page.locator('#galleryPasteHint')).toBeHidden();
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(0);
   await pastePicture(page, '#eventForm', picture);
-  await expect(page.locator('#cropModal')).toBeHidden();
-  await expect(page.locator('#coverError')).toHaveText('A picture can be added once the event has saved.');
+  await expect(page.locator('#galleryError')).toHaveText('Pictures can be added once the event has saved.');
 });

@@ -34,6 +34,7 @@ const DEFAULTS = {
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
     payment_methods: [], payment_link: null, payment_qr_path: null, payment_instructions: null,
     lepak_enabled: false, lepak_limit: null, lepak_label: null,
+    cover_source_image_id: null, cover_crop: null,
   }),
   gftvevents_attendees: () => ({
     meals: [], reminders_sent: [], volunteer: false, lepak: false,
@@ -42,6 +43,9 @@ const DEFAULTS = {
   }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),
   gftvevents_event_editors: () => ({ added_by: null, created_at: now() }),
+  gftvevents_event_images: () => ({ created_by: null, created_at: now() }),
+  gftvevents_sticker_packs: () => ({ created_at: now() }),
+  gftvevents_stickers: () => ({ still_path: null, still_from_frame: false, emoji: null, position: 0, created_at: now() }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
   gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
@@ -70,6 +74,8 @@ const UNIQUE = {
   gftvevents_passkeys: ['credential_id'],
   gftvevents_telegram_link_tokens: ['token_hash'],
   gftvevents_events: ['slug'],
+  gftvevents_event_images: ['path'],
+  gftvevents_stickers: ['path'],
   gftvevents_password_resets: ['code_hash'],
   gftvevents_name_filters: ['term'],
 };
@@ -92,7 +98,16 @@ const FKS = {
   // migrations/012: confirmed volunteers, and the convention a volunteer
   // benefit is for.
   gftvevents_volunteers: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('confirmed_by', 'set null')],
-  gftvevents_events: [{ column: 'volunteer_discount_from', parent: 'gftvevents_events', onDelete: 'set null' }],
+  gftvevents_events: [
+    { column: 'volunteer_discount_from', parent: 'gftvevents_events', onDelete: 'set null' },
+    // migrations/019: the gallery picture the cover was cut from.
+    { column: 'cover_source_image_id', parent: 'gftvevents_event_images', onDelete: 'set null' },
+  ],
+  // migrations/019: each event's gallery pictures.
+  gftvevents_event_images: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('created_by', 'set null')],
+  // migrations/020: sticker packs on an account, and their stickers.
+  gftvevents_sticker_packs: [toAccount('account_id')],
+  gftvevents_stickers: [{ column: 'pack_id', parent: 'gftvevents_sticker_packs', onDelete: 'cascade' }, toAccount('account_id')],
   // migrations/018: editors of one event.
   gftvevents_event_editors: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('account_id'), toAccount('added_by', 'set null')],
   // migrations/013: the last RSVP ID handed out for each event.

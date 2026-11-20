@@ -20,6 +20,13 @@ export const LIMITS = Object.freeze({
   recover: [5, 3600],
   notifyWrite: [30, 900],
   cover: [30, 3600],
+  // Gallery uploads (migrations/019): a whole set of pictures at once.
+  gallery: [300, 3600],
+  // Adding and removing sticker packs (migrations/020); an import fetches a
+  // whole pack from Telegram. Stills are the full-size first frames of video
+  // stickers the browser sends after an import, one per sticker.
+  stickers: [20, 3600],
+  stickerStill: [1000, 3600],
   // Payment reports and QR code uploads (migrations/016): each can carry a
   // picture.
   payment: [20, 3600],

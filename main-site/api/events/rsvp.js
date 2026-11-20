@@ -41,6 +41,8 @@ import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
 import { chooseMeals, takesVolunteers, needsCheckout, paymentOptions, tierOptions, storedTiers, ticketPrice, lepakOffered, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
+import { withGallery } from '../_lib/gallery.js';
+import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles } from '../_lib/payments.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
@@ -291,6 +293,8 @@ export default route('events/rsvp', async (request, response) => {
   }
   await withMealCounts(shown);
   await withVolunteerSource(shown);
+  await withGallery(shown);
+  await withDescriptionPictures(shown);
   const mine = await attendance(event.id, session.user.id);
   const standing = await volunteerStanding(shown, session.user.id);
   ok(response, {

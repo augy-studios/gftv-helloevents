@@ -237,10 +237,21 @@ test('a public account can delete itself, and its RSVPs go with it', async () =>
   addEvent({ slug: 'bye-meet' });
   const m = await member();
   await m.call(rsvp, { method: 'POST', body: { slug: 'bye-meet', going: true } });
+  // A sticker pack on the account (migrations/020): its files go too.
+  const accountId = db.table('gftvevents_accounts')[0].id;
+  const pack = { id: crypto.randomUUID(), account_id: accountId, name: 'ByePack', title: 'Bye' };
+  await db.from('gftvevents_sticker_packs').insert(pack);
+  const stickerPath = `${accountId}/StickerFileName1234567.webm`;
+  const stillPath = `${accountId}/StillFileName12345678.webp`;
+  await db.from('gftvevents_stickers').insert({ pack_id: pack.id, account_id: accountId, path: stickerPath, still_path: stillPath, format: 'webm', width: 512, height: 512 });
+  await db.storage.from('gftvevents_stickers').upload(stickerPath, Buffer.from('webm'));
+  await db.storage.from('gftvevents_stickers').upload(stillPath, Buffer.from('webp'));
   assert.equal((await m.call(security, { method: 'POST', body: { action: 'delete-account', password: 'nope nope nope' } })).json.error, 'password_wrong');
   const gone = await m.call(security, { method: 'POST', body: { action: 'delete-account', password: PASSWORD } });
   assert.equal(gone.status, 200);
   assert.equal(db.table('gftvevents_accounts').length, 0);
+  assert.equal(db.table('gftvevents_stickers').length, 0);
+  assert.equal([...db.objects.keys()].some((key) => key.startsWith('gftvevents_stickers/')), false, 'the sticker files are deleted');
   assert.equal(db.table('gftvevents_attendees').length, 0);
   assert.equal(db.table('gftvevents_sessions').length, 0);
   const s = await staff('keeper');
@@ -403,7 +414,10 @@ test('autosaving one change field by field tells the people going once, and a ch
   const current = (await ed.call(manage, { query: { id: event.id } })).json.event;
   const save = (changes) => ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, ...changes } } });
 
-  changeNotice.waitMs = 60;
+  // Long enough that the three saves below always land inside one wait,
+  // even when the whole suite runs at once and each save is slow (with 60 ms
+  // the first save's wait could end before the third save, now and then).
+  changeNotice.waitMs = 1500;
   try {
     // A new place, then a new start time, then the title: three saves, one notice.
     const moved = [{ ...current.locations[0], venueName: 'New Hall' }];

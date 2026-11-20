@@ -18,6 +18,12 @@
         },
         "api/events/page.js": {
             "includeFiles": "event.html"
+        },
+        "api/me/stickers.js": {
+            "maxDuration": 300
+        },
+        "api/manage/gallery.js": {
+            "maxDuration": 60
         }
     },
     "crons": [
@@ -42,7 +48,7 @@
             "headers": [
                 {
                     "key": "Content-Security-Policy",
-                    "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data: blob: https://*.googletagmanager.com https://*.google-analytics.com https://*.g.doubleclick.net https://www.google.com; connect-src 'self' https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.googletagmanager.com; font-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+                    "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://challenges.cloudflare.com; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https://*.googletagmanager.com https://*.google-analytics.com https://*.g.doubleclick.net https://www.google.com; connect-src 'self' https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.googletagmanager.com; font-src 'self'; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
                 },
                 {
                     "key": "Strict-Transport-Security",

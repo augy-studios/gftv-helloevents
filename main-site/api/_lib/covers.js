@@ -11,6 +11,10 @@
 // It is then re-encoded once more with sharp at the same size or smaller,
 // which strips every byte of metadata (EXIF, GPS) and means a crafted file
 // is never stored as sent. The same approach as gftv-linktree's avatars.
+//
+// Gallery pictures (migrations/019, gallery.js) go through the same checks
+// with their own limits (GALLERY): any shape, at least GALLERY_MIN_LONG on
+// the longer side, stored at most GALLERY_SIDE on it, in the same bucket.
 
 import sharp from 'sharp';
 import { database, TABLES } from './supabase.js';
@@ -26,6 +30,36 @@ export const MIN_HEIGHT = 180;
 const STORE_SIDE = 1600;
 // A decompression bomb is a tiny file that claims a huge canvas.
 const MAX_INPUT_PIXELS = MAX_SIDE * MAX_SIDE;
+// The bucket refuses anything larger (migrations/002).
+const BUCKET_MAX_BYTES = 1_048_576;
+
+// What a cover must be: at least MIN_WIDTH by MIN_HEIGHT, stored at most
+// STORE_SIDE on each side.
+const COVER = {
+  storeSide: STORE_SIDE,
+  fitsMinimum(width, height) {
+    if (width < MIN_WIDTH || height < MIN_HEIGHT) {
+      return false;
+    }
+    return true;
+  },
+};
+
+// A gallery picture keeps its own shape: at least GALLERY_MIN_LONG pixels on
+// its longer side and GALLERY_MIN_SHORT on its shorter one, stored at most
+// GALLERY_SIDE on its longer side.
+export const GALLERY_SIDE = 2000;
+export const GALLERY_MIN_LONG = 320;
+export const GALLERY_MIN_SHORT = 100;
+const GALLERY = {
+  storeSide: GALLERY_SIDE,
+  fitsMinimum(width, height) {
+    if (Math.max(width, height) < GALLERY_MIN_LONG || Math.min(width, height) < GALLERY_MIN_SHORT) {
+      return false;
+    }
+    return true;
+  },
+};
 
 // A stored cover's path: "<event id>/<random name>.webp".
 const COVER_PATH = /^[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
@@ -59,15 +93,49 @@ function isWebp(buffer) {
 // Three steps, each stopping at the first problem: decode the text, check
 // the picture itself, then re-encode it.
 export async function prepareCover(input) {
+  return preparePicture(input, COVER);
+}
+
+// The same for a gallery picture: any shape, within GALLERY's limits.
+export async function prepareGalleryPicture(input) {
+  return preparePicture(input, GALLERY);
+}
+
+// A picture copied from another website (fetch-picture.js) for the gallery:
+// any common still format (the first frame of an animated one), up to
+// COPY_SIDE a side, shrunk and re-encoded to a gallery WebP like any other.
+const COPY_SIDE = 12000;
+const COPY_FORMATS = ['jpeg', 'png', 'webp', 'gif', 'avif', 'heif', 'tiff'];
+export async function prepareCopiedPicture(bytes) {
+  let metadata;
+  try {
+    metadata = await sharp(bytes, { limitInputPixels: COPY_SIDE * COPY_SIDE, failOn: 'error' }).metadata();
+  } catch {
+    return { ok: false, error: 'cover_invalid' };
+  }
+  if (!COPY_FORMATS.includes(metadata.format)) {
+    return { ok: false, error: 'cover_invalid' };
+  }
+  const { width = 0, height = 0 } = metadata;
+  if (width > COPY_SIDE || height > COPY_SIDE) {
+    return { ok: false, error: 'cover_too_big' };
+  }
+  if (!GALLERY.fitsMinimum(width, height)) {
+    return { ok: false, error: 'gallery_too_small' };
+  }
+  return reencodeCover(bytes, { ...GALLERY, inputPixels: COPY_SIDE * COPY_SIDE });
+}
+
+async function preparePicture(input, kind) {
   const decoded = decodeCover(input);
   if (!decoded.ok) {
     return decoded;
   }
-  const checked = await checkCoverPicture(decoded.bytes);
+  const checked = await checkCoverPicture(decoded.bytes, kind);
   if (!checked.ok) {
     return checked;
   }
-  return reencodeCover(decoded.bytes);
+  return reencodeCover(decoded.bytes, kind);
 }
 
 // Step 1: the base64 text to bytes. Anything too large, not base64, or
@@ -103,8 +171,8 @@ function decodeCover(input) {
 }
 
 // Step 2: what sharp reads from the file: a WebP, one frame only, and
-// within the size limits.
-async function checkCoverPicture(bytes) {
+// within the size limits (kind: COVER or GALLERY).
+async function checkCoverPicture(bytes, kind) {
   let metadata;
   try {
     metadata = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).metadata();
@@ -125,20 +193,36 @@ async function checkCoverPicture(bytes) {
   if (width > MAX_SIDE || height > MAX_SIDE) {
     return { ok: false, error: 'cover_too_big' };
   }
-  if (width < MIN_WIDTH || height < MIN_HEIGHT) {
+  if (!kind.fitsMinimum(width, height)) {
     return { ok: false, error: 'cover_too_small' };
   }
   return { ok: true };
 }
 
 // Step 3: re-encode at the stored size or smaller. This drops every byte of
-// metadata, so a crafted file is never stored as sent.
-async function reencodeCover(bytes) {
+// metadata, so a crafted file is never stored as sent. A larger picture
+// (a gallery one) that comes out over what the bucket takes is tried again
+// at a lower quality.
+async function reencodeCover(bytes, kind) {
+  let inputPixels = MAX_INPUT_PIXELS;
+  if (kind.inputPixels) {
+    inputPixels = kind.inputPixels;
+  }
   try {
-    const { data, info } = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' })
-      .resize(STORE_SIDE, STORE_SIDE, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80, effort: 4 })
-      .toBuffer({ resolveWithObject: true });
+    let result = null;
+    for (const quality of [80, 70, 60]) {
+      result = await sharp(bytes, { limitInputPixels: inputPixels, failOn: 'error' })
+        .resize(kind.storeSide, kind.storeSide, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality, effort: 4 })
+        .toBuffer({ resolveWithObject: true });
+      if (result.data.length <= BUCKET_MAX_BYTES) {
+        break;
+      }
+    }
+    if (result.data.length > BUCKET_MAX_BYTES) {
+      return { ok: false, error: 'cover_too_large' };
+    }
+    const { data, info } = result;
     return { ok: true, buffer: data, width: info.width, height: info.height };
   } catch (cause) {
     console.warn('[helloevents] cover could not be processed:', errorDetail(cause));

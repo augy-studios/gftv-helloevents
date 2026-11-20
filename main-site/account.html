@@ -13,6 +13,7 @@
 
     <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/assets/fonts/emoji/emoji.css">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/GHE-180.png">
@@ -185,6 +186,22 @@
                     <div class="actions inline"><button class="btn" type="submit" id="countrySubmit"><span data-i18n="account.country-save">Save country</span></button></div>
                     <div class="callout danger" id="countryError" role="alert"></div>
                 </form>
+            </section>
+
+            <section class="glass-card page-card" id="stickerBox" hidden aria-labelledby="stickerTitle">
+                <h2 id="stickerTitle" data-i18n="stickers.title">Telegram sticker packs</h2>
+                <p class="muted small" data-i18n="stickers.lede">Add a pack from its t.me/addstickers link to put its stickers in event descriptions. Still stickers are kept as WebP and video stickers as WebM (with a still picture for Safari); animated stickers are left out.</p>
+                <form class="u-mt-1 picker-pack-form" id="stickerForm" novalidate>
+                    <label class="field">
+                        <span data-i18n="stickers.link-label">Add a Telegram sticker pack</span>
+                        <input id="stickerLink" type="url" inputmode="url" placeholder="https://t.me/addstickers/…" autocomplete="off">
+                    </label>
+                    <button class="btn" type="submit" id="stickerAdd"><span data-icon="plus"></span><span data-i18n="stickers.add">Add pack</span></button>
+                </form>
+                <p class="small muted" id="stickerStatus" aria-live="polite"></p>
+                <div class="callout danger" id="stickerError" role="alert"></div>
+                <p class="small muted" id="stickerNone" hidden data-i18n="stickers.none">No sticker packs yet. Paste a t.me/addstickers link above.</p>
+                <ul class="sticker-packs" id="stickerPacks"></ul>
             </section>
 
             <section class="glass-card page-card" id="nameBox" aria-labelledby="nameTitle">

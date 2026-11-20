@@ -45,25 +45,98 @@ the functions with the service role key. No Supabase Auth, no request signing.
   everyone shares the venue's Wi-Fi, a staff member opens `/manage` on that Wi-Fi and raises the
   limit for that connection (its salted IP hash) for 2 to 12 hours, to 50 to 500 an hour. It ends
   by itself or with "End now", and is in the audit log.
-- **Cover pictures** are uploaded from `/manage`. Every picture first opens a crop dialog
-  (`js/cover-crop.js`) with a frame the shape of the cards' 16:9 thumbnail, starting on the
+- **Gallery and cover pictures** (migrations/019). Every event has a gallery on `/manage`: "Add
+  pictures" (several at once) or a picture pasted anywhere in the open form (Ctrl+V, Cmd+V on a
+  Mac; pasted into a text field along with text, the text is pasted instead) adds pictures, up to
+  100. Gallery pictures are never cropped: the browser only shrinks each to at most 2000 px on its
+  longer side and compresses it to a WebP of at most 1 MB (`js/gallery-upload.js`), and the server
+  checks it really is a still WebP within the limits (at least 320 px on its longer side and 100 on
+  its shorter one), re-encodes it (stripping metadata) and stores it in the public-read Supabase
+  Storage bucket `gftvevents_covers`, with a row in `gftvevents_event_images`. The event page shows
+  them in columns, each in its own shape, under "About this event"; each opens larger in a dialog
+  with Previous and Next (`js/event-gallery.js`). A picture is removed with its bin button, which
+  asks once more first.
+  The cover is cut from a gallery picture: only "Use as cover" on one opens the crop dialog
+  (`js/cover-crop.js`), with a frame the shape of the cards' 16:9 thumbnail, starting on the
   middle of the picture, with the strips the wider 21:9 banner on the event page leaves out shaded
   and edged with dashed lines; the editor drags and zooms (slider, wheel, pinch or keyboard) to pick
-  the part to show, and "Adjust crop" re-crops the picture chosen in that visit. Besides "Choose
-  a picture", a picture copied to the clipboard can be pasted anywhere in the open form (Ctrl+V,
-  Cmd+V on a Mac) and goes through exactly the same crop and upload; pasted into a text field
-  along with text (an image copied from a web page), the text is pasted instead. The browser
-  then converts the part kept to a compressed 16:9 WebP (at most 1600 px wide and 1 MB); the server checks it really is a still WebP within the
-  size and dimension limits, re-encodes it (stripping metadata) and puts it in the public-read
-  Supabase Storage bucket `gftvevents_covers`. The event keeps the object's path; the old picture is
-  deleted when it is replaced or the event is deleted.
-- **Pictures come from this site.** Pages never get a Supabase Storage address: a cover is
+  the part to show. The browser converts the part kept to a compressed 16:9 WebP (at most 1600 px
+  wide and 1 MB), which the server checks and re-encodes the same way and stores as the cover,
+  also the cards' thumbnail. The event remembers which gallery picture and crop the cover came
+  from (`cover_source_image_id`, `cover_crop`), so that picture is marked "Cover" and "Adjust
+  crop" starts from the earlier crop in any later visit. Taking that picture out of the gallery
+  keeps the cover and forgets its source. The old cover is deleted when it is replaced; the cover
+  and every gallery file are deleted with the event.
+- **Pictures come from this site.** Pages never get a Supabase Storage address (a gallery picture
+  is served the same way by `api/events/gallery-image.js`, with the same rules): a cover is
   served by `api/events/cover.js` (`/api/events/cover?slug=...&v=<cover name>`), as stored. A
   released event's cover is public and cached by the CDN for a year (a new upload gets a new
   address); an unreleased event's goes only to editors, never cached; anything else is a 404. A
   staff member's profile picture from gftv.asia is served by `api/me/avatar.js`, and only
   fetched when it is in this site's Supabase project. The Content-Security-Policy no longer
   allows images from Supabase at all.
+- **Rich text descriptions** (migrations/020). Both descriptions are written in a Word-like editor
+  on `/manage` (`js/rich-editor.js`): undo and redo; paragraph style (normal, three heading levels,
+  quote); font; size in points; bold, italic, underline, strikethrough, subscript, superscript;
+  text colour and highlight, each with "Automatic"; clear formatting; alignment; bullets and
+  numbering; indent; links (Ctrl+K); pictures and stickers; tables with row and column tools;
+  horizontal lines. Text pasted from Word, Google Docs or a web page keeps its formatting:
+  `js/rich-text.js` maps it onto what a description can hold (Word's numbered paragraphs become
+  real lists, Google Docs' bold spans become bold, and so on). So a description stays readable
+  in dark mode, near-black and near-white text colours and near-white page backgrounds are left
+  out (the text follows the theme), and highlighted text gets a colour readable on its highlight;
+  colours chosen on purpose are kept. Pasted pictures are copied into the event's gallery and land
+  where they were: one from another website is fetched by the server
+  (`api/_lib/fetch-picture.js`: http(s) only, no private or internal addresses, checked when
+  connecting, at most 3 redirects, 15 MB and 12 seconds), one pasted as a file or data by the
+  browser; a picture only on the editor's own computer (Word's `file:` pictures) is left out, and
+  the editor is told. The server cleans every description with the same rules before it is
+  stored (`api/_lib/rich-text.js`, htmlparser2): only that short list of elements, attributes
+  and style properties survives, links are http(s), mailto or tel only, and pictures are kept as
+  references (`data-gallery-id`, `data-sticker-id`) that become this site's own addresses when a
+  page asks; a picture taken out of the gallery disappears from the description with it. Pictures
+  and stickers sit in line with the text, as in Word. Clicking a gallery picture in the editor (or
+  Enter with one selected) opens a size and crop dialog (`js/picture-crop.js`): its size in the
+  description (its own, or small, medium, large or full width: 25, 50, 75 or 100% of the text's
+  width, `data-size`), and a frame over the whole picture, moved and resized by mouse, touch or
+  keyboard, free or held to a shape (the picture's own, square, 4:3, 3:4, 16:9, 9:16); "Apply
+  without a crop" takes the crop off, and undo takes a change back. The size and crop belong to that place in the
+  description (`data-crop` is fractions of the picture); the gallery keeps the whole picture, and
+  `api/events/gallery-image.js` serves the cropped part for an address carrying the crop. Plain
+  text descriptions from before are read as paragraphs. Limits: 20000 characters of text, 100000
+  of HTML, 100 pictures per description. The Content-Security-Policy allows inline style
+  attributes (`style-src-attr 'unsafe-inline'`, nothing else) for the formatting; pages also
+  apply it through the CSS object model for browsers without that directive.
+- **Emoji, up to the latest edition** (Emoji 18.0 now). Descriptions keep every emoji as text,
+  exactly (skin tones, zero-width-joiner sequences, keycaps, flags, the tag-sequence flags), and
+  the editor's toolbar has an emoji picker (`js/emoji-picker.js`): every emoji of Unicode's
+  latest edition by group, a search by name, a skin tone, and the ones used lately first,
+  remembered in the browser. Everywhere on the site (titles, summaries, cards, every page), readers
+  see their own device's emoji; any their device is too old to
+  have come from the site's own copy of Google's Noto Color Emoji ("GFTV Emoji",
+  `assets/fonts/emoji/`, SIL Open Font License 1.1 in `OFL.txt`), split into slices that load only
+  when a page shows an emoji in their range. The font list is the `--emoji-fonts` variable in
+  `style.css`, used after the site's font on every element, and kept after any font pasted into a
+  description. When
+  Unicode publishes a new edition (each September) and Noto has caught up, run
+  `node tools/make-emoji.mjs` and bump `sw.js`'s VERSION: it rebuilds `assets/emoji/emoji.json`
+  from Unicode's `emoji-test.txt` and the font slices from Google Fonts.
+- **Telegram sticker packs** (migrations/020). Anyone who edits events can add Telegram sticker
+  packs to their account, from a `t.me/addstickers/<name>` link, in the editor's picture dialog
+  or the Sticker packs section of `/account`, and put the stickers in descriptions. The server
+  reads the pack with the Bot API (`TELEGRAM_BOT_TOKEN`; the webhook settings are not needed for
+  this) and copies each sticker into the private `gftvevents_stickers` bucket
+  (`api/_lib/stickers.js`): still stickers as the WebP Telegram keeps them in, video stickers as
+  WebM with a still WebP for Safari (which cannot play WebM with transparency). That still is
+  Telegram's own small preview at first; the editor's browser (Chrome, Edge or Firefox) then draws
+  each video's first frame at full size and sends it back (`js/sticker-packs.js`), whenever the
+  packs are loaded. Animated (Lottie) stickers are left out. At most 30 packs per account and
+  200 stickers per pack. Stickers are served by `api/stickers/image.js`, public and cached, since
+  they are copies of public stickers in public descriptions. Deleting the account deletes its
+  sticker files too. To check adding a pack against the real Bot API (everything else in memory,
+  nothing written anywhere real), run
+  `TELEGRAM_BOT_TOKEN=... node tests/live/telegram-stickers.js [pack link]`. Removing a pack deletes its files,
+  and its stickers disappear from descriptions.
 - **Managing events** at `/manage`: the event list and the edit form are separate tabs (Event list,
   Manage event). The form saves itself whenever a field is left, a list option picked or a box
   ticked; a pill at the bottom says "Saving…", "All changes saved" or why a change was refused.
@@ -256,7 +329,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 018) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 020) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -276,7 +349,11 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    Storage bucket. Run `017_lepak.sql` before deploying "Just Lepak Only": it replaces the RSVP
    function (every RSVP sends its lepak setting) and the view the spaces are counted from. Run
    `018_event_editors.sql` before deploying editors of one event: the session, `/manage` and the
-   event pages read its table.
+   event pages read its table. Run `019_event_gallery.sql` before deploying galleries: the event
+   pages, the edit form and the cover upload read its table and the events' two new columns. Run
+   `020_rich_descriptions_stickers.sql` before deploying rich descriptions and sticker packs: it
+   allows longer descriptions, adds the sticker tables and creates the private
+   `gftvevents_stickers` Storage bucket.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

@@ -16,7 +16,7 @@
 // event's link-preview tags, api/events/page.js; only apps reading the link
 // need those, and they have no service worker.)
 
-const VERSION = '2026-11-20.4';
+const VERSION = '2026-11-20.9';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 
@@ -69,6 +69,20 @@ const PRECACHE = [
   '/js/manage-timetable.js',
   '/js/timetable.js',
   '/js/cover-crop.js',
+  '/js/gallery-upload.js',
+  '/js/manage-gallery.js',
+  '/js/event-gallery.js',
+  '/js/rich-text.js',
+  '/js/rich-dom.js',
+  '/js/rich-editor.js',
+  '/js/rich-icons.js',
+  '/js/picture-picker.js',
+  '/js/sticker-packs.js',
+  '/js/account-stickers.js',
+  '/js/picture-crop.js',
+  '/js/emoji-picker.js',
+  '/assets/emoji/emoji.json',
+  '/assets/fonts/emoji/emoji.css',
   '/js/choices.js',
   '/js/tabs.js',
   '/js/tour.js',

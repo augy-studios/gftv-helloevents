@@ -16,6 +16,7 @@ import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice 
 import { startTabs } from '../tabs.js';
 import { startTours } from '../tour.js';
 import { fillCountrySelect } from '../choices.js';
+import { startAccountStickers } from '../account-stickers.js';
 
 const byId = (id) => document.getElementById(id);
 let currentUser = null;
@@ -225,6 +226,7 @@ async function load() {
   renderRsvps();
   renderNotify();
   renderSecurity();
+  startAccountStickers(currentUser);
   startTours('account');
   // Whether this device is subscribed, after the page is drawn.
   const subscription = await currentSubscription();

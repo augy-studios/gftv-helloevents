@@ -172,7 +172,7 @@
   --tt-grid-bg: var(--bg-alt);
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--font); }
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--font), var(--emoji-fonts); }
 /* Only html is held to the screen's height: body grows with the page (min-height below), or the
    sticky header, which can't leave body, would scroll away after the first screenful. */
 html { height: 100%; }
@@ -1406,6 +1406,72 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .cover-field > span:first-child { display: block; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.9375rem; }
 .cover-preview { max-width: 28rem; margin-bottom: 0.4rem; border-radius: var(--radius-sm); }
 .cover-preview.no-image > .icon svg { width: 2rem; height: 2rem; }
+
+/* manage: the gallery (js/manage-gallery.js). Each picture keeps its own
+   shape, in columns. */
+.gallery-field > span:first-child { display: block; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.9375rem; }
+.gallery-manage {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  columns: 3 11rem;
+  column-gap: 0.75rem;
+}
+.gallery-item {
+  position: relative;
+  break-inside: avoid;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+.gallery-item.is-cover { border-color: var(--brand-dark); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-dark) 45%, transparent); }
+.gallery-item img { display: block; width: 100%; height: auto; background: var(--surface-active); }
+.gallery-cover-chip { position: absolute; top: 0.4rem; left: 0.4rem; gap: 0.25rem; background: var(--bg); }
+.gallery-cover-chip .icon svg { width: 13px; height: 13px; }
+.gallery-item-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; padding: 0.45rem; }
+.gallery-use-cover { gap: 0.35rem; }
+.gallery-use-cover .icon svg { width: 15px; height: 15px; }
+.gallery-remove.armed { width: auto; gap: 0.3rem; padding: 0 0.6rem; background: var(--danger); color: var(--danger-on); font-size: 0.8125rem; font-weight: 600; }
+.file-btn.disabled { opacity: 0.55; pointer-events: none; }
+
+/* The event page's gallery (js/event-gallery.js): every picture in its own
+   shape, in columns, each opening larger in a dialog. */
+.event-gallery {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 3 12rem;
+  column-gap: 0.75rem;
+}
+.event-gallery li { break-inside: avoid; margin-bottom: 0.75rem; }
+.gallery-thumb {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.gallery-thumb img { display: block; width: 100%; height: auto; transition: transform var(--motion) ease; }
+.gallery-thumb:hover img { transform: scale(1.02); }
+.gallery-thumb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.modal.gallery-modal { max-width: min(64rem, 100%); }
+.gallery-view {
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: calc(100dvh - 11rem);
+  margin: 0.75rem auto;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+  background: var(--surface-active);
+}
+.gallery-nav { justify-content: center; }
 .file-btn { cursor: pointer; }
 .file-btn:focus-within {
   outline: 2px solid var(--focus-ring);
@@ -1691,3 +1757,304 @@ html.touring { overflow: hidden; }
   .tour-line.drawn { animation: none; stroke-dashoffset: 0; }
   .tour-dots > span { transition: none; }
 }
+
+/* Rich text descriptions (js/rich-text.js): the event page and the editor
+   show them alike. Pictures keep their shape; stickers sit in the text. */
+.rich-text { overflow-wrap: anywhere; line-height: 1.6; }
+.rich-text > :first-child { margin-top: 0; }
+.rich-text > :last-child { margin-bottom: 0; }
+.rich-text p { margin: 0 0 0.75em; }
+.rich-text h2 { margin: 1.2em 0 0.5em; font-size: 1.5rem; line-height: 1.25; }
+.rich-text h3 { margin: 1.1em 0 0.45em; font-size: 1.25rem; line-height: 1.3; }
+.rich-text h4 { margin: 1em 0 0.4em; font-size: 1.0625rem; line-height: 1.35; }
+.rich-text ul, .rich-text ol { margin: 0 0 0.75em; padding-left: 1.6em; }
+.rich-text li { margin: 0.15em 0; }
+.rich-text blockquote {
+  margin: 0 0 0.75em;
+  padding: 0.25em 0 0.25em 1em;
+  border-left: 3px solid var(--brand-dark);
+  color: var(--text-muted);
+}
+.rich-text hr { margin: 1.25em 0; border: 0; border-top: 1px solid var(--border-strong); }
+.rich-text a { color: var(--link); text-decoration: underline; }
+.rich-text table { width: 100%; margin: 0 0 0.9em; border-collapse: collapse; font-size: 0.9375rem; }
+.rich-text th, .rich-text td { padding: 0.4em 0.6em; border: 1px solid var(--border-strong); vertical-align: top; text-align: left; }
+.rich-text th { background: var(--surface-active); font-weight: 700; }
+.rich-text th > :last-child, .rich-text td > :last-child { margin-bottom: 0; }
+/* In line with the text, as in Word (the site's img rule makes pictures blocks). */
+.rich-text img, .rich-text video { display: inline-block; max-width: 100%; height: auto; vertical-align: bottom; border-radius: var(--radius-sm); }
+.rich-text .rich-sticker {
+  width: 8rem;
+  max-width: 40%;
+  height: auto;
+  vertical-align: middle;
+  border-radius: 0;
+  background: transparent;
+}
+.event-description { display: block; }
+@media (max-width: 600px) {
+  .rich-text table { display: block; overflow-x: auto; }
+}
+
+/* manage: the description editor (js/rich-editor.js) */
+.description-field .field-label { font-weight: 600; font-size: 0.9375rem; cursor: text; }
+.rich-toolbar {
+  position: sticky;
+  top: calc(var(--header-height, 0px) + 3.6rem);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg);
+}
+.rich-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem; padding-right: 0.5rem; border-right: 1px solid var(--border); }
+.rich-group:last-child, .rich-group.rich-table-tools { border-right: 0; }
+.rich-table-tools { flex-basis: 100%; padding-top: 0.25rem; border-top: 1px dashed var(--border); }
+.rich-table-tools[hidden] { display: none; }
+.rich-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.rich-btn svg { width: 18px; height: 18px; }
+.rich-btn:hover { background: var(--surface-hover); }
+.rich-btn[aria-pressed="true"] { background: var(--surface-active); border-color: var(--border-strong); }
+.rich-btn:disabled { opacity: 0.4; cursor: default; }
+.rich-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.rich-text-btn { font-size: 0.8125rem; font-weight: 600; padding: 0 0.55rem; }
+.field .rich-select {
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+.field .rich-select#richBlock { width: 8.5rem; }
+.field .rich-font { width: 9.5rem; }
+.field .rich-size { width: 4.75rem; }
+.rich-custom input[type="color"] { width: 2.5rem; min-height: 1.75rem; padding: 0; }
+.rich-colour { position: relative; display: inline-flex; }
+.rich-colour-bar { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 3px; border-radius: 2px; background: currentColor; opacity: 0.85; }
+.rich-palette {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: 15.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+.rich-palette[hidden] { display: none; }
+.rich-palette-none { width: 100%; margin-bottom: 0.4rem; }
+.rich-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; }
+.rich-swatch { aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.rich-swatch:hover, .rich-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.rich-custom { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.875rem; }
+.rich-custom input { width: 2.5rem; height: 1.75rem; padding: 0; border: 1px solid var(--border); background: none; }
+.rich-editor {
+  position: relative;
+  min-height: 14rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: text;
+}
+.rich-editor:focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rich-editor[hidden] { display: none; }
+.rich-editor.is-empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.rich-editor img { cursor: grab; }
+.rich-editor img:hover { outline: 2px solid var(--brand-dark); outline-offset: 1px; }
+.rich-editor table td, .rich-editor table th { min-width: 3rem; }
+.rich-editor img.rich-pending {
+  display: inline-block;
+  width: 10rem;
+  height: 6rem;
+  background: var(--surface-active) linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 8%, transparent), transparent) 0 0 / 200% 100%;
+  animation: rich-pending 1.2s linear infinite;
+}
+@keyframes rich-pending { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .rich-editor img.rich-pending { animation: none; }
+}
+
+/* manage: the picture dialog (js/picture-picker.js) */
+.modal.picture-modal { max-width: 46rem; }
+.picker-tabs { display: flex; gap: 0.25rem; margin: 0.5rem 0 0.75rem; border-bottom: 1px solid var(--border); }
+.picker-tab {
+  padding: 0.5rem 0.9rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.picker-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--brand-dark); }
+.picker-grid {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  columns: 4 8rem;
+  column-gap: 0.5rem;
+}
+.picker-grid li { break-inside: avoid; margin-bottom: 0.5rem; }
+.picker-item {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  overflow: hidden;
+  cursor: pointer;
+}
+.picker-item img { display: block; width: 100%; height: auto; }
+.picker-item:hover, .picker-item:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: 1px; }
+.picker-stickers { columns: 6 4.5rem; }
+.picker-sticker { background: transparent; border-color: transparent; }
+.picker-pack h3 { margin: 0.75rem 0 0.25rem; font-size: 1rem; }
+.picker-pack-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; }
+.picker-pack-form .field { flex: 1 1 16rem; margin: 0; }
+
+/* account: sticker packs (js/account-stickers.js) */
+.sticker-packs { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.75rem; }
+.sticker-pack { padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.sticker-pack-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.sticker-pack-head > div { display: flex; flex-direction: column; }
+.sticker-pack-preview { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+.sticker-pack-preview img { width: 3rem; height: 3rem; object-fit: contain; }
+
+/* manage: cropping a picture in a description (js/picture-crop.js). The
+   whole picture, with the part kept framed and the rest shaded. */
+.modal.picture-crop-modal { max-width: 48rem; }
+.picture-crop-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin: 0.5rem 0; }
+.picture-crop-shape { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 0.9375rem; }
+.picture-crop-shape select { min-height: 36px; padding: 0 0.5rem; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-active); color: var(--text); }
+.picture-crop-stage {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  touch-action: none;
+  user-select: none;
+}
+.picture-crop-stage:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.picture-crop-box { position: relative; display: inline-block; line-height: 0; }
+.picture-crop-shade { position: absolute; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
+.picture-crop-box img { display: block; max-width: 100%; max-height: min(60vh, 34rem); width: auto; height: auto; }
+.picture-crop-frame {
+  position: absolute;
+  outline: 2px solid #ffffff;
+  cursor: move;
+}
+.picture-crop-frame [data-handle] {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.picture-crop-frame [data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.picture-crop-frame [data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.picture-crop-frame [data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.picture-crop-frame [data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.picture-crop-frame [data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.picture-crop-frame [data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.picture-crop-frame [data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.picture-crop-frame [data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+@media (pointer: coarse) {
+  .picture-crop-frame [data-handle] { width: 24px; height: 24px; margin: -12px 0 0 -12px; }
+}
+.rich-editor img[data-gallery-id] { cursor: pointer; }
+
+/* Emoji everywhere on the site (the * rule above uses this list after the
+   site's font): each reader's own device's emoji first; any its fonts are
+   too old to have come from the site's copy of Noto Color Emoji
+   (assets/fonts/emoji/emoji.css, "GFTV Emoji"), so the latest edition shows.
+   A font pasted into a description keeps the list after it (js/rich-text.js
+   fontFamily). */
+:root { --emoji-fonts: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'GFTV Emoji'; }
+
+/* manage: the emoji picker (js/emoji-picker.js) */
+.rich-palette.emoji-panel { width: min(22rem, calc(100vw - 2rem)); padding: 0.6rem; }
+.field .emoji-search { width: 100%; min-height: 36px; padding: 0.35rem 0.6rem; font-size: 0.9375rem; }
+.emoji-tones, .emoji-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 0.4rem; }
+.emoji-tabs { padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+.emoji-tone, .emoji-tab {
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.emoji-tone[aria-pressed="true"], .emoji-tab[aria-selected="true"] { background: var(--surface-active); border-color: var(--border-strong); }
+.emoji-heading { margin: 0.4rem 0 0.2rem; font-size: 0.8125rem; font-weight: 600; color: var(--text-muted); }
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.25rem, 1fr));
+  max-height: 15rem;
+  overflow-y: auto;
+  line-height: 1;
+}
+.emoji-item {
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 1.45rem;
+  cursor: pointer;
+}
+.emoji-item:hover, .emoji-item:focus-visible { background: var(--surface-active); outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.emoji-version { margin: 0.35rem 0 0; font-size: 0.75rem; color: var(--text-muted); text-align: right; }
+
+/* A gallery picture's size in a description (js/rich-text.js
+   PICTURE_SIZES): a share of the text's width, Word-like. */
+.rich-text img[data-size="small"] { width: 25%; }
+.rich-text img[data-size="medium"] { width: 50%; }
+.rich-text img[data-size="large"] { width: 75%; }
+.rich-text img[data-size="full"] { width: 100%; }
+.picture-size { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin: 0.25rem 0 0.5rem; padding: 0; border: 0; }
+.picture-size legend { width: 100%; margin-bottom: 0.25rem; font-weight: 600; font-size: 0.9375rem; }
+.picture-size-option { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 32px; cursor: pointer; }
+.picture-size-option input { accent-color: var(--brand-dark); }

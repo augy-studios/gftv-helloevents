@@ -13,6 +13,7 @@
 
     <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/assets/fonts/emoji/emoji.css">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="apple-touch-icon" href="/GHE-180.png">
@@ -165,32 +166,119 @@
                                 <span data-i18n="manage.field.summary-optional">Short summary (optional)</span>
                                 <input id="f-summary" name="summary" type="text" maxlength="280">
                             </label>
-                            <div class="field span-2">
+                            <div class="field span-2 description-field">
                                 <div class="field-head">
-                                    <label for="f-description" id="descriptionLabel" data-i18n="manage.field.description-both">Description</label>
+                                    <span class="field-label" id="descriptionLabel" data-i18n="manage.field.description-both">Description</span>
                                     <div class="lang-switch" id="descriptionSwitch" role="group" aria-label="Language" data-i18n-attr="aria-label:manage.description-switch">
                                         <button class="lang-switch-btn" type="button" data-lang="en" aria-pressed="true" lang="en">English<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
                                         <button class="lang-switch-btn" type="button" data-lang="zh" aria-pressed="false" lang="zh">中文<span class="missing-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.description-missing">(not written yet)</span></span></button>
                                     </div>
                                 </div>
-                                <textarea id="f-description" name="description" maxlength="8000" rows="6" lang="en" required aria-labelledby="descriptionEnName"></textarea>
-                                <textarea id="f-descriptionZh" name="descriptionZh" maxlength="8000" rows="6" lang="zh" required aria-labelledby="descriptionZhName" hidden></textarea>
+                                <div class="rich-toolbar" id="richToolbar" role="toolbar" aria-label="Formatting" data-i18n-attr="aria-label:editor.toolbar" aria-controls="f-description f-descriptionZh">
+                                  <div class="rich-group" role="group" aria-label="History" data-i18n-attr="aria-label:editor.group-history">
+                                    <button class="rich-btn" type="button" data-command="undo" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)" data-i18n-attr="aria-label:editor.undo,title:editor.undo"><span data-rich-icon="undo"></span></button>
+                                    <button class="rich-btn" type="button" data-command="redo" aria-label="Redo (Ctrl+Y)" title="Redo (Ctrl+Y)" data-i18n-attr="aria-label:editor.redo,title:editor.redo"><span data-rich-icon="redo"></span></button>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Style" data-i18n-attr="aria-label:editor.group-style">
+                                    <select class="rich-select" id="richBlock" aria-label="Paragraph style" title="Paragraph style" data-i18n-attr="aria-label:editor.style,title:editor.style"><option value="p" data-i18n="editor.style-normal">Normal text</option><option value="h2" data-i18n="editor.style-h1">Heading 1</option><option value="h3" data-i18n="editor.style-h2">Heading 2</option><option value="h4" data-i18n="editor.style-h3">Heading 3</option><option value="blockquote" data-i18n="editor.style-quote">Quote</option></select>
+                                    <select class="rich-select rich-font" id="richFont" aria-label="Font" title="Font" data-i18n-attr="aria-label:editor.font,title:editor.font"><option value="" data-i18n="editor.font-default">Default font</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Segoe UI">Segoe UI</option><option value="Calibri">Calibri</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Garamond">Garamond</option><option value="Cambria">Cambria</option><option value="Courier New">Courier New</option><option value="Consolas">Consolas</option><option value="Comic Sans MS">Comic Sans MS</option><option value="Impact">Impact</option></select>
+                                    <select class="rich-select rich-size" id="richSize" aria-label="Font size (points)" title="Font size (points)" data-i18n-attr="aria-label:editor.size,title:editor.size"><option value="" data-i18n="editor.size-default">Size</option><option value="11">8</option><option value="12">9</option><option value="13">10</option><option value="15">11</option><option value="16">12</option><option value="19">14</option><option value="21">16</option><option value="24">18</option><option value="27">20</option><option value="32">24</option><option value="37">28</option><option value="43">32</option><option value="48">36</option><option value="64">48</option><option value="96">72</option></select>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Text" data-i18n-attr="aria-label:editor.group-text">
+                                    <button class="rich-btn" type="button" data-command="bold" aria-pressed="false" aria-label="Bold (Ctrl+B)" title="Bold (Ctrl+B)" data-i18n-attr="aria-label:editor.bold,title:editor.bold"><span data-rich-icon="bold"></span></button>
+                                    <button class="rich-btn" type="button" data-command="italic" aria-pressed="false" aria-label="Italic (Ctrl+I)" title="Italic (Ctrl+I)" data-i18n-attr="aria-label:editor.italic,title:editor.italic"><span data-rich-icon="italic"></span></button>
+                                    <button class="rich-btn" type="button" data-command="underline" aria-pressed="false" aria-label="Underline (Ctrl+U)" title="Underline (Ctrl+U)" data-i18n-attr="aria-label:editor.underline,title:editor.underline"><span data-rich-icon="underline"></span></button>
+                                    <button class="rich-btn" type="button" data-command="strikeThrough" aria-pressed="false" aria-label="Strikethrough" title="Strikethrough" data-i18n-attr="aria-label:editor.strike,title:editor.strike"><span data-rich-icon="strike"></span></button>
+                                    <button class="rich-btn" type="button" data-command="subscript" aria-pressed="false" aria-label="Subscript" title="Subscript" data-i18n-attr="aria-label:editor.subscript,title:editor.subscript"><span data-rich-icon="subscript"></span></button>
+                                    <button class="rich-btn" type="button" data-command="superscript" aria-pressed="false" aria-label="Superscript" title="Superscript" data-i18n-attr="aria-label:editor.superscript,title:editor.superscript"><span data-rich-icon="superscript"></span></button>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Colour" data-i18n-attr="aria-label:editor.group-colour">
+                                    <span class="rich-colour">
+                                      <button class="rich-btn" type="button" data-command="colour" aria-haspopup="true" aria-expanded="false" aria-label="Text colour" title="Text colour" data-i18n-attr="aria-label:editor.colour,title:editor.colour"><span data-rich-icon="colour"></span><span class="rich-colour-bar" id="colourBar"></span></button>
+                                      <div class="rich-palette" id="colourPalette" hidden>
+                                        <button class="btn btn-small rich-palette-none" type="button" data-colour="none" data-i18n="editor.colour-automatic">Automatic</button>
+                                        <div class="rich-swatches"></div>
+                                        <label class="rich-custom"><span data-i18n="editor.colour-more">More colours</span><input type="color" value="#c8285a"></label>
+                                      </div>
+                                    </span>
+                                    <span class="rich-colour">
+                                      <button class="rich-btn" type="button" data-command="highlight" aria-haspopup="true" aria-expanded="false" aria-label="Highlight colour" title="Highlight colour" data-i18n-attr="aria-label:editor.highlight,title:editor.highlight"><span data-rich-icon="highlight"></span><span class="rich-colour-bar" id="highlightBar"></span></button>
+                                      <div class="rich-palette" id="highlightPalette" hidden>
+                                        <button class="btn btn-small rich-palette-none" type="button" data-colour="none" data-i18n="editor.highlight-none">No highlight</button>
+                                        <div class="rich-swatches"></div>
+                                        <label class="rich-custom"><span data-i18n="editor.colour-more">More colours</span><input type="color" value="#c8285a"></label>
+                                      </div>
+                                    </span>
+                                    <button class="rich-btn" type="button" data-command="removeFormat" aria-label="Clear formatting" title="Clear formatting" data-i18n-attr="aria-label:editor.clear,title:editor.clear"><span data-rich-icon="clear"></span></button>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Alignment" data-i18n-attr="aria-label:editor.group-align">
+                                    <button class="rich-btn" type="button" data-command="justifyLeft" aria-pressed="false" aria-label="Align left" title="Align left" data-i18n-attr="aria-label:editor.align-left,title:editor.align-left"><span data-rich-icon="align-left"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyCenter" aria-pressed="false" aria-label="Centre" title="Centre" data-i18n-attr="aria-label:editor.align-center,title:editor.align-center"><span data-rich-icon="align-center"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyRight" aria-pressed="false" aria-label="Align right" title="Align right" data-i18n-attr="aria-label:editor.align-right,title:editor.align-right"><span data-rich-icon="align-right"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyFull" aria-pressed="false" aria-label="Justify" title="Justify" data-i18n-attr="aria-label:editor.align-justify,title:editor.align-justify"><span data-rich-icon="align-justify"></span></button>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Paragraph" data-i18n-attr="aria-label:editor.group-paragraph">
+                                    <button class="rich-btn" type="button" data-command="insertUnorderedList" aria-pressed="false" aria-label="Bullets" title="Bullets" data-i18n-attr="aria-label:editor.bullets,title:editor.bullets"><span data-rich-icon="bullets"></span></button>
+                                    <button class="rich-btn" type="button" data-command="insertOrderedList" aria-pressed="false" aria-label="Numbering" title="Numbering" data-i18n-attr="aria-label:editor.numbers,title:editor.numbers"><span data-rich-icon="numbers"></span></button>
+                                    <button class="rich-btn" type="button" data-command="outdent" aria-label="Decrease indent" title="Decrease indent" data-i18n-attr="aria-label:editor.outdent,title:editor.outdent"><span data-rich-icon="outdent"></span></button>
+                                    <button class="rich-btn" type="button" data-command="indent" aria-label="Increase indent" title="Increase indent" data-i18n-attr="aria-label:editor.indent,title:editor.indent"><span data-rich-icon="indent"></span></button>
+                                  </div>
+                                  <div class="rich-group" role="group" aria-label="Insert" data-i18n-attr="aria-label:editor.group-insert">
+                                    <button class="rich-btn" type="button" data-command="link" aria-label="Link (Ctrl+K)" title="Link (Ctrl+K)" data-i18n-attr="aria-label:editor.link,title:editor.link"><span data-rich-icon="link"></span></button>
+                                    <button class="rich-btn" type="button" data-command="unlink" aria-label="Remove link" title="Remove link" data-i18n-attr="aria-label:editor.unlink,title:editor.unlink"><span data-rich-icon="unlink"></span></button>
+                                    <span class="rich-colour">
+                                      <button class="rich-btn" type="button" data-command="emoji" aria-haspopup="true" aria-expanded="false" aria-label="Emoji" title="Emoji" data-i18n-attr="aria-label:editor.emoji,title:editor.emoji"><span data-rich-icon="emoji"></span></button>
+                                      <div class="rich-palette emoji-panel" id="emojiPalette" role="dialog" aria-label="Emoji" data-i18n-attr="aria-label:editor.emoji" hidden>
+                                        <input class="emoji-search" id="emojiSearch" type="search" data-autofocus autocomplete="off" placeholder="Search emoji" aria-label="Search emoji" data-i18n-attr="placeholder:emoji.search,aria-label:emoji.search">
+                                        <div class="emoji-tones" id="emojiTones" role="group" aria-label="Skin tone" data-i18n-attr="aria-label:emoji.tone"></div>
+                                        <div class="emoji-tabs" id="emojiTabs" role="group" aria-label="Groups" data-i18n-attr="aria-label:emoji.groups"></div>
+                                        <p class="emoji-heading" id="emojiHeading"></p>
+                                        <div class="emoji-grid rich-text" id="emojiGrid"></div>
+                                        <p class="small muted" id="emojiEmpty" hidden></p>
+                                        <p class="emoji-version" id="emojiVersion"></p>
+                                      </div>
+                                    </span>
+                                    <button class="rich-btn" type="button" data-command="picture" aria-label="Picture or sticker" title="Picture or sticker" data-i18n-attr="aria-label:editor.picture,title:editor.picture"><span data-rich-icon="picture"></span></button>
+                                    <button class="rich-btn" type="button" data-command="table" aria-label="Table" title="Table" data-i18n-attr="aria-label:editor.table,title:editor.table"><span data-rich-icon="table"></span></button>
+                                    <button class="rich-btn" type="button" data-command="hr" aria-label="Horizontal line" title="Horizontal line" data-i18n-attr="aria-label:editor.hr,title:editor.hr"><span data-rich-icon="hr"></span></button>
+                                  </div>
+                                  <div class="rich-group rich-table-tools" id="richTableTools" role="group" aria-label="Table" data-i18n-attr="aria-label:editor.group-table" hidden>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:rowAbove" data-i18n="editor.row-above">Row above</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:rowBelow" data-i18n="editor.row-below">Row below</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:columnLeft" data-i18n="editor.column-left">Column left</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:columnRight" data-i18n="editor.column-right">Column right</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:deleteRow" data-i18n="editor.delete-row">Delete row</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:deleteColumn" data-i18n="editor.delete-column">Delete column</button>
+                                    <button class="rich-btn rich-text-btn" type="button" data-command="table:deleteTable" data-i18n="editor.delete-table">Delete table</button>
+                                  </div>
+                                </div>
+                                <div class="rich-editor rich-text" id="f-description" contenteditable="true" role="textbox" aria-multiline="true" lang="en" spellcheck="true" aria-labelledby="descriptionEnName" aria-describedby="descriptionHint" data-placeholder="Write the description…" data-i18n-attr="data-placeholder:editor.placeholder"></div>
+                                <div class="rich-editor rich-text" id="f-descriptionZh" contenteditable="true" role="textbox" aria-multiline="true" lang="zh" spellcheck="true" aria-labelledby="descriptionZhName" aria-describedby="descriptionHint" data-placeholder="Write the description…" data-i18n-attr="data-placeholder:editor.placeholder" hidden></div>
                                 <span class="visually-hidden" id="descriptionEnName" data-i18n="manage.field.description">Description (English)</span>
                                 <span class="visually-hidden" id="descriptionZhName" data-i18n="manage.field.descriptionZh">Description (Chinese)</span>
-                                <span class="field-hint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Plain text. Line breaks are kept.</span>
+                                <span class="field-hint" id="descriptionHint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Format it as in Word. Pasted text keeps its formatting, and pasted pictures are copied into the gallery. Click a picture in the description to size or crop it.</span>
                             </div>
                             <div class="field span-2 cover-field">
                                 <span data-i18n="manage.field.cover">Cover picture</span>
                                 <div class="event-cover no-image cover-preview" id="coverPreview"><span data-icon="image"></span></div>
-                                <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">Any picture works: you choose the 16:9 part to show, then your browser turns it into a small WebP before it is uploaded.</p>
-                                <p class="field-hint" id="coverPasteHint" data-i18n="manage.hint.cover-paste">Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).</p>
-                            <p class="field-hint" id="coverSaveFirst" data-i18n="manage.hint.cover-save-first">A picture can be added once the event has saved.</p>
+                                <p class="field-hint" id="coverHint" data-i18n="manage.hint.cover">The cover is cut from a gallery picture: choose "Use as cover" on one below, then pick the 16:9 part to show. Event cards show it as their thumbnail.</p>
                                 <div class="actions inline">
-                                    <label class="btn file-btn" id="coverPick"><span data-icon="image"></span><span data-i18n="manage.cover-choose">Choose a picture</span><input type="file" id="coverFile" accept="image/*" class="visually-hidden"></label>
                                     <button class="btn" type="button" id="coverAdjust" hidden><span data-icon="edit"></span><span data-i18n="manage.cover-adjust">Adjust crop</span></button>
-                                    <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove picture</span></button>
+                                    <button class="btn btn-quiet" type="button" id="coverRemove" hidden><span data-i18n="manage.cover-remove">Remove cover</span></button>
                                 </div>
                                 <div class="callout danger" id="coverError" role="alert"></div>
+                            </div>
+                            <div class="field span-2 gallery-field">
+                                <span data-i18n="manage.field.gallery">Gallery</span>
+                                <p class="field-hint" id="galleryHint" data-i18n="manage.hint.gallery">Add as many pictures as you like, up to 30. Each keeps its own shape, uncropped; your browser shrinks it into a small WebP before it is uploaded. The event page shows them under the description.</p>
+                                <p class="field-hint" id="galleryPasteHint" data-i18n="manage.hint.gallery-paste">Or copy a picture and paste it here with Ctrl+V (Cmd+V on a Mac).</p>
+                                <p class="field-hint" id="gallerySaveFirst" data-i18n="manage.hint.cover-save-first">Pictures can be added once the event has saved.</p>
+                                <ul class="gallery-manage" id="galleryList" hidden></ul>
+                                <div class="actions inline">
+                                    <label class="btn file-btn" id="galleryPick"><span data-icon="plus"></span><span data-i18n="manage.gallery-add">Add pictures</span><input type="file" id="galleryFile" accept="image/*" multiple class="visually-hidden"></label>
+                                    <span class="small muted" id="galleryCount" aria-live="polite"></span>
+                                </div>
+                                <div class="callout danger" id="galleryError" role="alert"></div>
                             </div>
                             <label class="field span-2">
                                 <span data-i18n="manage.field.externalUrl-link">Link (optional)</span>
@@ -668,6 +756,129 @@
                 <button class="btn" type="button" id="cropReset"><span data-icon="refresh"></span><span data-i18n="manage.crop-reset">Back to the middle</span></button>
                 <button class="btn btn-quiet" type="button" data-close-modal="cropModal" data-i18n="common.cancel">Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="pictureModal">
+        <div class="modal glass-card picture-modal" role="dialog" aria-modal="true" aria-labelledby="pictureTitle">
+            <div class="modal-head">
+                <h2 id="pictureTitle" data-i18n="editor.picker-title">Picture or sticker</h2>
+                <button class="icon-btn small" type="button" data-close-modal="pictureModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <div class="picker-tabs" id="pickerTabs" role="tablist" aria-label="Pictures" data-i18n-attr="aria-label:editor.picker-title">
+                <button class="picker-tab" type="button" role="tab" id="pickerTab-gallery" aria-controls="pickerPanel-gallery" aria-selected="true" data-i18n="editor.picker-gallery">Gallery</button>
+                <button class="picker-tab" type="button" role="tab" id="pickerTab-stickers" aria-controls="pickerPanel-stickers" aria-selected="false" tabindex="-1" data-i18n="editor.picker-stickers">Stickers</button>
+            </div>
+            <div role="tabpanel" id="pickerPanel-gallery" aria-labelledby="pickerTab-gallery">
+                <p class="small muted" data-i18n="editor.picker-gallery-lede">Choose a picture to put in where the cursor is. You can drag it elsewhere in the text afterwards.</p>
+                <p class="small muted" id="pickerGalleryEmpty" hidden data-i18n="editor.picker-gallery-empty">The gallery has no pictures yet. Upload some below.</p>
+                <p class="callout small" id="pickerSaveFirst" hidden data-i18n="editor.pictures-save-first">Pictures can be added once the event has saved.</p>
+                <ul class="picker-grid" id="pickerGallery"></ul>
+                <div class="actions inline">
+                    <label class="btn file-btn" id="pickerUpload"><span data-icon="plus"></span><span data-i18n="editor.picker-upload">Upload pictures</span><input type="file" id="pickerFile" accept="image/*" multiple class="visually-hidden"></label>
+                </div>
+                <div class="callout danger" id="pickerUploadError" role="alert"></div>
+            </div>
+            <div role="tabpanel" id="pickerPanel-stickers" aria-labelledby="pickerTab-stickers" hidden>
+                <form class="picker-pack-form" id="pickerPackForm" novalidate>
+                    <label class="field">
+                        <span data-i18n="stickers.link-label">Add a Telegram sticker pack</span>
+                        <input id="pickerPackLink" type="url" inputmode="url" placeholder="https://t.me/addstickers/…" autocomplete="off">
+                    </label>
+                    <button class="btn" type="submit" id="pickerPackAdd"><span data-icon="plus"></span><span data-i18n="stickers.add">Add pack</span></button>
+                </form>
+                <p class="small muted" id="pickerPackStatus" aria-live="polite"></p>
+                <div class="callout danger" id="pickerStickerError" role="alert"></div>
+                <p class="small muted" id="pickerNoPacks" hidden data-i18n="stickers.none">No sticker packs yet. Paste a t.me/addstickers link above.</p>
+                <div class="picker-packs" id="pickerPacks"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="pictureCropModal">
+        <div class="modal glass-card picture-crop-modal" role="dialog" aria-modal="true" aria-labelledby="pictureCropTitle" aria-describedby="pictureCropHelp">
+            <div class="modal-head">
+                <h2 id="pictureCropTitle" data-i18n="editor.crop-title">Size and crop</h2>
+                <button class="icon-btn small" type="button" data-close-modal="pictureCropModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <fieldset class="picture-size" id="pictureSize">
+                <legend data-i18n="editor.size-label">Size in the description</legend>
+                <label class="picture-size-option"><input type="radio" name="pictureSize" value=""><span data-i18n="editor.size-original">Original</span></label>
+                <label class="picture-size-option"><input type="radio" name="pictureSize" value="small"><span data-i18n="editor.size-small">Small</span></label>
+                <label class="picture-size-option"><input type="radio" name="pictureSize" value="medium"><span data-i18n="editor.size-medium">Medium</span></label>
+                <label class="picture-size-option"><input type="radio" name="pictureSize" value="large"><span data-i18n="editor.size-large">Large</span></label>
+                <label class="picture-size-option"><input type="radio" name="pictureSize" value="full"><span data-i18n="editor.size-full">Full width</span></label>
+            </fieldset>
+            <div class="picture-crop-tools">
+                <label class="picture-crop-shape">
+                    <span data-i18n="editor.crop-shape">Shape</span>
+                    <select id="pictureCropShape">
+                        <option value="free" data-i18n="editor.crop-free">Free</option>
+                        <option value="original" data-i18n="editor.crop-original">The picture's own</option>
+                        <option value="1:1" data-i18n="editor.crop-square">Square</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                    </select>
+                </label>
+                <span class="small muted" id="pictureCropSize" aria-live="polite"></span>
+            </div>
+            <div class="picture-crop-stage" id="pictureCropStage" tabindex="0" role="application" aria-label="The part of the picture to show" data-i18n-attr="aria-label:editor.crop-frame" aria-describedby="pictureCropHelp">
+                <div class="picture-crop-box">
+                    <img id="pictureCropImage" alt="" draggable="false">
+                    <div class="picture-crop-shade" id="pictureCropShadeTop"></div><div class="picture-crop-shade" id="pictureCropShadeBottom"></div><div class="picture-crop-shade" id="pictureCropShadeLeft"></div><div class="picture-crop-shade" id="pictureCropShadeRight"></div>
+                    <div class="picture-crop-frame" id="pictureCropFrame">
+                        <span data-handle="nw"></span><span data-handle="n"></span><span data-handle="ne"></span><span data-handle="e"></span>
+                        <span data-handle="se"></span><span data-handle="s"></span><span data-handle="sw"></span><span data-handle="w"></span>
+                    </div>
+                </div>
+            </div>
+            <p class="field-hint" id="pictureCropHelp" data-i18n="editor.crop-help">Drag the frame to move it, and its edges or corners to resize it. On the keyboard: the arrow keys move it (Shift for bigger steps), + and - resize it, 0 takes the whole picture. Only this place in the description changes; the gallery keeps the whole picture.</p>
+            <div class="actions inline">
+                <button class="btn btn-primary" type="button" id="pictureCropUse"><span data-icon="check"></span><span data-i18n="editor.crop-use">Apply</span></button>
+                <button class="btn" type="button" id="pictureCropFull"><span data-icon="refresh"></span><span data-i18n="editor.crop-full">Apply without a crop</span></button>
+                <button class="btn btn-quiet" type="button" data-close-modal="pictureCropModal" data-i18n="common.cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="linkModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="linkTitle">
+            <div class="modal-head">
+                <h2 id="linkTitle" data-i18n="editor.link-title">Link</h2>
+                <button class="icon-btn small" type="button" data-close-modal="linkModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <form id="linkForm" novalidate>
+                <label class="field"><span data-i18n="editor.link-text">Text to show</span><input id="linkText" type="text" maxlength="500"></label>
+                <label class="field"><span data-i18n="editor.link-address">Address</span><input id="linkAddress" type="text" inputmode="url" placeholder="https://" maxlength="2000"></label>
+                <div class="callout danger" id="linkError" role="alert"></div>
+                <div class="actions inline">
+                    <button class="btn btn-primary" type="submit"><span data-icon="check"></span><span data-i18n="editor.link-save">Save link</span></button>
+                    <button class="btn btn-quiet" type="button" id="linkRemove" hidden data-i18n="editor.unlink">Remove link</button>
+                    <button class="btn btn-quiet" type="button" data-close-modal="linkModal" data-i18n="common.cancel">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal-backdrop hidden" id="tableModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="tableTitle">
+            <div class="modal-head">
+                <h2 id="tableTitle" data-i18n="editor.table-title">Insert a table</h2>
+                <button class="icon-btn small" type="button" data-close-modal="tableModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+            </div>
+            <form id="tableForm" novalidate>
+                <div class="row">
+                    <label class="field"><span data-i18n="editor.table-rows">Rows</span><input id="tableRows" type="number" min="1" max="50" value="3" inputmode="numeric"></label>
+                    <label class="field"><span data-i18n="editor.table-columns">Columns</span><input id="tableColumns" type="number" min="1" max="10" value="3" inputmode="numeric"></label>
+                </div>
+                <label class="check"><input type="checkbox" id="tableHeader" checked><span data-i18n="editor.table-header">First row is a heading</span></label>
+                <div class="actions inline">
+                    <button class="btn btn-primary" type="submit"><span data-icon="check"></span><span data-i18n="editor.table-insert">Insert table</span></button>
+                    <button class="btn btn-quiet" type="button" data-close-modal="tableModal" data-i18n="common.cancel">Cancel</button>
+                </div>
+            </form>
         </div>
     </div>
 

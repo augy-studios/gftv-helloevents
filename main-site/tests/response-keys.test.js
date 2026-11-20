@@ -42,6 +42,7 @@ const detail = await route('events/detail');
 const rsvp = await route('events/rsvp');
 const manage = await route('manage/events');
 const cover = await route('manage/cover');
+const gallery = await route('manage/gallery');
 const admin = await route('manage/admin');
 const security = await route('me/security');
 const notifications = await route('me/notifications');
@@ -149,7 +150,7 @@ const LOCATION = ['label', 'customLabel', 'venueName', 'city', 'country', 'addre
 // The event page: the card, plus what only the page shows.
 const DETAIL = [
   ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName',
-  ...nest('externalLink', ['url', 'label', 'customLabel', 'locked']), 'crossBorder',
+  ...nest('externalLink', ['url', 'label', 'customLabel', 'locked']), 'crossBorder', 'gallery',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
   ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'methods']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
@@ -168,7 +169,7 @@ const EDITOR_LOCATION = ['label', 'customLabel', 'venueName', 'venueAddress', 'c
 const EDITOR = [
   'id', 'slug', 'title', 'kind', 'status', 'datesHidden', 'timezone', 'capacity', 'summary', 'description',
   'descriptionZh', 'startDate', 'startTime', 'endDate', 'endTime', 'publishLocal', 'isOnline', 'onlineUrl',
-  ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'externalUrl',
+  ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop', 'externalUrl',
   'externalUrlLabel', 'externalUrlCustomLabel', 'crossBorder',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
   ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includesPrevious', 'previousDisplay', 'paymentMethods', 'paymentLink', 'paymentQrUrl']), 'rsvpOpen',
@@ -179,7 +180,11 @@ const EDITOR = [
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
   'lepakEnabled', 'lepakLimit', 'lepakLabel',
 ];
-const COVER = ['coverImageUrl', 'hasCover'];
+const COVER = ['coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop'];
+// The gallery (migrations/019): in the edit form, and on the event page.
+const GALLERY_IMAGE = ['id', 'url', 'width', 'height'];
+const GALLERY = [...listOf('images', GALLERY_IMAGE), 'limit'];
+const CROP = ['x', 'y', 'width', 'height'];
 const ATTENDEE = [
   'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'lepak', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt',
   ...nest('payment', ['method', 'status', 'tier', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
@@ -492,6 +497,20 @@ test('the event list, the edit form, attendees and the cover answer only what /m
 
   assertKeys(await editor.call(cover, { method: 'POST', body: { id, image: await webp() } }), nest('event', COVER));
   assertKeys(await editor.call(cover, { method: 'POST', body: { id, remove: true } }), nest('event', COVER));
+
+  // The gallery, and a cover cut from one of its pictures.
+  assertKeys(await editor.call(gallery, { query: { id } }), ['images', 'limit']);
+  const added = await editor.call(gallery, { method: 'POST', body: { id, image: await webp() } });
+  assertKeys(added, [...nest('image', GALLERY_IMAGE), ...GALLERY]);
+  assertKeys(await editor.call(gallery, { query: { id } }), GALLERY);
+  const sourceImageId = added.json.image.id;
+  const crop = { x: 0, y: 0, width: 1600, height: 900 };
+  assertKeys(await editor.call(cover, { method: 'POST', body: { id, image: await webp(), sourceImageId, crop } }), [...nest('event', COVER), ...nest('event.coverCrop', CROP)]);
+  assertKeys(await editor.call(manage, { query: { id } }), [...nest('event', EDITOR), ...nest('event.coverCrop', CROP), ...listOf('attendees', ATTENDEE)]);
+  // The event page's gallery: each picture's address and size, no id.
+  const page = await editor.call(detail, { query: { slug: 'mega-con' } });
+  assert.deepEqual(keyPaths(page.json.event.gallery), ['[].height', '[].url', '[].width']);
+  assertKeys(await editor.call(gallery, { method: 'POST', body: { id, remove: sourceImageId } }), [...nest('event', COVER), ...listOf('images', []), 'limit']);
 
   const removed = await editor.call(manage, { method: 'POST', body: { action: 'remove-attendee', id, username: 'otter', staff: false } });
   assertKeys(removed, listOf('attendees', ATTENDEE));

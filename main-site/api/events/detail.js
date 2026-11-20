@@ -13,6 +13,8 @@ import { currentSession } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
+import { withGallery } from '../_lib/gallery.js';
+import { withDescriptionPictures } from '../_lib/description-pictures.js';
 
 // The signed-in person's country of origin (migrations/015), or null.
 function countryOfSession(session) {
@@ -50,6 +52,8 @@ export default route('events/detail', async (request, response) => {
 
   await withMealCounts(row);
   await withVolunteerSource(row);
+  await withGallery(row);
+  await withDescriptionPictures(row);
   let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false };
   let standing = { volunteered: false, discount: false };
   if (session) {

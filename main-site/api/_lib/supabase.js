@@ -55,6 +55,13 @@ export const TABLES = Object.freeze({
   paymentsBucket: 'gftvevents_payments',
   // migrations/018: accounts an admin made editors of one event.
   eventEditors: 'gftvevents_event_editors',
+  // migrations/019: each event's gallery pictures (files in coversBucket).
+  eventImages: 'gftvevents_event_images',
+  // migrations/020: Telegram sticker packs added to an account, their
+  // stickers, and the private bucket the sticker files are in.
+  stickerPacks: 'gftvevents_sticker_packs',
+  stickers: 'gftvevents_stickers',
+  stickersBucket: 'gftvevents_stickers',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).
