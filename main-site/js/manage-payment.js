@@ -62,9 +62,27 @@ function renderQr() {
   }
 }
 
+// A problem in words: the event's, or one tier's ("Gold: ...").
+function problemText(problem) {
+  const text = translate(`manage.payment-problem.${problem.code}`);
+  if (problem.tier) {
+    return translate('manage.payment-problem-tier', { tier: problem.tier, problem: translate(`manage.payment-problem.tier-${problem.code}`) });
+  }
+  return text;
+}
+
+// The payment problems as the server now has them (after a tier's QR code
+// changes, js/manage-tiers.js).
+export function setPaymentProblems(problems) {
+  if (Array.isArray(problems)) {
+    qr.problems = problems;
+  }
+  renderProblems();
+}
+
 function renderProblems() {
   const list = byId('paymentProblems');
-  list.replaceChildren(...qr.problems.map((problem) => createElement('li', { text: translate(`manage.payment-problem.${problem}`) })));
+  list.replaceChildren(...qr.problems.map((problem) => createElement('li', { text: problemText(problem) })));
   let shown = false;
   if (qr.problems.length > 0 && byId('f-priceType').value === 'paid') {
     shown = true;

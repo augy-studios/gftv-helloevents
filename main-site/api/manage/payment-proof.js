@@ -8,6 +8,7 @@
 import { route, guard, fail, query } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { requireUser } from '../_lib/session.js';
+import { canEditEvent } from '../_lib/event-editors.js';
 import { readPaymentFile } from '../_lib/payments.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -35,7 +36,7 @@ export default route('manage/payment-proof', async (request, response) => {
   if (guard(request, response, ['GET'])) {
     return;
   }
-  const session = await requireUser(request, response, { manage: true });
+  const session = await requireUser(request, response, { manage: true, eventEditor: true });
   if (!session) {
     return;
   }
@@ -43,6 +44,10 @@ export default route('manage/payment-proof', async (request, response) => {
   const username = query(request, 'username').trim();
   const staff = query(request, 'staff') === '1';
   if (!UUID_PATTERN.test(eventId) || !username) {
+    return notFound(response);
+  }
+  // An editor of one event (migrations/018): only its own attendees.
+  if (!(await canEditEvent(session.user, eventId.toLowerCase()))) {
     return notFound(response);
   }
   const { data, error } = await database()

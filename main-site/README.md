@@ -185,6 +185,33 @@ the functions with the service role key. No Supabase Auth, no request signing.
   (refunds are the organisers' business). QR codes and screenshots live in the private
   `gftvevents_payments` bucket, and a screenshot is deleted when it is replaced or its RSVP goes
   (taken back, removed by an editor, the event or account deleted).
+- **Each tier its own ways to pay.** A tier card ticks its own ways to pay (on the day, link, QR
+  code), none for the event's, and can have its own payment link and QR code in place of the
+  event's. Tiers keep an id, by which the server keeps a tier's QR code across autosaves (the form
+  never sends it; it is uploaded on its own once the tier has saved). Checkout offers each ticket
+  only its tier's ways, shows the link or QR code of the tier bought, and lets "Pay another way"
+  pick only among them; a buyer can open only their own tier's QR code. The event page's ticket
+  cards say how a tier is paid for when it differs from the event. Taking a tier away deletes its
+  QR code.
+- **"Just Lepak Only"** (migrations/017). A paid event can let people come without a ticket, to hang
+  out: a third RSVP choice beside "The whole event" and "just for the meal", "Just Lepak Only"
+  unless the editor typed other words. Lepak people are going like anyone else (address, RSVP ID,
+  reminders), take none of the event's spaces (so a full event still takes them), can tick meals
+  too, and have their own cap. Editors see them marked on the attendee list, with a count.
+- **Editors of one event** (migrations/018). An admin adds any account active in the last 30 days
+  as an editor of a specific event, from that event's Editors tab (admins only). An event editor
+  sees only their events on `/manage` (no New event, no staff tools), edits every section and
+  manages attendees, but cannot change the Status or release time (the server keeps them), create
+  or delete events. Their rights work only while two-step sign-in (an authenticator app or a
+  passkey) is on; the tab warns until it is. They preview their unreleased event and get "Edit this
+  event" on it.
+- **Event list by status.** `/manage`'s event list has Published (released or scheduled), Drafts and
+  Cancelled, each with its count and pages; going back from the form opens the status of the event
+  that was open.
+- **Feed search.** The home page searches title, summary, venue, city, country and organiser, every
+  word, within the When and Kind picked, as it is typed; the search is kept in the address
+  (`/?q=...`). Typed symbols are only text: the search is a nested PostgREST filter under the
+  release check (`event-rules.js releasedFilter`, `searchWords`).
 - **Page tours** (`js/tour.js`, `js/tours.js`, after `docs/page-tour-spec.md`). The first time
   someone opens the feed, an event, checkout, their account or `/manage`, the page dims and a
   chalk arrow points at each thing worth knowing, one line at a time, with Next and Skip. Each tab
@@ -229,7 +256,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 016) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 018) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -246,7 +273,10 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    cross-border events: sign-up, the account page, RSVPs and the event pages read its columns.
    Run `016_checkout_payments.sql` before deploying checkout: the event pages, RSVPs, the edit
    form and the attendee list read its columns, and it creates the private `gftvevents_payments`
-   Storage bucket.
+   Storage bucket. Run `017_lepak.sql` before deploying "Just Lepak Only": it replaces the RSVP
+   function (every RSVP sends its lepak setting) and the view the spaces are counted from. Run
+   `018_event_editors.sql` before deploying editors of one event: the session, `/manage` and the
+   event pages read its table.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

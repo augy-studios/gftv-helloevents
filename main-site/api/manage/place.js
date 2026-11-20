@@ -20,7 +20,7 @@ export default route('manage/place', async (request, response) => {
   if (guard(request, response, ['POST'])) {
     return;
   }
-  const session = await requireUser(request, response, { manage: true });
+  const session = await requireUser(request, response, { manage: true, eventEditor: true });
   if (!session) {
     return;
   }

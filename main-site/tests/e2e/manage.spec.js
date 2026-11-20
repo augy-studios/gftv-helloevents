@@ -46,13 +46,26 @@ const locationField = (page, index, key) => page.locator('#locationList .locatio
 test('an editor creates an event in Manage, edits it, and the public page and feed show the change', async ({ page }) => {
   await openManage(page);
 
-  // Every event, drafts included, for editors.
+  // Every event, drafts included, for editors, by status: Published first,
+  // each status with its count.
   const list = page.locator('#eventList');
-  for (const event of Object.values(EVENTS)) {
-    await expect(list.locator('.item-title', { hasText: event.title })).toHaveCount(1);
-  }
+  const statusButton = (name) => page.locator('#listStatus').getByRole('button', { name });
+  await expect(page.locator('#listStatus button')).toHaveText(['Published4', 'Drafts1', 'Cancelled0']);
+  await expect(statusButton(/^Published/)).toHaveAttribute('aria-pressed', 'true');
+  const published = Object.values(EVENTS).filter((event) => event.status === 'published');
+  // Newest change first, which the seed does not fix: compared as a set.
+  await expect(list.locator('li')).toHaveCount(published.length);
+  expect((await list.locator('.item-title').allInnerTexts()).sort()).toEqual(published.map((event) => event.title).sort());
+  await expect(list.locator('.item-title', { hasText: EVENTS.draft.title })).toHaveCount(0);
+  await statusButton(/^Drafts/).click();
   const draftRow = list.locator('li', { hasText: EVENTS.draft.title });
   await expect(draftRow.locator('.chip')).toHaveText('Draft');
+  await expect(list.locator('li')).toHaveCount(1);
+  // No cancelled events: a line says so.
+  await statusButton(/^Cancelled/).click();
+  await expect(list.locator('li')).toHaveCount(0);
+  await expect(page.locator('#listEmptyStatus')).toHaveText('No cancelled events.');
+  await statusButton(/^Published/).click();
   await expect(page.locator('header [data-when="manager"]')).toBeVisible();
   // Fewer than ten events: one page, no pager.
   await expect(page.locator('#listPager')).toBeHidden();
@@ -128,8 +141,9 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(page.locator('#f-endDate')).toHaveValue(NEW_EVENT.startDate);
   await openSection(page, 'Attendees and notes');
   await expect(page.locator('#attendeesTitle')).toHaveText('0 people going');
-  // The list, in its own tab, has the new event.
+  // The list, in its own tab, has the new event, under its status.
   await page.getByRole('tab', { name: 'Event list' }).click();
+  await expect(page.locator('#listStatus').getByRole('button', { name: /^Published/ })).toHaveAttribute('aria-pressed', 'true');
   const newRow = list.locator('li', { hasText: NEW_EVENT.title });
   await expect(newRow.locator('.chip')).toHaveText('Published');
   await page.getByRole('tab', { name: 'Manage event' }).click();
@@ -240,7 +254,8 @@ test('an event with its times to be confirmed, both descriptions and three locat
 
 test('the event list shows ten events a page', async ({ page }) => {
   await openManage(page);
-  const seeded = Object.keys(EVENTS).length;
+  // The new events are drafts, listed under Drafts with the seeded one.
+  const seeded = Object.values(EVENTS).filter((event) => event.status === 'draft').length;
   const added = 12;
   // Made through the API from the signed-in page, the way the form saves.
   await page.evaluate(async (count) => {
@@ -259,6 +274,9 @@ test('the event list shows ten events a page', async ({ page }) => {
   }, added);
   await page.reload();
   await expect(page.locator('#listBox')).toHaveAttribute('aria-busy', 'false');
+  // Published has too few for a second page; Drafts has two.
+  await expect(page.locator('#listPager')).toBeHidden();
+  await page.locator('#listStatus').getByRole('button', { name: /^Drafts/ }).click();
 
   const total = seeded + added;
   const pages = Math.ceil(total / 10);

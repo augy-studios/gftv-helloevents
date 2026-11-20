@@ -21,7 +21,7 @@ import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { attendance } from '../_lib/events.js';
-import { paymentOptions, readPaymentReference, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { ticketOptions, readPaymentReference, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { preparePicture, storeProof, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { checkoutEvent, checkoutAnswer } from './checkout.js';
 
@@ -77,7 +77,7 @@ async function report(request, response, event, user, stored, body) {
 
 // "method": another way to pay.
 async function switchMethod(request, response, event, user, stored, body) {
-  if (!paymentOptions(event).includes(body.method)) {
+  if (!ticketOptions(event, stored.payment_tier).includes(body.method)) {
     return fail(response, 400, 'payment_method_required');
   }
   if (!stored.payment_method) {

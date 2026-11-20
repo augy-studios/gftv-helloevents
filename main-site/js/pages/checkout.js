@@ -87,24 +87,44 @@ function priceAside(ticket) {
 
 function renderTickets() {
   const tickets = checkout.tickets;
-  if (pickedTicket >= tickets.length) {
-    pickedTicket = 0;
+  if (pickedTicket >= tickets.length || tickets[pickedTicket].methods.length === 0) {
+    pickedTicket = Math.max(0, tickets.findIndex((ticket) => ticket.methods.length > 0));
   }
   byId('ticketList').replaceChildren(...tickets.map((ticket, place) => {
     let title = ticket.name;
     if (!title) {
       title = translate('checkout.ticket-single');
     }
-    return choiceCard({ name: 'ticket', value: String(place), checked: place === pickedTicket, title, lines: ticket.benefits, aside: priceAside(ticket) });
+    const lines = [...ticket.benefits];
+    // A ticket no way to pay is set up for yet cannot be picked.
+    if (ticket.methods.length === 0) {
+      lines.push(translate('checkout.ticket-unavailable'));
+    }
+    const card = choiceCard({ name: 'ticket', value: String(place), checked: place === pickedTicket, title, lines, aside: priceAside(ticket) });
+    if (ticket.methods.length === 0) {
+      card.classList.add('unavailable');
+      card.querySelector('input').disabled = true;
+    }
+    return card;
   }));
   byId('discountNote').hidden = !checkout.volunteerDiscount;
 }
 
-function renderMethods() {
-  if (!checkout.methods.includes(pickedMethod)) {
-    pickedMethod = checkout.methods[0];
+// The ways to pay the picked ticket (its tier's own, or the event's).
+function ticketMethods() {
+  const ticket = checkout.tickets[pickedTicket];
+  if (!ticket) {
+    return [];
   }
-  byId('methodList').replaceChildren(...checkout.methods.map((method) => choiceCard({
+  return ticket.methods;
+}
+
+function renderMethods() {
+  const methods = ticketMethods();
+  if (!methods.includes(pickedMethod)) {
+    pickedMethod = methods[0];
+  }
+  byId('methodList').replaceChildren(...methods.map((method) => choiceCard({
     name: 'method',
     value: method,
     checked: method === pickedMethod,
@@ -151,7 +171,7 @@ function renderOrder() {
 
 // Why there is nothing to buy here, or '' when there is.
 function closedReason() {
-  if (!checkout.checkout || checkout.tickets.length === 0) {
+  if (!checkout.checkout || !checkout.tickets.some((ticket) => ticket.methods.length > 0)) {
     return translate('checkout.closed-no-payment');
   }
   if (checkout.rsvp === 'open') {
@@ -229,7 +249,13 @@ function renderPayHow(payment) {
 
 // The other ways to pay, while the payment is not confirmed.
 function renderSwitch(payment) {
-  const others = checkout.methods.filter((method) => method !== payment.method);
+  // The ways to pay this ticket's tier (or the event's, without tiers).
+  let methods = checkout.methods;
+  const ticket = checkout.tickets.find((each) => each.name === payment.tier);
+  if (payment.tier && ticket) {
+    methods = ticket.methods;
+  }
+  const others = methods.filter((method) => method !== payment.method);
   byId('switchBox').hidden = true;
   if (payment.status === 'paid' || others.length === 0) {
     return;
@@ -273,7 +299,7 @@ function render() {
   renderHeader();
   const payment = checkout.viewer.payment;
   let holding = false;
-  if (checkout.viewer.going && !checkout.viewer.onlyMeals && payment !== null && payment.method !== null) {
+  if (checkout.viewer.going && !checkout.viewer.withoutTicket && payment !== null && payment.method !== null) {
     holding = true;
   }
   byId('payBox').hidden = !holding;
@@ -284,7 +310,7 @@ function render() {
     return;
   }
   // Going to the whole event from before checkout: nothing to buy.
-  if (checkout.viewer.going && !checkout.viewer.onlyMeals) {
+  if (checkout.viewer.going && !checkout.viewer.withoutTicket) {
     byId('orderBox').hidden = true;
     byId('closedBox').hidden = false;
     setText('closedText', translate('checkout.already-going'));
@@ -313,8 +339,10 @@ async function switchMethod(button, method) {
   });
 }
 
+// Another ticket can be paid for in other ways: the methods follow it.
 byId('ticketList').addEventListener('change', (changed) => {
   pickedTicket = Number(changed.target.value);
+  renderMethods();
   renderOrder();
 });
 

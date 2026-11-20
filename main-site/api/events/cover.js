@@ -19,7 +19,7 @@
 
 import { route, guard, fail, query } from '../_lib/http.js';
 import { currentSession } from '../_lib/session.js';
-import { canManage } from '../_lib/users.js';
+import { canEditEvent } from '../_lib/event-editors.js';
 import { isReleased } from '../_lib/event-rules.js';
 import { anyEventBySlug } from '../_lib/events.js';
 import { coverVersion, readCover } from '../_lib/covers.js';
@@ -44,7 +44,7 @@ export default route('events/cover', async (request, response) => {
   const released = isReleased(row);
   if (!released) {
     const session = await currentSession(request);
-    if (!session || !canManage(session.user)) {
+    if (!session || !(await canEditEvent(session.user, row.id))) {
       return notFound(response);
     }
   }

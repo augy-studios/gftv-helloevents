@@ -28,6 +28,7 @@ export async function checkoutAnswer(row, user) {
   return checkoutView(row, {
     going: mine.going,
     meals: mine.meals,
+    lepak: mine.lepak,
     rsvpNumber: mine.rsvpNumber,
     volunteer: mine.volunteer,
     discount: standing.discount,

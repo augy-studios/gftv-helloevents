@@ -302,11 +302,11 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['country', 'displayName', 'meals', 'pastVolunteer', 'payment', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
+  assert.deepEqual(Object.keys(staff).sort(), ['country', 'displayName', 'lepak', 'meals', 'pastVolunteer', 'payment', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
   assert.equal(staff.staff, true);
   const member = ser.attendeeView({ user_id: 'p1', rsvp_number: 7, created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
   const noPayment = { method: null, status: 'none', tier: null, amount: null, currency: null, reference: null, hasProof: false, submittedAt: null, paidAt: null };
-  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], country: null, volunteer: false, volunteered: false, pastVolunteer: false, payment: noPayment, rsvpAt: 'x' });
+  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], lepak: false, country: null, volunteer: false, volunteered: false, pastVolunteer: false, payment: noPayment, rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
   // An attendee's country goes to the editors of a cross-border event only.
   const traveller = { user_id: 'p2', created_at: 'x', account: { kind: 'public', username: 'lynx', display_name: 'Lynx', country: 'MY' } };
@@ -475,16 +475,19 @@ test('the event page shows tiers with earlier benefits in full or by name, and h
     ],
   });
   assert.deepEqual(ser.publicEventDetail(event, {}, now).tiers, [
-    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null },
-    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null },
-    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null },
-    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor' },
-    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null },
+    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null, methods: [] },
+    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null, methods: [] },
+    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null, methods: [] },
+    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor', methods: [] },
+    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null, methods: [] },
   ]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_hidden: true }), {}, now).tiers.map((tier) => tier.price), [null, null, null, null, null]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, tiers_enabled: false }), {}, now).tiers, []);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_type: 'free' }), {}, now).tiers, []);
-  assert.deepEqual(ser.managedEvent(event).ticketTiers[1], { name: 'Weekend', price: '80', benefits: 'Three days', includesPrevious: true, previousDisplay: 'full' });
+  assert.deepEqual(ser.managedEvent(event).ticketTiers[1], {
+    id: 't-tier2', name: 'Weekend', price: '80', benefits: 'Three days', includesPrevious: true, previousDisplay: 'full',
+    paymentMethods: [], paymentLink: '', paymentQrUrl: '',
+  });
 });
 
 test('the signed-in view of yourself has no secrets', () => {
@@ -492,9 +495,9 @@ test('the signed-in view of yourself has no secrets', () => {
     id: 'u1', kind: 'staff', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
     is_admin: false, is_editor: true, is_approved: true, avatar_url: 'http://insecure.example/a.png',
   });
-  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, country: null });
+  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, editsEvents: false, country: null });
   const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$', country: 'SG' });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, country: 'SG' });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG' });
 });
 
 test('a public account can never manage events, whatever its row says', () => {

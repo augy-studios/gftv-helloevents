@@ -62,6 +62,12 @@
             <p class="lede" data-i18n="home.lede">Find your next meet, see how many are going, and RSVP with your GFTV account.</p>
         </section>
 
+        <form class="feed-search" id="feedSearchForm" role="search" novalidate>
+            <label class="visually-hidden" for="feedSearch" data-i18n="home.search-label">Search events</label>
+            <span class="feed-search-icon" data-icon="search"></span>
+            <input type="search" id="feedSearch" maxlength="80" autocomplete="off" enterkeyhint="search" placeholder="Search by name, place or organiser" data-i18n-attr="placeholder:home.search-placeholder">
+        </form>
+
         <div class="feed-controls">
             <div class="segmented" role="group" id="whenPicker" aria-label="When" data-i18n-attr="aria-label:home.when-label">
                 <button type="button" data-when-filter="upcoming" aria-pressed="true"><span data-i18n="home.upcoming">Upcoming</span></button>

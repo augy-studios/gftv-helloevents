@@ -6,6 +6,7 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { currentSession, endSession, endOtherSessions } from '../_lib/session.js';
 import { audit } from '../_lib/guards.js';
 import { selfView } from '../_lib/serialize.js';
+import { editsAnyEvent } from '../_lib/event-editors.js';
 
 // GET says who is signed in; POST signs this device, or every other one, out.
 export default route('auth/session', async (request, response) => {
@@ -18,7 +19,7 @@ export default route('auth/session', async (request, response) => {
     if (!session) {
       return ok(response, { signedIn: false });
     }
-    return ok(response, { signedIn: true, user: selfView(session.user) });
+    return ok(response, { signedIn: true, user: selfView(session.user, { editsEvents: await editsAnyEvent(session.user) }) });
   }
 
   const body = await readJson(request, response);

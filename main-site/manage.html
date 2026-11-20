@@ -75,8 +75,15 @@
         <div class="tab-panel" role="tabpanel" id="panel-events" aria-labelledby="tab-events">
             <section class="glass-card page-card" id="listBox" aria-busy="true">
                 <h2 class="visually-hidden" data-i18n="manage.list-title">All events</h2>
+                <!-- The list by status, each with its own pages (js/pages/manage.js). -->
+                <div class="segmented list-status" role="group" id="listStatus" aria-label="Show" data-i18n-attr="aria-label:manage.list-status-label">
+                    <button type="button" data-list-status="published" aria-pressed="true"><span data-i18n="manage.list-status.published">Published</span><span class="list-count" data-list-count="published"></span></button>
+                    <button type="button" data-list-status="draft" aria-pressed="false"><span data-i18n="manage.list-status.draft">Drafts</span><span class="list-count" data-list-count="draft"></span></button>
+                    <button type="button" data-list-status="cancelled" aria-pressed="false"><span data-i18n="manage.list-status.cancelled">Cancelled</span><span class="list-count" data-list-count="cancelled"></span></button>
+                </div>
                 <ul class="item-list" id="eventList"></ul>
                 <p class="muted" id="listEmpty" hidden data-i18n="manage.list-empty">No events yet.</p>
+                <p class="muted" id="listEmptyStatus" hidden></p>
                 <nav class="pager" id="listPager" aria-label="Pages" data-i18n-attr="aria-label:manage.pages" hidden>
                     <button class="btn btn-small" type="button" id="pagePrev"><span data-i18n="manage.page-prev">Previous</span></button>
                     <span class="muted small" id="pageInfo" aria-live="polite"></span>
@@ -111,6 +118,7 @@
                     <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-timetable" data-tab="timetable" aria-controls="epanel-timetable" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="manage.etab.timetable">Timetable</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-editors" data-tab="editors" aria-controls="epanel-editors" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="manage.etab.editors">Editors</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                 </div>
 
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-basics" aria-labelledby="etab-basics">
@@ -348,6 +356,27 @@
                         </div>
                     </fieldset>
 
+                    <!-- "Just Lepak Only" (migrations/017): coming without a ticket. -->
+                    <fieldset id="lepakSection">
+                        <legend data-i18n="manage.section.lepak">Coming without a ticket</legend>
+                        <p class="muted small" id="lepakNotPaid" data-i18n="manage.lepak-not-paid">For a paid event: set Price to Paid to use this.</p>
+                        <div class="form-grid" id="lepakFields">
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-lepakEnabled" name="lepakEnabled">
+                                <span data-i18n="manage.field.lepakEnabled">Let people come without paying, to hang out ("Just Lepak Only")</span>
+                            </label>
+                            <p class="field-hint span-2" data-i18n="manage.hint.lepak">They are going like anyone else (address, RSVP ID, reminders) but take none of the event's spaces. They can tick meals too.</p>
+                            <label class="field">
+                                <span data-i18n="manage.field.lepakLabel">What the choice says (optional)</span>
+                                <input id="f-lepakLabel" name="lepakLabel" type="text" maxlength="40" placeholder="Just Lepak Only">
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.lepakLimit">Places (blank for no limit)</span>
+                                <input id="f-lepakLimit" name="lepakLimit" type="number" min="1" step="1" inputmode="numeric">
+                            </label>
+                        </div>
+                    </fieldset>
+
                     <fieldset>
                         <legend data-i18n="manage.section.rsvp">RSVP and publishing</legend>
                         <div class="form-grid">
@@ -367,6 +396,7 @@
                                 <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
                                 <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
                             </label>
+                            <p class="field-hint span-2" id="statusStaffOnly" hidden data-i18n="manage.hint.status-staff-only">GFTV staff decide when this event goes live: the Status and release time are theirs to change.</p>
                             <label class="field span-2">
                                 <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
                                 <input id="f-publishLocal" name="publishLocal" type="datetime-local">
@@ -504,9 +534,29 @@
                         <p class="muted small" id="attendeesMeals" hidden></p>
                         <p class="muted small" id="attendeesVolunteers" hidden></p>
                         <p class="muted small" id="attendeesPayments" hidden></p>
+                        <p class="muted small" id="attendeesLepak" hidden></p>
                         <p class="muted small" id="attendeesCountries" hidden></p>
                         <ul class="item-list" id="attendeeList"></ul>
                     </section>
+                </div>
+
+                <!-- The event's own editors (migrations/018, js/manage-editors.js):
+                     admins only. Not part of the form's saves. -->
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-editors" aria-labelledby="etab-editors" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.editors">Editors of this event</legend>
+                        <p class="muted small" data-i18n="manage.editors-lede">People you add here can edit this event and manage its attendees, but cannot publish, cancel or delete it. They need two-step sign-in (an authenticator app or a passkey) turned on before it works.</p>
+                        <ul class="item-list" id="eventEditorList"></ul>
+                        <div class="row u-mt-1" id="eventEditorAdd">
+                            <label class="field grow">
+                                <span data-i18n="manage.field.editorUsername">Add an editor (active in the last 30 days)</span>
+                                <input id="eventEditorUsername" type="text" list="eventEditorCandidates" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Pick or type a username" data-i18n-attr="placeholder:manage.editor-placeholder">
+                            </label>
+                            <datalist id="eventEditorCandidates"></datalist>
+                            <button class="btn" type="button" id="eventEditorAddBtn"><span data-icon="plus"></span><span data-i18n="manage.editor-add">Add</span></button>
+                        </div>
+                        <div class="callout danger" id="eventEditorError" role="alert"></div>
+                    </fieldset>
                 </div>
 
                 <div class="callout danger" id="editorError" role="alert"></div>

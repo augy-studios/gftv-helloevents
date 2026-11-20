@@ -209,6 +209,28 @@ test('the feed shows released events only, with hidden prices and dates kept bac
   }
 });
 
+test('the feed searches title, summary, place and organiser, every word, released events only', async () => {
+  const later = (days) => new Date(Date.now() + days * 86400_000).toISOString();
+  addEvent({ slug: 'bay-walk', title: 'Marina Bay Walk', starts_at: later(3) });
+  addEvent({ slug: 'sketch-meet', title: 'Sketch Meet', summary: 'Drawing by the bay.', starts_at: later(4) });
+  addEvent({ slug: 'jb-con', title: 'Southern Con', city: 'Johor Bahru', organiser_name: 'Paws Malaysia', starts_at: later(5) });
+  addEvent({ slug: 'secret-bay', title: 'Bay Draft', status: 'draft', starts_at: later(6) });
+  const b = browser();
+  const found = async (q, when = 'upcoming') => (await b.call(feed, { query: { when, q } })).json.events.map((e) => e.slug);
+
+  assert.deepEqual(await found('bay'), ['bay-walk', 'sketch-meet'], 'title or summary, never a draft');
+  assert.deepEqual(await found('BAY walk'), ['bay-walk'], 'every word, any case');
+  assert.deepEqual(await found('johor'), ['jb-con'], 'the city');
+  assert.deepEqual(await found('paws'), ['jb-con'], 'the organiser');
+  assert.deepEqual(await found('nothing like this'), []);
+  assert.deepEqual(await found('bay', 'past'), [], 'within the When picked');
+  // Wildcards and PostgREST syntax are only text.
+  assert.deepEqual(await found('%'), ['bay-walk', 'sketch-meet', 'jb-con'], 'a lone wildcard is no search');
+  // Syntax typed into a search is just more words to find: no draft slips in.
+  assert.deepEqual(await found('bay),status.eq.draft'), []);
+  assert.deepEqual(await found('bay)'), ['bay-walk', 'sketch-meet']);
+});
+
 test('editors may preview an unreleased event; members may not', async () => {
   addEvent({ slug: 'a-draft', status: 'draft' });
   await addUser({ username: 'editor', totp_secret: SHARED_SECRET, is_editor: true });
@@ -283,7 +305,7 @@ test('someone can come only for the meals an event offers, change their choice, 
 
   const going = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['m-tea123', 'lunch'] } });
   assert.equal(going.status, 200);
-  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, volunteered: false, volunteerDiscount: false, needsCountry: false, payment: { method: null, status: 'none' } });
+  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, lepak: false, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, volunteered: false, volunteerDiscount: false, needsCountry: false, payment: { method: null, status: 'none' } });
   assert.equal(going.json.event.going, 0, 'a meal-only attendee takes no space');
 
   const changed = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['dinner'] } });

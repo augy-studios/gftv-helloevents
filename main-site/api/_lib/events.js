@@ -3,7 +3,7 @@
 // a public request; the serializers then pick the fields each caller may see.
 
 import { database, TABLES } from './supabase.js';
-import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive } from './event-rules.js';
+import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive, lepakOffered, searchGroups } from './event-rules.js';
 
 // "going" on cards and pages counts the people coming to the whole event,
 // who take its spaces (gftvevents_full_attendees, migrations/009); people
@@ -21,7 +21,7 @@ export const DETAIL_COLUMNS =
   'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers, ' +
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
   'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
-  'payment_methods, payment_link, payment_qr_path, payment_instructions';
+  'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -32,9 +32,11 @@ export const FEED_PAGE = 24;
 // One page of the public feed.
 // when: "upcoming" (not over yet, soonest first), "past" (most recent first),
 // "tba" (dates not announced yet). kind: a KINDS value or "" for all.
-export async function releasedFeed({ when = 'upcoming', kind = '', offset = 0 } = {}) {
+// words: a search's words (event-rules.js searchWords), each to be found in
+// the title, summary, venue, city, country or organiser; [] for no search.
+export async function releasedFeed({ when = 'upcoming', kind = '', offset = 0, words = [] } = {}) {
   const now = new Date().toISOString();
-  let query = releasedFilter(database().from(TABLES.events).select(CARD_COLUMNS), now);
+  let query = releasedFilter(database().from(TABLES.events).select(CARD_COLUMNS), now, searchGroups(words));
   if (kind) {
     query = query.eq('kind', kind);
   }
@@ -86,13 +88,28 @@ export async function anyEventBySlug(slug, columns = MANAGE_COLUMNS) {
 }
 
 // Adds to an event row how many people are coming for each of its meals
-// (row.meal_taken: { lunch: 3 }), for the places left the event page shows.
-// Nothing is asked for an event with no meals.
+// (row.meal_taken: { lunch: 3 }) and how many are lepak (row.lepak_taken,
+// migrations/017), for the places left the event page shows. Nothing is
+// asked for an event with no meals, or that takes no lepak RSVPs.
 export async function withMealCounts(row) {
   if (!row) {
     return row;
   }
   row.meal_taken = {};
+  row.lepak_taken = 0;
+  if (lepakOffered(row)) {
+    const { count, error } = await database()
+      .from(TABLES.attendees)
+      .select('user_id', { count: 'exact', head: true })
+      .eq('event_id', row.id)
+      .eq('lepak', true);
+    if (error) {
+      throw error;
+    }
+    if (Number.isInteger(count)) {
+      row.lepak_taken = count;
+    }
+  }
   if (storedMeals(row).length === 0) {
     return row;
   }
@@ -123,7 +140,7 @@ export const PAYMENT_COLUMNS =
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`meals, volunteer, rsvp_number, ${PAYMENT_COLUMNS}`)
+    .select(`meals, volunteer, rsvp_number, lepak, ${PAYMENT_COLUMNS}`)
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -131,7 +148,7 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null };
+    return { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
@@ -141,7 +158,7 @@ export async function attendance(eventId, userId) {
   if (Number.isInteger(data.rsvp_number)) {
     rsvpNumber = data.rsvp_number;
   }
-  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber, payment: data };
+  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber, payment: data, lepak: data.lepak === true };
 }
 
 // Adds to an event row the earlier convention whose volunteers get its

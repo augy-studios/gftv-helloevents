@@ -6,13 +6,34 @@
 //
 // The server checks every field again (api/_lib/event-rules.js readTiers)
 // and drops a card left wholly blank.
+//
+// Each tier can also take its own ways to pay (migrations/016): any of on the
+// day, a payment link and a QR code, none ticked for the event's own (the
+// Payment section), with its own link and QR code in place of the event's.
+// A tier keeps an id (made here for a new one), by which the server keeps
+// its QR code: that is uploaded on its own (api/manage/payment-qr.js), once
+// the tier has saved.
 
 import { t as translate } from '../assets/i18n/i18n.js';
-import { createElement } from './ui.js';
+import { createElement, withBusy } from './ui.js';
 import { iconNode } from './icons.js';
+import { post } from './api.js';
+import { qrPicture } from './picture-file.js';
 
 const MAX_TIERS = 10;
 const DISPLAYS = ['reference', 'full'];
+const METHODS = ['onsite', 'link', 'qr'];
+// The open event ({ id }), or null for one not saved yet, and what to do
+// with an answer that changes the payment problems.
+let currentEvent = () => null;
+let onPaymentChange = () => {};
+
+// A new tier's id, as the server takes it: "t-" and ten letters or digits.
+function newTierId() {
+  const letters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const random = crypto.getRandomValues(new Uint8Array(10));
+  return `t-${[...random].map((value) => letters[value % letters.length]).join('')}`;
+}
 
 const byId = (id) => document.getElementById(id);
 const list = () => byId('tierList');
@@ -64,6 +85,65 @@ function renumber() {
   byId('tierAdd').hidden = cards.length >= MAX_TIERS;
 }
 
+// A card's link field shows with "Payment link" ticked, and its QR code with
+// "QR code" ticked; the QR code's buttons once the tier has saved.
+function syncPay(card) {
+  card.querySelector('.tier-pay-link').hidden = !input(card, 'pay-link').checked;
+  card.querySelector('.tier-pay-qr').hidden = !input(card, 'pay-qr').checked;
+  const url = card.dataset.qrUrl;
+  card.querySelector('.tier-qr-preview').hidden = !url;
+  card.querySelector('.tier-qr-remove').hidden = !url;
+  if (url && card.querySelector('.tier-qr-preview img').getAttribute('src') !== url) {
+    card.querySelector('.tier-qr-preview img').src = url;
+  }
+  card.querySelector('.tier-qr-pick').hidden = currentEvent() === null;
+}
+
+// Uploads (or, with remove, takes off) a card's QR code, then shows every
+// tier's QR code and the payment problems as the server now has them.
+async function uploadTierQr(card, body, button) {
+  const errorBox = card.querySelector('.tier-qr-error');
+  errorBox.textContent = '';
+  await withBusy(button, errorBox, async () => {
+    const data = await post('/api/manage/payment-qr', { id: currentEvent().id, tier: input(card, 'id').value, ...body });
+    for (const each of data.event.tierQrUrls) {
+      const match = [...list().children].find((other) => input(other, 'id').value === each.id);
+      if (match) {
+        match.dataset.qrUrl = each.paymentQrUrl;
+        syncPay(match);
+      }
+    }
+    onPaymentChange(data.event.paymentProblems);
+  });
+}
+
+// A card's own ways to pay: three boxes, its link, and its QR code.
+function payPart() {
+  const qrInput = createElement('input', { type: 'file', accept: 'image/*', class: 'visually-hidden tier-qr-file' });
+  return createElement('div', { class: 'span-2 tier-pay' }, [
+    createElement('p', { class: 'tier-pay-title', i18n: 'manage.field.tierPayment' }),
+    createElement('div', { class: 'payment-methods' }, METHODS.map((method) => createElement('label', { class: 'check' }, [
+      createElement('input', { type: 'checkbox', 'data-key': `pay-${method}` }),
+      createElement('span', { i18n: `manage.payment.${method}` }),
+    ]))),
+    createElement('p', { class: 'field-hint', i18n: 'manage.hint.tierPayment' }),
+    createElement('label', { class: 'field payment-indent tier-pay-link' }, [
+      createElement('span', { i18n: 'manage.field.tierPaymentLink' }),
+      createElement('input', { type: 'url', 'data-key': 'paymentLink', maxlength: 500, placeholder: 'https://' }),
+    ]),
+    createElement('div', { class: 'field payment-indent tier-pay-qr' }, [
+      createElement('span', { i18n: 'manage.field.tierPaymentQr' }),
+      createElement('div', { class: 'pay-qr-preview tier-qr-preview' }, [createElement('img', { alt: '' })]),
+      createElement('p', { class: 'field-hint', i18n: 'manage.hint.tierPaymentQr' }),
+      createElement('div', { class: 'actions inline' }, [
+        createElement('label', { class: 'btn btn-small file-btn tier-qr-pick' }, [iconNode('image'), createElement('span', { i18n: 'manage.payment-qr-choose' }), qrInput]),
+        createElement('button', { class: 'btn btn-small btn-quiet tier-qr-remove', type: 'button' }, [createElement('span', { i18n: 'manage.payment-qr-remove' })]),
+      ]),
+      createElement('div', { class: 'callout danger tier-qr-error', role: 'alert' }),
+    ]),
+  ]);
+}
+
 // One tier's card, filled with values (a tier as the server sends it, or a
 // new one's blanks).
 function tierCard(values) {
@@ -96,7 +176,9 @@ function tierCard(values) {
         createElement('span', { i18n: 'manage.field.previousDisplay' }),
         display,
       ]),
+      payPart(),
     ]),
+    createElement('input', { type: 'hidden', 'data-key': 'id' }),
   ]);
 
   for (const key of ['name', 'price', 'benefits']) {
@@ -112,6 +194,48 @@ function tierCard(values) {
     shown = 'reference';
   }
   display.value = shown;
+  let id = values.id;
+  if (typeof id !== 'string' || !/^t-[a-z0-9]{4,16}$/.test(id)) {
+    id = newTierId();
+  }
+  input(card, 'id').value = id;
+  let methods = [];
+  if (Array.isArray(values.paymentMethods)) {
+    methods = values.paymentMethods;
+  }
+  for (const method of METHODS) {
+    input(card, `pay-${method}`).checked = methods.includes(method);
+  }
+  let link = values.paymentLink;
+  if (link === null || link === undefined) {
+    link = '';
+  }
+  input(card, 'paymentLink').value = link;
+  let qrUrl = values.paymentQrUrl;
+  if (!qrUrl) {
+    qrUrl = '';
+  }
+  card.dataset.qrUrl = qrUrl;
+  for (const method of METHODS) {
+    input(card, `pay-${method}`).addEventListener('change', () => syncPay(card));
+  }
+  card.querySelector('.tier-qr-file').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file || !currentEvent()) {
+      return;
+    }
+    const pick = card.querySelector('.tier-qr-pick');
+    try {
+      await uploadTierQr(card, { image: await qrPicture(file) }, pick);
+    } catch (error) {
+      card.querySelector('.tier-qr-error').textContent = translate(`error.${error.code}`);
+    }
+  });
+  card.querySelector('.tier-qr-remove').addEventListener('click', (event) => {
+    uploadTierQr(card, { remove: true }, event.currentTarget);
+  });
+  syncPay(card);
 
   // The next card's wording follows this tier's name as it is typed.
   input(card, 'name').addEventListener('input', renumber);
@@ -148,11 +272,14 @@ export function readTiers() {
       includesPrevious = input(card, 'includesPrevious').checked;
     }
     return {
+      id: input(card, 'id').value,
       name: input(card, 'name').value,
       price: input(card, 'price').value,
       benefits: input(card, 'benefits').value,
       includesPrevious,
       previousDisplay: input(card, 'previousDisplay').value,
+      paymentMethods: METHODS.filter((method) => input(card, `pay-${method}`).checked),
+      paymentLink: input(card, 'paymentLink').value,
     };
   });
 }
@@ -167,9 +294,20 @@ export function addTier() {
   input(card, 'name').focus();
 }
 
-// Wires the Add button once.
-export function startTiers() {
+// Wires the Add button once. getEvent: the open event ({ id }), or null for
+// a new one not saved yet; onProblems: called with the payment problems
+// after a tier's QR code changes.
+export function startTiers({ getEvent = () => null, onProblems = () => {} } = {}) {
+  currentEvent = getEvent;
+  onPaymentChange = onProblems;
   byId('tierAdd').addEventListener('click', addTier);
+}
+
+// After the event first saves, the QR code buttons can show.
+export function syncTierPayment() {
+  for (const card of list().children) {
+    syncPay(card);
+  }
 }
 
 // Redraws the wording in the reader's language, keeping what was typed.

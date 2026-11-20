@@ -52,3 +52,21 @@ test('the feed lists upcoming events soonest first, filters by when and kind, an
   // Google Analytics was asked for, and answered by the stub, not the network.
   expect(stubbedRequests.some((url) => url.startsWith('https://www.googletagmanager.com/gtag/js'))).toBe(true);
 });
+
+test('the search finds events by name, place or organiser, and keeps the search in the address', async ({ page }) => {
+  await page.goto('/');
+  const titles = page.locator('#feed .event-card-title');
+  await expect(titles).toHaveText([EVENTS.furmeet.title, EVENTS.convention.title]);
+  await page.locator('#feedSearch').fill('suntec');
+  await expect(titles).toHaveText([EVENTS.convention.title]);
+  await expect(page).toHaveURL(/\/\?q=suntec$/);
+  await page.locator('#feedSearch').fill('nothing here at all');
+  await expect(page.locator('#feedEmpty')).toHaveText('Nothing found for "nothing here at all". Try Dates to come or Past, or other words.');
+  // A shared link opens the search; clearing it shows everything again.
+  await page.goto('/?q=marina');
+  await expect(page.locator('#feedSearch')).toHaveValue('marina');
+  await expect(titles).toHaveText([EVENTS.furmeet.title]);
+  await page.locator('#feedSearch').fill('');
+  await expect(titles).toHaveText([EVENTS.furmeet.title, EVENTS.convention.title]);
+  await expect(page).toHaveURL(`${new URL(page.url()).origin}/`);
+});

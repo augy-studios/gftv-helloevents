@@ -41,7 +41,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, tierOptions, tierNamed, tierLink, tierQrPath } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
@@ -109,7 +109,9 @@ function numberOrZero(value) {
 
 // The signed-in person, about themselves. Their own notification choices are
 // theirs to see; the email is not sent even to them (nothing here needs it).
-export function selfView(user) {
+// editsEvents: whether they edit any event, staff or an editor of one
+// (event-editors.js editsAnyEvent), for the Manage link and page.
+export function selfView(user, { editsEvents = false } = {}) {
   let displayName = user.display_name;
   if (!displayName) {
     displayName = user.username;
@@ -133,6 +135,7 @@ export function selfView(user) {
     kind,
     role: roleOf(user),
     canManage: canManage(user),
+    editsEvents: editsEvents === true,
     country: missingToNull(user.country),
   };
 }
@@ -174,6 +177,7 @@ export function attendeeView(row, event = {}, standing = {}) {
     displayName,
     staff: isStaff,
     meals: offeredMeals(event, row.meals),
+    lepak: row.lepak === true,
     country: attendeeCountry(event, account),
     volunteer: row.volunteer === true,
     volunteered: standing.volunteered === true,
@@ -343,6 +347,22 @@ function managedLocation(location) {
   };
 }
 
+// "Just Lepak Only" on the event page (migrations/017): whether the event
+// takes lepak RSVPs, what the choice says, the cap and the places left
+// (both null with no cap). row.lepak_taken holds how many are lepak
+// (events.js withMealCounts).
+function lepakView(row) {
+  if (!lepakOffered(row)) {
+    return { offered: false, label: null, limit: null, left: null };
+  }
+  const limit = lepakLimit(row);
+  let left = null;
+  if (limit !== null) {
+    left = Math.max(0, limit - numberOrZero(row.lepak_taken));
+  }
+  return { offered: true, label: lepakLabel(row), limit, left };
+}
+
 // The meals an event offers for meal-only RSVPs, in order, for the event
 // page: { id, label, limit, left, locations }, label null for breakfast,
 // lunch and dinner (the page names those in the reader's language); limit
@@ -414,7 +434,9 @@ function tiersView(row) {
     if (priceShown) {
       price = tier.price;
     }
-    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier };
+    // How this tier can be paid for (migrations/016), when it says.
+    const methods = tierOptions(row, tier);
+    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, methods };
   });
 }
 
@@ -541,13 +563,17 @@ function managedTimetable(row) {
 
 // One tier on the edit form, its price and benefits as the fields hold
 // them (the benefits one per line).
-function managedTier(tier) {
+function managedTier(tier, row) {
   return {
+    id: tier.id,
     name: tier.name,
     price: String(tier.price),
     benefits: tier.benefits.join('\n'),
     includesPrevious: tier.includes_previous,
     previousDisplay: tier.previous_display,
+    paymentMethods: tier.payment_methods,
+    paymentLink: emptyToBlank(tier.payment_link),
+    paymentQrUrl: emptyToBlank(qrUrl({ slug: row.slug, payment_qr_path: tier.payment_qr_path })),
   };
 }
 
@@ -723,6 +749,11 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (row.cross_border === true && viewer.signedIn === true && !viewer.country) {
     needsCountry = true;
   }
+  // Someone going lepak, without a ticket (migrations/017).
+  let myLepak = false;
+  if (viewer.going === true && viewer.lepak === true) {
+    myLepak = true;
+  }
   // Someone going: how they are paying and where it stands (migrations/016).
   // Anyone else: nothing to pay.
   let myPayment = { method: null, status: 'none' };
@@ -748,6 +779,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     },
     tiers: tiersView(row),
     meals: mealsView(row, addressShown),
+    lepak: lepakView(row),
     timetable: timetableDetail(row),
     volunteers: volunteersView(row),
     // How people pay, and whether a ticket goes through /checkout.
@@ -755,6 +787,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     viewer: {
       signedIn: viewer.signedIn === true,
       going: viewer.going === true,
+      lepak: myLepak,
       payment: myPayment,
       rsvpNumber,
       meals: myMeals,
@@ -846,7 +879,7 @@ export function managedEvent(row) {
     currency: emptyToBlank(row.currency),
     priceNote: emptyToBlank(row.price_note),
     tiersEnabled: row.tiers_enabled === true,
-    ticketTiers: storedTiers(row).map(managedTier),
+    ticketTiers: storedTiers(row).map((tier) => managedTier(tier, row)),
     rsvpOpen: row.rsvp_open !== false,
     meals: storedMeals(row).map((meal) => ({
       id: meal.id,
@@ -860,6 +893,9 @@ export function managedEvent(row) {
     volunteerDiscountType: volunteerDiscountType(row),
     volunteerDiscountValue: stringOrBlank(row.volunteer_discount_value),
     ...managedTimetable(row),
+    lepakEnabled: row.lepak_enabled === true,
+    lepakLimit: stringOrBlank(row.lepak_limit),
+    lepakLabel: emptyToBlank(row.lepak_label),
     paymentMethods: storedPaymentMethods(row),
     paymentLink: emptyToBlank(row.payment_link),
     paymentInstructions: emptyToBlank(row.payment_instructions),
@@ -879,6 +915,15 @@ export function managedPaymentQr(row) {
   };
 }
 
+// The answer to a tier's QR code upload or removal: the event's QR code and
+// problems, and each tier's QR code by its id.
+export function managedTierQr(row) {
+  return {
+    ...managedPaymentQr(row),
+    tierQrUrls: storedTiers(row).map((tier) => ({ id: tier.id, paymentQrUrl: emptyToBlank(qrUrl({ slug: row.slug, payment_qr_path: tier.payment_qr_path })) })),
+  };
+}
+
 // The tickets a checkout offers: each tier (or the one price, when the
 // event has no tiers), with its price and what it costs this person after
 // any volunteer benefit. index is what the page sends back to pick a tier
@@ -888,14 +933,14 @@ function checkoutTickets(row, volunteerDiscount) {
   if (row.tiers_enabled === true && tiers.length > 0) {
     return tiers.map((tier, index) => {
       const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount });
-      return { index, name: tier.name, benefits: tier.benefits, price: priced.price, amount: priced.amount };
+      return { index, name: tier.name, benefits: tier.benefits, price: priced.price, amount: priced.amount, methods: tierOptions(row, tier) };
     });
   }
   const priced = ticketPrice(row, { volunteerDiscount });
   if (!priced.ok) {
     return [];
   }
-  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount }];
+  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, methods: paymentOptions(row) }];
 }
 
 // Someone's own payment at checkout, from their attendee row.
@@ -931,11 +976,13 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
   let paymentQrUrl = null;
   if (viewer.going === true && viewer.payment) {
     mine = myCheckoutPayment(viewer.payment);
+    // The link and QR code of the tier their ticket is for, or the event's.
+    const tier = tierNamed(row, mine.tier);
     if (mine.method === 'link' && mine.status !== 'none') {
-      paymentLink = emptyToNull(row.payment_link);
+      paymentLink = tierLink(row, tier);
     }
     if (mine.method === 'qr' && mine.status !== 'none') {
-      paymentQrUrl = qrUrl(row);
+      paymentQrUrl = qrUrl({ slug: row.slug, payment_qr_path: tierQrPath(row, tier) });
     }
   }
   let needsCountry = false;
@@ -944,14 +991,15 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
   }
   let rsvpNumber = null;
   let volunteer = false;
-  let onlyMeals = false;
+  // Going without a ticket: just for meals, or lepak (migrations/017).
+  let withoutTicket = false;
   if (viewer.going === true) {
     if (Number.isInteger(viewer.rsvpNumber)) {
       rsvpNumber = viewer.rsvpNumber;
     }
     volunteer = viewer.volunteer === true;
-    if (Array.isArray(viewer.meals) && viewer.meals.length > 0) {
-      onlyMeals = true;
+    if ((Array.isArray(viewer.meals) && viewer.meals.length > 0) || viewer.lepak === true) {
+      withoutTicket = true;
     }
   }
 
@@ -973,7 +1021,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     needsCountry,
     viewer: {
       going: viewer.going === true,
-      onlyMeals,
+      withoutTicket,
       rsvpNumber,
       volunteer,
       payment: mine,

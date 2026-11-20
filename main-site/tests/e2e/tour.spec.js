@@ -30,17 +30,19 @@ test('the feed shows its tour once, and the ? button replays it without the hint
   await page.goto('/');
   await expect(tour(page)).toBeVisible();
   await expect(page.locator('.tour')).toHaveAttribute('role', 'dialog');
-  await expect(text(page)).toHaveText('Upcoming events, ones whose dates are still to come, or past ones.');
+  await expect(text(page)).toHaveText('Search by name, place or organiser, within the events picked below.');
   await expect(next(page)).toBeFocused();
   // Signed out: the sign-in link, not Account or Manage, and the ? hint last.
-  // when, kind, the first card, sign in, the hint.
-  await expect(dots(page)).toHaveCount(5);
+  // search, when, kind, the first card, sign in, the hint.
+  await expect(dots(page)).toHaveCount(6);
   // The page under it can't be scrolled or reached.
   await expect(page.locator('html')).toHaveClass(/touring/);
   await expect(page.locator('main')).toHaveAttribute('inert', '');
 
   // The right arrow moves on, like Next.
   await page.keyboard.press('ArrowRight');
+  await expect(text(page)).toHaveText('Upcoming events, ones whose dates are still to come, or past ones.');
+  await next(page).click();
   await expect(text(page)).toHaveText('Narrow it down to furmeets, conventions or everything else.');
   await next(page).click();
   await expect(text(page)).toHaveText('Open an event for the details, who is going, and to RSVP.');
@@ -66,7 +68,7 @@ test('the feed shows its tour once, and the ? button replays it without the hint
   // nothing about what has been seen.
   await page.locator('#tourBtn').click();
   await expect(tour(page)).toBeVisible();
-  await expect(dots(page)).toHaveCount(4);
+  await expect(dots(page)).toHaveCount(5);
   await page.keyboard.press('Escape');
   await expect(tour(page)).toHaveCount(0);
   await expect(page.locator('#tourBtn')).toBeFocused();
@@ -116,7 +118,7 @@ test('the Manage tour covers the tabs each role has', async ({ page }) => {
   await expect(text(page)).toHaveText('Event list: every event, drafts and ones not released yet included.');
   await expect(dots(page)).toHaveCount(5);
   await finish(page);
-  await expect(text(page)).toHaveText('Its status. Drafts, and events whose release time has not come, are seen by editors only.');
+  await expect(text(page)).toHaveText('Published, Drafts and Cancelled each have their own list. The number says how many.');
   await finish(page);
 
   // Opening an event: the form's tour, then its first section's.

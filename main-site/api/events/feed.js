@@ -1,4 +1,7 @@
-// GET /api/events/feed?when=upcoming|past|tba&kind=furmeet|convention|other&offset=0
+// GET /api/events/feed?when=upcoming|past|tba&kind=furmeet|convention|other&offset=0&q=<search>
+//
+// q: words to find in an event's title, summary, venue, city, country or
+// organiser, each of them somewhere (event-rules.js searchWords).
 //
 // The public event feed. No sign-in needed and nothing personal in it, so
 // the CDN may cache it for a minute. Released events only, as cards
@@ -7,7 +10,7 @@
 import { route, guard, ok, query } from '../_lib/http.js';
 import { releasedFeed, FEED_PAGE } from '../_lib/events.js';
 import { publicEventCard } from '../_lib/serialize.js';
-import { KINDS } from '../_lib/event-rules.js';
+import { KINDS, searchWords } from '../_lib/event-rules.js';
 
 const WHEN_CHOICES = ['upcoming', 'past', 'tba'];
 // The furthest a feed can be paged, so a crafted offset stays cheap.
@@ -36,7 +39,8 @@ export default route('events/feed', async (request, response) => {
     offset = Math.min(requestedOffset, MAX_OFFSET);
   }
 
-  const rows = await releasedFeed({ when, kind, offset });
+  const words = searchWords(query(request, 'q'));
+  const rows = await releasedFeed({ when, kind, offset, words });
   const now = Date.now();
   response.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
   // A full page may have more after it; a shorter one is the last.

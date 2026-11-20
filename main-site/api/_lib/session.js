@@ -14,6 +14,7 @@
 // factor set up, since 2FA is optional for those (login.js decides).
 
 import { database, TABLES } from './supabase.js';
+import { editsAnyEvent } from './event-editors.js';
 import { randomToken, sha256, hashIp } from './crypto.js';
 import { readCookie, setCookie, clearCookie, fail, clientIp } from './http.js';
 import { SESSION_ACCOUNT_SELECT, normaliseAccount, ensureStaffAccount, canSignIn, canManage, isAdmin } from './users.js';
@@ -92,7 +93,10 @@ export async function currentSession(request) {
 
 // The signed-in user, or null after answering 401/403.
 //   manage: editors and admins only.   admin: admins only.
-export async function requireUser(request, response, { manage = false, admin = false } = {}) {
+//   eventEditor (with manage): also editors of one event (migrations/018),
+//   for routes that then check the event itself (event-editors.js
+//   canEditEvent).
+export async function requireUser(request, response, { manage = false, admin = false, eventEditor = false } = {}) {
   const session = await currentSession(request);
   if (!session) {
     fail(response, 401, 'signed_out');
@@ -103,6 +107,9 @@ export async function requireUser(request, response, { manage = false, admin = f
     return null;
   }
   if (manage && !canManage(session.user)) {
+    if (eventEditor && (await editsAnyEvent(session.user))) {
+      return session;
+    }
     fail(response, 403, 'manage_only');
     return null;
   }

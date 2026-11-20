@@ -110,17 +110,17 @@ test('a method is offered only once it can be used, and checkout only for link o
   const base = { price_type: 'paid', price_min: 10, price_max: null, payment_methods: ['onsite', 'link', 'qr'], payment_link: null, payment_qr_path: null };
   assert.deepEqual(rules.paymentOptions(base), ['onsite']);
   assert.equal(rules.needsCheckout(base), false);
-  assert.deepEqual(rules.paymentProblems(base), ['no_link', 'no_qr']);
+  assert.deepEqual(rules.paymentProblems(base), [{ code: 'no_link', tier: null }, { code: 'no_qr', tier: null }]);
   const ready = { ...base, payment_link: 'https://pay.example.com', payment_qr_path: QR_PATH };
   assert.deepEqual(rules.paymentOptions(ready), ['onsite', 'link', 'qr']);
   assert.equal(rules.needsCheckout(ready), true);
   // A range with no tiers has no one amount to pay.
   const range = { ...ready, price_max: 30 };
   assert.deepEqual(rules.paymentOptions(range), ['onsite']);
-  assert.deepEqual(rules.paymentProblems(range), ['no_single_price']);
+  assert.deepEqual(rules.paymentProblems(range), [{ code: 'no_single_price', tier: null }]);
   // A free event takes no payment at all.
   assert.deepEqual(rules.paymentOptions({ ...ready, price_type: 'free' }), []);
-  assert.deepEqual(rules.paymentProblems({ ...ready, price_type: 'free' }), ['not_paid']);
+  assert.deepEqual(rules.paymentProblems({ ...ready, price_type: 'free' }), [{ code: 'not_paid', tier: null }]);
 });
 
 test('a ticket costs its tier, less any volunteer benefit', () => {
@@ -259,7 +259,7 @@ test('an editor uploads a QR code of any shape, kept as a PNG, and replacing it 
   const event = addEvent({ payment_qr_path: null });
   const editor = await signedIn('editor', { is_editor: true });
   const before = (await editor.call(manage, { query: { id: event.id } })).json.event;
-  assert.deepEqual(before.paymentProblems, ['no_qr']);
+  assert.deepEqual(before.paymentProblems, [{ code: 'no_qr', tier: 'Day pass' }, { code: 'no_qr', tier: 'Sponsor' }]);
   // A tall, narrow picture: no crop, no fixed shape.
   const tall = base64(await picture(300, 900, 'png'));
   const up = await editor.call(uploadQr, { method: 'POST', body: { id: event.id, image: tall } });
@@ -279,4 +279,60 @@ test('an editor uploads a QR code of any shape, kept as a PNG, and replacing it 
   // A member cannot upload one.
   const member = await signedIn('member');
   assert.equal((await member.call(uploadQr, { method: 'POST', body: { id: event.id, image: tall } })).status, 403);
+});
+
+// ---------------------------------------------------------------------------
+// Each tier its own ways to pay, link and QR code
+// ---------------------------------------------------------------------------
+
+test('each tier takes its own ways to pay, with its own QR code kept across saves', async () => {
+  const event = addEvent({
+    payment_methods: ['onsite', 'link'],
+    ticket_tiers: [
+      { id: 't-dayticket', name: 'Day pass', price: 40, benefits: [], includes_previous: false, previous_display: 'reference', payment_methods: ['qr'] },
+      { id: 't-sponsor1', name: 'Sponsor', price: 120, benefits: [], includes_previous: false, previous_display: 'reference', payment_methods: ['onsite'] },
+    ],
+  });
+  const editor = await signedIn('editor', { is_editor: true });
+  const buyer = await signedIn('buyer');
+
+  // The Day pass's own QR code is still to come: it uses the event's.
+  let view = (await buyer.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.deepEqual(view.tickets.map((ticket) => [ticket.name, ticket.methods]), [['Day pass', ['qr']], ['Sponsor', ['onsite']]]);
+
+  // Its own QR code, uploaded for that tier alone.
+  const tall = base64(await picture(200, 500, 'png'));
+  const up = await editor.call(uploadQr, { method: 'POST', body: { id: event.id, tier: 't-dayticket', image: tall } });
+  assert.equal(up.status, 200, JSON.stringify(up.json));
+  const dayQr = up.json.event.tierQrUrls.find((each) => each.id === 't-dayticket').paymentQrUrl;
+  assert.match(dayQr, /payment-qr\?slug=paid-con&v=/);
+  assert.notEqual(dayQr, up.json.event.paymentQrUrl, 'not the event QR code');
+  assert.equal((await editor.call(uploadQr, { method: 'POST', body: { id: event.id, tier: 't-unsaved1', image: tall } })).json.error, 'tier_not_saved');
+
+  // An autosave (which never sends QR codes) keeps it.
+  const form = (await editor.call(manage, { query: { id: event.id } })).json.event;
+  assert.equal(form.ticketTiers[0].paymentQrUrl, dayQr);
+  const saved = await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...form, title: 'Paid Con 2' } } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.json));
+  assert.equal(saved.json.event.ticketTiers[0].paymentQrUrl, dayQr);
+  assert.deepEqual(saved.json.event.ticketTiers[0].paymentMethods, ['qr']);
+
+  // The Day pass: by QR code only, its own.
+  const byLink = await buyer.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', tier: 0, tierName: 'Day pass' } } });
+  assert.equal(byLink.json.error, 'payment_method_required');
+  await buyer.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'qr', tier: 0, tierName: 'Day pass' } } });
+  view = (await buyer.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.equal(view.paymentQrUrl, dayQr);
+  const v = (url) => new URL(url, 'https://x').searchParams.get('v');
+  assert.equal((await buyer.call(paymentQr, { query: { slug: 'paid-con', v: v(dayQr) } })).status, 200);
+  // The event's QR code is not theirs to see.
+  assert.equal((await buyer.call(paymentQr, { query: { slug: 'paid-con', v: v(up.json.event.paymentQrUrl) } })).status, 404);
+  // Nor can they switch to a way their tier does not take.
+  assert.equal((await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'method', method: 'link' } })).json.error, 'payment_method_required');
+
+  // Taking the tier away deletes its QR code.
+  const dayPath = db.table('gftvevents_events')[0].ticket_tiers[0].payment_qr_path;
+  assert.equal(db.objects.has(`gftvevents_payments/${dayPath}`), true);
+  await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...form, ticketTiers: [form.ticketTiers[1]] } } });
+  assert.equal(db.objects.has(`gftvevents_payments/${dayPath}`), false);
 });

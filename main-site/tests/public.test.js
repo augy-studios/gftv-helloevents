@@ -130,7 +130,7 @@ test('signing up makes a public account with a bcrypt cost 12 password, and sign
   const r = await b.call(signup, { method: 'POST', body: join({ username: 'Otter', email: ' Otter@Example.com ' }) });
   assert.equal(r.status, 200);
   // The answer is only ok (help desk #18); the session says who it is.
-  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, country: 'SG' });
+  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG' });
   assert.deepEqual(leaks(r.json), []);
   const row = db.table('gftvevents_accounts')[0];
   assert.equal(row.kind, 'public');

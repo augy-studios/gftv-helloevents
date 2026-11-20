@@ -53,6 +53,8 @@ export const TABLES = Object.freeze({
   coversBucket: 'gftvevents_covers',
   // migrations/016: payment QR codes and screenshots, private (payments.js).
   paymentsBucket: 'gftvevents_payments',
+  // migrations/018: accounts an admin made editors of one event.
+  eventEditors: 'gftvevents_event_editors',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).

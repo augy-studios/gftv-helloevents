@@ -11,6 +11,7 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
+import { canEditEvent } from '../_lib/event-editors.js';
 import { managedCover } from '../_lib/serialize.js';
 import { prepareCover, storeCover, deleteCover, MAX_UPLOAD_BYTES } from '../_lib/covers.js';
 
@@ -26,7 +27,7 @@ export default route('manage/cover', async (request, response) => {
   if (guard(request, response, ['POST'])) {
     return;
   }
-  const session = await requireUser(request, response, { manage: true });
+  const session = await requireUser(request, response, { manage: true, eventEditor: true });
   if (!session) {
     return;
   }
@@ -43,6 +44,10 @@ export default route('manage/cover', async (request, response) => {
   }
   if (!UUID_PATTERN.test(String(typedId))) {
     return fail(response, 400, 'bad_request');
+  }
+  // An editor of one event (migrations/018): only its own.
+  if (!(await canEditEvent(session.user, String(typedId).toLowerCase()))) {
+    return fail(response, 404, 'not_found');
   }
 
   const { data: event, error } = await database()

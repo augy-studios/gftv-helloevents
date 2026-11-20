@@ -18,6 +18,11 @@
 //                              their payment (or take that back); telling
 //                              them when it is confirmed (migrations/016)
 //
+// Editors of one event (migrations/018) reach only the events they edit:
+// the list shows only those, and anything else answers 404. They cannot
+// create or delete events, and a save of theirs keeps the Status and the
+// release time as they are (staff decide when an event goes live).
+//
 // Saving a change to when or where a released event happens, to its
 // timetable, or cancelling it, tells the people going (notify.js), in the
 // background, once for a run of autosaves.
@@ -30,11 +35,12 @@ import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
-import { validateEvent, isSlug, volunteerDiscountActive, VOLUNTEER_KIND } from '../_lib/event-rules.js';
+import { validateEvent, isSlug, volunteerDiscountActive, storedTiers, VOLUNTEER_KIND } from '../_lib/event-rules.js';
 import { MANAGE_COLUMNS, PAYMENT_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
 import { deletePaymentFiles, proofPaths } from '../_lib/payments.js';
+import { editableEventIds } from '../_lib/event-editors.js';
 import { background, queueEventChange, sendEventChangeWhenDue, sendPaymentConfirmed } from '../_lib/notify.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,7 +76,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, lepak, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -161,10 +167,17 @@ async function checkSlug(response, slug, eventId) {
 }
 
 // GET: every event, any status, most recently changed first.
-async function listEvents(response) {
-  const { data, error } = await database()
+async function listEvents(response, scope) {
+  if (scope !== null && scope.length === 0) {
+    return ok(response, { events: [] });
+  }
+  let request = database()
     .from(TABLES.events)
-    .select(`id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, ${TABLES.fullAttendees}(count)`)
+    .select(`id, slug, title, kind, status, publish_at, starts_at, dates_hidden, capacity, ${TABLES.fullAttendees}(count)`);
+  if (scope !== null) {
+    request = request.in('id', scope);
+  }
+  const { data, error } = await request
     .order('updated_at', { ascending: false })
     .limit(500);
   if (error) {
@@ -238,6 +251,18 @@ async function updateEvent(request, response, body, fields, user) {
   // The address stays as it is unless the caller names a new one, so a new
   // title never moves the event's page.
   const changes = { ...fields };
+  // A tier's QR code is uploaded on its own (api/manage/payment-qr.js), so
+  // the form never sends it: each tier keeps its own, found by its id.
+  const tierQrBefore = new Map(storedTiers(before).map((tier) => [tier.id, tier.payment_qr_path]));
+  if (Array.isArray(changes.ticket_tiers)) {
+    for (const tier of changes.ticket_tiers) {
+      let path = tierQrBefore.get(tier.id);
+      if (path === undefined) {
+        path = null;
+      }
+      tier.payment_qr_path = path;
+    }
+  }
   if (!slugGiven(body.event)) {
     changes.slug = before.slug;
   }
@@ -254,6 +279,9 @@ async function updateEvent(request, response, body, fields, user) {
   if (!data) {
     return fail(response, 404, 'not_found');
   }
+  // The QR codes of tiers taken away.
+  const tierQrAfter = new Set(storedTiers(data).map((tier) => tier.payment_qr_path));
+  await deletePaymentFiles([...tierQrBefore.values()].filter((path) => !tierQrAfter.has(path)));
   await audit(request, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
   if (changes.notice_due_at) {
     background(sendEventChangeWhenDue(data.id));
@@ -292,6 +320,11 @@ async function saveEvent(request, response, body, user) {
     return fail(response, 400, 'invalid_field', { field: 'volunteerDiscountFrom' });
   }
   const fields = { ...check.fields, updated_by: user.id };
+  // An editor of one event (migrations/018) cannot change when it goes live.
+  if (user.scope !== null) {
+    delete fields.status;
+    delete fields.publish_at;
+  }
   if (body.action === 'create') {
     return createEvent(request, response, fields, user, { numberSlug: !slugGiven(body.event) });
   }
@@ -312,7 +345,7 @@ async function deleteEvent(request, response, body, user) {
     .from(TABLES.events)
     .delete()
     .eq('id', body.id)
-    .select('id, slug, cover_image_path, payment_qr_path');
+    .select('id, slug, cover_image_path, payment_qr_path, ticket_tiers');
   if (error) {
     throw error;
   }
@@ -321,7 +354,8 @@ async function deleteEvent(request, response, body, user) {
   }
   const deleted = data[0];
   await deleteCover(deleted.cover_image_path);
-  await deletePaymentFiles([deleted.payment_qr_path, ...proofs]);
+  const tierQrs = storedTiers(deleted).map((tier) => tier.payment_qr_path);
+  await deletePaymentFiles([deleted.payment_qr_path, ...tierQrs, ...proofs]);
   // event_id is set null on the audit rows by the foreign key, so the slug
   // goes in the details to keep the trail readable.
   await audit(request, { action: 'event.deleted', actorId: user.id, details: { slug: deleted.slug } });
@@ -534,11 +568,19 @@ export default route('manage/events', async (request, response) => {
   if (guard(request, response, ['GET', 'POST'])) {
     return;
   }
-  const session = await requireUser(request, response, { manage: true });
+  const session = await requireUser(request, response, { manage: true, eventEditor: true });
   if (!session) {
     return;
   }
-  const user = session.user;
+  // The events this person may reach: null for every one, otherwise the ids
+  // of the events they edit (migrations/018).
+  const user = { ...session.user, scope: await editableEventIds(session.user) };
+  const outOfScope = (eventId) => {
+    if (user.scope === null) {
+      return false;
+    }
+    return !user.scope.includes(String(eventId).toLowerCase());
+  };
 
   if (request.method === 'GET') {
     const eventId = query(request, 'id');
@@ -548,10 +590,14 @@ export default route('manage/events', async (request, response) => {
       return;
     }
     if (eventId) {
+      if (outOfScope(eventId)) {
+        fail(response, 404, 'not_found');
+        return;
+      }
       await showEvent(response, eventId);
       return;
     }
-    await listEvents(response);
+    await listEvents(response, user.scope);
     return;
   }
 
@@ -562,6 +608,15 @@ export default route('manage/events', async (request, response) => {
     return;
   }
   if (await limited(request, response, 'manageWrite', [`u:${user.id}`])) {
+    return;
+  }
+  // An editor of one event: only its own, and never a new one.
+  if (user.scope !== null && body.action === 'create') {
+    fail(response, 403, 'manage_only');
+    return;
+  }
+  if (user.scope !== null && body.action !== 'create' && outOfScope(body.id)) {
+    fail(response, 404, 'not_found');
     return;
   }
 

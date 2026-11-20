@@ -10,7 +10,7 @@
 
 import { route, guard, ok, fail, query } from '../_lib/http.js';
 import { currentSession } from '../_lib/session.js';
-import { canManage } from '../_lib/users.js';
+import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 
@@ -30,16 +30,19 @@ export default route('events/detail', async (request, response) => {
   }
   const slug = query(request, 'slug').toLowerCase();
   const session = await currentSession(request);
+  // Anyone who edits this event (staff editors and admins, or an editor of
+  // this one, migrations/018) sees it released or not, as a preview.
+  let row = await releasedEventBySlug(slug);
   let isManager = false;
-  if (session && canManage(session.user)) {
-    isManager = true;
-  }
-
-  let row;
-  if (isManager) {
-    row = await anyEventBySlug(slug, DETAIL_COLUMNS);
-  } else {
-    row = await releasedEventBySlug(slug);
+  if (session) {
+    let any = row;
+    if (!any) {
+      any = await anyEventBySlug(slug, DETAIL_COLUMNS);
+    }
+    if (any && (await canEditEvent(session.user, any.id))) {
+      isManager = true;
+      row = any;
+    }
   }
   if (!row) {
     return fail(response, 404, 'not_found');
@@ -47,7 +50,7 @@ export default route('events/detail', async (request, response) => {
 
   await withMealCounts(row);
   await withVolunteerSource(row);
-  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null };
+  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false };
   let standing = { volunteered: false, discount: false };
   if (session) {
     mine = await attendance(row.id, session.user.id);
@@ -57,6 +60,7 @@ export default route('events/detail', async (request, response) => {
     signedIn: Boolean(session),
     going: mine.going,
     meals: mine.meals,
+    lepak: mine.lepak,
     rsvpNumber: mine.rsvpNumber,
     canManage: isManager,
     volunteer: mine.volunteer,

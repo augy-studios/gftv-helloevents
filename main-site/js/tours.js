@@ -24,6 +24,7 @@ export const TOURS = [
     page: 'home',
     needs: '#feed',
     steps: [
+      { el: '#feedSearch', i18n: 'tour.home.search' },
       { el: '#whenPicker', i18n: 'tour.home.when' },
       { el: '#kindPicker', i18n: 'tour.home.kind' },
       { el: ['#feed .event-card:not(.skeleton-card)', '#feedEmpty'], i18n: 'tour.home.feed' },
@@ -47,6 +48,7 @@ export const TOURS = [
       { el: '#rsvpMeals', i18n: 'tour.event.meals' },
       { el: '#rsvpVolunteerRow', i18n: 'tour.event.volunteer' },
       { el: '#rsvpBtn', i18n: 'tour.event.rsvp' },
+      { el: '#rsvpForLepakRow', i18n: 'tour.event.lepak' },
       { el: '#rsvpCheckout', i18n: 'tour.event.checkout' },
       { el: '#rsvpPayment', i18n: 'tour.event.payment' },
       { el: '#timetableBox', i18n: 'tour.event.timetable' },
@@ -155,6 +157,7 @@ export const TOURS = [
     page: 'manage',
     needs: '#listBox',
     steps: [
+      { el: '#listStatus', i18n: 'tour.manage.list-filter' },
       { el: '#eventList .item-row .chip', i18n: 'tour.manage.list-status' },
       { el: '#eventList .item-row .btn', i18n: 'tour.manage.list-edit' },
       { el: '#listEmpty', i18n: 'tour.manage.list-empty' },
@@ -203,6 +206,7 @@ export const TOURS = [
     steps: [
       { el: 'label:has(> #f-tiersEnabled)', i18n: 'tour.editor.price-tiers' },
       { el: '#paymentSection', i18n: 'tour.editor.price-payment' },
+      { el: '#lepakSection', i18n: 'tour.editor.price-lepak' },
       { el: '.field:has(#f-capacity)', i18n: 'tour.editor.price-capacity' },
       { el: '.field:has(#f-status)', i18n: 'tour.editor.price-status' },
       { el: '.field:has(#f-publishLocal)', i18n: 'tour.editor.price-release' },
@@ -238,6 +242,16 @@ export const TOURS = [
       { el: '#attendeesBox', i18n: 'tour.editor.people-list' },
       { el: '#attendeesPayments', i18n: 'tour.editor.people-payments' },
       { el: '#attendeesVolunteers', i18n: 'tour.editor.people-volunteers' },
+    ],
+  },
+
+  {
+    id: 'editor.editors',
+    page: 'manage',
+    needs: '#epanel-editors',
+    steps: [
+      { el: '#eventEditorAdd', i18n: 'tour.editor.editors-add' },
+      { el: '#eventEditorList', i18n: 'tour.editor.editors-list' },
     ],
   },
 

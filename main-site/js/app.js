@@ -193,7 +193,8 @@ function wireHeaderLinks() {
     let isManager = false;
     if (currentSession.signedIn) {
       const user = currentSession.user;
-      if (user !== null && user !== undefined && user.canManage) {
+      // Staff editors and admins, and editors of one event (migrations/018).
+      if (user !== null && user !== undefined && (user.canManage || user.editsEvents)) {
         isManager = true;
       }
     }

@@ -26,16 +26,17 @@ import { iconNode } from '../icons.js';
 import { decodeCover, cropToWebp } from '../cover-upload.js';
 import { cropCover } from '../cover-crop.js';
 import { startTools } from '../manage-tools.js';
+import { startEditors, loadEditors } from '../manage-editors.js';
 import { startTabs } from '../tabs.js';
 import { startTours } from '../tour.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom, countryName } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
 import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANGED } from '../manage-meals.js';
-import { setTiers, readTiers, startTiers, relabelTiers, addTier, TIERS_CHANGED } from '../manage-tiers.js';
+import { setTiers, readTiers, startTiers, relabelTiers, addTier, syncTierPayment, TIERS_CHANGED } from '../manage-tiers.js';
 import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
-import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
+import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, setPaymentProblems, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
 
 const byId = (id) => document.getElementById(id);
 const form = byId('eventForm');
@@ -51,8 +52,9 @@ const TEXT_FIELDS = [
   'startDate', 'startTime', 'endDate', 'endTime', 'onlineUrl',
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
   'volunteerDiscountType', 'volunteerDiscountValue', 'timetableView', 'externalUrlLabel', 'externalUrlCustomLabel',
+  'lepakLabel', 'lepakLimit',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder', 'lepakEnabled'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -80,6 +82,10 @@ const BLANK = {
 let currentUser = null;
 let events = [];
 let page = 0; // the list page shown, from 0
+// Which events the list shows, by status: 'published' (released or
+// scheduled), 'draft' or 'cancelled'. Each has its own pages.
+const LIST_STATUSES = ['published', 'draft', 'cancelled'];
+let listStatus = 'published';
 let editing = null; // { id, slug } of the event in the form, or null for a new one
 let attendees = [];
 // The meals the open event offers as last saved ([{ id, label }]), for
@@ -151,20 +157,46 @@ function eventRow(row) {
   ]);
 }
 
-function pageCount() {
-  return Math.max(1, Math.ceil(events.length / PAGE_SIZE));
+// The events with the status the list shows, newest change first.
+function listedEvents() {
+  return events.filter((row) => row.status === listStatus);
 }
 
-// The list's current page, and the pager under it while there is more than
-// one page.
+function pageCount() {
+  return Math.max(1, Math.ceil(listedEvents().length / PAGE_SIZE));
+}
+
+// The status buttons, each with its count, the one shown pressed.
+function renderListStatus() {
+  for (const button of byId('listStatus').querySelectorAll('[data-list-status]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.listStatus === listStatus));
+  }
+  for (const status of LIST_STATUSES) {
+    const count = events.filter((row) => row.status === status).length;
+    byId('listStatus').querySelector(`[data-list-count="${status}"]`).textContent = String(count);
+  }
+}
+
+// The list's current page, for the status picked, and the pager under it
+// while there is more than one page. With no events at all, "No events
+// yet"; with none of this status, a line saying so.
 function renderList() {
   byId('listBox').setAttribute('aria-busy', 'false');
+  renderListStatus();
+  const listed = listedEvents();
   byId('listEmpty').hidden = events.length > 0;
+  byId('listStatus').hidden = events.length === 0;
+  let noneOfStatus = false;
+  if (events.length > 0 && listed.length === 0) {
+    noneOfStatus = true;
+  }
+  byId('listEmptyStatus').hidden = !noneOfStatus;
+  byId('listEmptyStatus').textContent = translate(`manage.list-empty-status.${listStatus}`);
   const pages = pageCount();
   if (page > pages - 1) {
     page = pages - 1;
   }
-  const shown = events.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const shown = listed.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   byId('eventList').replaceChildren(...shown.map((row) => eventRow(row)));
   byId('listPager').hidden = pages < 2;
   byId('pageInfo').textContent = translate('manage.page-of', { page: page + 1, pages });
@@ -180,6 +212,25 @@ function turnPage(step) {
 
 byId('pagePrev').addEventListener('click', () => turnPage(-1));
 byId('pageNext').addEventListener('click', () => turnPage(1));
+
+// Picking a status shows its events from their first page.
+function showListStatus(status) {
+  if (!LIST_STATUSES.includes(status)) {
+    return;
+  }
+  if (status !== listStatus) {
+    page = 0;
+  }
+  listStatus = status;
+  renderList();
+}
+
+byId('listStatus').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-list-status]');
+  if (button) {
+    showListStatus(button.dataset.listStatus);
+  }
+});
 
 async function loadList() {
   const data = await api('/api/manage/events');
@@ -499,6 +550,13 @@ function syncDependent() {
   } else {
     byId('f-volunteerDiscountValue').removeAttribute('max');
   }
+  // "Just Lepak Only" is for a paid event; its words and places mean
+  // something only while it is on.
+  byId('lepakNotPaid').hidden = paid;
+  byId('lepakFields').hidden = !paid;
+  for (const name of ['lepakLabel', 'lepakLimit']) {
+    byId(`f-${name}`).disabled = !byId('f-lepakEnabled').checked;
+  }
   syncPayment();
 }
 
@@ -561,13 +619,13 @@ function savesOnChange(element) {
 const DRAFT_CARDS = '.tier-edit-card, .room-row, .timetable-item-card';
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel'].includes(event.target.id)
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel', 'f-lepakEnabled'].includes(event.target.id)
     || event.target.hasAttribute('data-payment-method')) {
     syncDependent();
   }
   // The attendee list's Volunteered and Paid boxes save on their own, and
   // the QR code uploads on its own.
-  if (event.target.closest('#attendeeList') || event.target.id === 'payQrFile') {
+  if (event.target.closest('#attendeeList') || event.target.closest('#epanel-editors') || event.target.id === 'payQrFile') {
     return;
   }
   // A convention draws people from everywhere, so Kind set to Convention
@@ -808,6 +866,7 @@ function applySaved(saved, sent) {
     fillVolunteerSources(saved.volunteerDiscountFrom);
   }
   applySavedPayment(saved, now, sent);
+  syncTierPayment();
   syncDependent();
   markMissingDescriptions();
 }
@@ -972,6 +1031,10 @@ function showSavedControls() {
   if (editing) {
     byId('editorView').href = `/e/${encodeURIComponent(editing.slug)}`;
   }
+  // The Editors tab (admins only) for the event open.
+  if (currentUser.role === 'admin') {
+    loadEditors();
+  }
   renderCover();
   renderAttendees();
 }
@@ -1062,6 +1125,9 @@ function attendeeRow(attendee) {
   if (attendee.rsvpNumber !== null) {
     details.unshift(translate('manage.attendee-number', { number: attendee.rsvpNumber }));
   }
+  if (attendee.lepak) {
+    details.push(lepakLabelShown());
+  }
   const meals = attendeeMealsText(attendee);
   if (meals) {
     details.push(translate('manage.attendee-meals', { meals }));
@@ -1123,6 +1189,7 @@ function renderAttendees() {
   renderVolunteerCounts();
   renderCountryCounts();
   renderPaymentCounts(attendees);
+  renderLepakCount();
   let attendeeRows;
   if (attendees.length === 0) {
     attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
@@ -1189,6 +1256,30 @@ function renderMealCounts() {
   const box = byId('attendeesMeals');
   box.hidden = parts.length === 0;
   box.textContent = translate('manage.attendees-meals', { counts: parts.join(' · ') });
+}
+
+// What the lepak choice says for this event: the editor's words, or "Just
+// Lepak Only".
+function lepakLabelShown() {
+  const typed = byId('f-lepakLabel').value.trim();
+  if (typed) {
+    return typed;
+  }
+  return translate('manage.lepak-default');
+}
+
+// Under the attendee count, how many are lepak, of the places when capped
+// ("Just Lepak Only: 4 of 10"). Hidden while nobody is.
+function renderLepakCount() {
+  const box = byId('attendeesLepak');
+  const count = attendees.filter((attendee) => attendee.lepak).length;
+  box.hidden = count === 0;
+  const limit = byId('f-lepakLimit').value.trim();
+  if (limit) {
+    box.textContent = translate('manage.attendees-lepak-of', { label: lepakLabelShown(), count, limit });
+  } else {
+    box.textContent = translate('manage.attendees-lepak', { label: lepakLabelShown(), count });
+  }
 }
 
 // Under the attendee count at a convention, how many signed up to
@@ -1344,9 +1435,10 @@ byId('editorEmptyNew').addEventListener('click', openNew);
 byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
 startMeals();
-startTiers();
+startTiers({ getEvent: () => editing, onProblems: setPaymentProblems });
 startTimetable();
 startPayment({ getEvent: () => editing });
+startEditors({ getEvent: () => editing });
 
 // The edit form's section tabs, kept out of the address (it already says
 // #editor). A tab picked with the tab bar stuck under the page header (the
@@ -1386,16 +1478,30 @@ async function start() {
     return;
   }
   currentUser = currentSession.user;
-  if (!currentUser.canManage) {
+  if (!currentUser.canManage && !currentUser.editsEvents) {
     byId('manageError').textContent = translate('error.manage_only');
     byId('panel-events').hidden = true;
     return;
   }
-  byId('newEvent').hidden = false;
+  // An editor of one event (migrations/018): their events only, no New
+  // event, no staff tools, and the Status and release time left to staff.
+  const eventEditorOnly = !currentUser.canManage;
+  byId('newEvent').hidden = eventEditorOnly;
   byId('tab-editor').hidden = false;
+  byId('statusStaffOnly').hidden = !eventEditorOnly;
+  byId('f-status').disabled = eventEditorOnly;
+  byId('f-publishLocal').disabled = eventEditorOnly;
+  // An event's own editors are an admin's to choose.
+  byId('etab-editors').hidden = currentUser.role !== 'admin';
+  editorTabs.refresh();
   fillCurrencyList(byId('currencyList'));
   tabs = startTabs(byId('manageTabs'), {
     onSelect(name) {
+      // Back from the form: the list opens on the status of the event that
+      // was open, so a new draft is found under Drafts.
+      if (name === 'events' && editing) {
+        showListStatus(byId('f-status').value);
+      }
       if (name === 'events' && listStale) {
         loadList().catch((error) => {
           byId('manageError').textContent = errorText(error);
@@ -1403,7 +1509,10 @@ async function start() {
       }
     },
   });
-  const toolsReady = startTools(currentUser).then(() => tabs.refresh());
+  let toolsReady = Promise.resolve();
+  if (!eventEditorOnly) {
+    toolsReady = startTools(currentUser).then(() => tabs.refresh());
+  }
   try {
     await loadList();
   } catch (error) {

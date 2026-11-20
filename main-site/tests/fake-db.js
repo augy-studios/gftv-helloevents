@@ -33,13 +33,15 @@ const DEFAULTS = {
     timetable_view: 'timeline', timetable_rooms: [], timetable_items: [],
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
     payment_methods: [], payment_link: null, payment_qr_path: null, payment_instructions: null,
+    lepak_enabled: false, lepak_limit: null, lepak_label: null,
   }),
   gftvevents_attendees: () => ({
-    meals: [], reminders_sent: [], volunteer: false,
+    meals: [], reminders_sent: [], volunteer: false, lepak: false,
     payment_method: null, payment_status: 'none', payment_tier: null, payment_amount: null, payment_currency: null,
     payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null,
   }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),
+  gftvevents_event_editors: () => ({ added_by: null, created_at: now() }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
   gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
@@ -58,6 +60,7 @@ const PRIMARY = {
   gftvevents_attendees: ['event_id', 'user_id'],
   gftvevents_volunteers: ['event_id', 'user_id'],
   gftvevents_rsvp_counters: 'event_id',
+  gftvevents_event_editors: ['event_id', 'account_id'],
 };
 const UNIQUE = {
   gftvevents_accounts: ['username', 'email', 'staff_user_id'],
@@ -90,6 +93,8 @@ const FKS = {
   // benefit is for.
   gftvevents_volunteers: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('confirmed_by', 'set null')],
   gftvevents_events: [{ column: 'volunteer_discount_from', parent: 'gftvevents_events', onDelete: 'set null' }],
+  // migrations/018: editors of one event.
+  gftvevents_event_editors: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('account_id'), toAccount('added_by', 'set null')],
   // migrations/013: the last RSVP ID handed out for each event.
   gftvevents_rsvp_counters: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }],
   // migrations/009: a view of the attendees coming to the whole event.
@@ -128,7 +133,7 @@ export function createFakeDb() {
   const tables = {};
   // Views (migrations/009), read-only, worked out from their table.
   const VIEWS = {
-    gftvevents_full_attendees: () => (tables.gftvevents_attendees ?? []).filter((r) => !(r.meals ?? []).length),
+    gftvevents_full_attendees: () => (tables.gftvevents_attendees ?? []).filter((r) => !(r.meals ?? []).length && !r.lepak),
   };
   const table = (name) => (VIEWS[name] ? VIEWS[name]() : (tables[name] ??= []));
 
@@ -222,8 +227,16 @@ export function createFakeDb() {
     in(c, values) { this.filters.push((r) => values.includes(r[c])); return this; }
     like(c, p) { const re = likeToRegex(p, ''); this.filters.push((r) => re.test(String(r[c] ?? ''))); return this; }
     ilike(c, p) { const re = likeToRegex(p, 'i'); this.filters.push((r) => re.test(String(r[c] ?? ''))); return this; }
+    // A PostgREST logical tree: col.op.value clauses, and and(...) / or(...)
+    // groups of them, nested as deep as given (event-rules.js releasedFilter).
     or(expr) {
-      const clauses = expr.split(/,(?=\w+\.)/).map((part) => {
+      const clause = (part) => {
+        const group = part.match(/^(and|or)\((.*)\)$/);
+        if (group) {
+          const inner = splitTop(group[2]).map(clause);
+          if (group[1] === 'and') return (r) => inner.every((f) => f(r));
+          return (r) => inner.some((f) => f(r));
+        }
         const m = part.match(/^(\w+)\.(ilike|eq|is|lte|gte|lt|gt)\.(?:"(.*)"|(.*))$/);
         if (!m) throw new Error(`fake or() cannot parse ${part}`);
         const [, col, op] = m;
@@ -232,7 +245,8 @@ export function createFakeDb() {
         if (op === 'ilike') { const re = likeToRegex(value, 'i'); return (r) => re.test(String(r[col] ?? '')); }
         const cmp = { lte: (a, b) => a <= b, gte: (a, b) => a >= b, lt: (a, b) => a < b, gt: (a, b) => a > b, eq: (a, b) => String(a) === b }[op];
         return (r) => r[col] !== null && r[col] !== undefined && cmp(r[col], value);
-      });
+      };
+      const clauses = splitTop(expr).map(clause);
       this.filters.push((r) => clauses.some((f) => f(r)));
       return this;
     }
@@ -334,9 +348,10 @@ export function createFakeDb() {
       row.hits += 1;
       return row.hits;
     },
-    // The same rules as the SQL function in migrations/001, 007, 009, 010 and 013.
-    gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [] }) {
+    // The same rules as the SQL function in migrations/001, 007, 009, 010, 013 and 017.
+    gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [], p_lepak = false }) {
       const meals = p_meals ?? [];
+      const lepak = p_lepak === true;
       const e = table('gftvevents_events').find((r) => r.id === p_event_id);
       if (!e) return 'not_found';
       if (!['published', 'cancelled'].includes(e.status) || (e.publish_at && e.publish_at > now())) return 'not_found';
@@ -346,16 +361,23 @@ export function createFakeDb() {
       const current = mine ? (mine.meals ?? []) : null;
       if (!e.rsvp_open && !mine) return 'rsvp_closed';
       if (e.last_at && e.last_at < now()) return 'event_over';
-      if (mine && JSON.stringify(current) === JSON.stringify(meals)) return 'already';
-      if (!e.rsvp_open && !meals.length) return 'rsvp_closed';
-      const full = going.filter((r) => !(r.meals ?? []).length);
-      if (!meals.length && e.capacity !== null && (!mine || current.length) && full.length >= e.capacity) return 'event_full';
+      if (mine && JSON.stringify(current) === JSON.stringify(meals) && Boolean(mine.lepak) === lepak) return 'already';
+      const whole = !meals.length && !lepak;
+      const hadSpace = Boolean(mine) && !current.length && !mine.lepak;
+      if (!e.rsvp_open && whole && !hadSpace) return 'rsvp_closed';
+      const full = going.filter((r) => !(r.meals ?? []).length && !r.lepak);
+      if (whole && !hadSpace && e.capacity !== null && full.length >= e.capacity) return 'event_full';
+      if (lepak && !(mine && mine.lepak)) {
+        if (!e.lepak_enabled || e.price_type !== 'paid') return 'lepak_not_offered';
+        if (e.lepak_limit !== null && going.filter((r) => r.lepak).length >= e.lepak_limit) return 'lepak_full';
+      }
       for (const option of e.meal_options ?? []) {
         if (typeof option.limit !== 'number' || !meals.includes(option.id) || (mine && current.includes(option.id))) continue;
         if (going.filter((r) => (r.meals ?? []).includes(option.id)).length >= option.limit) return 'meal_full';
       }
       if (mine) {
         mine.meals = [...meals];
+        mine.lepak = lepak;
         return 'changed';
       }
       const counters = table('gftvevents_rsvp_counters');
@@ -365,7 +387,7 @@ export function createFakeDb() {
         counters.push(counter);
       }
       counter.last_number += 1;
-      table('gftvevents_attendees').push({ ...DEFAULTS.gftvevents_attendees(), event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], rsvp_number: counter.last_number });
+      table('gftvevents_attendees').push({ ...DEFAULTS.gftvevents_attendees(), event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], lepak, rsvp_number: counter.last_number });
       return 'ok';
     },
     gftvevents_meal_counts({ p_event_id }) {

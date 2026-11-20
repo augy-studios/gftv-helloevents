@@ -1,5 +1,5 @@
 // POST /api/events/rsvp  { slug, going: true | false, meals?: [id], volunteer?: true | false,
-//                          payment?: { method, tier?, tierName? } }
+//                          lepak?: true | false, payment?: { method, tier?, tierName? } }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
 // meals: when the event offers meals people can come to on their own, the
@@ -10,6 +10,10 @@
 // volunteer: for a convention taking volunteers, whether this person signs
 // up to volunteer (migrations/012); left out, it stays as it was. Someone
 // going can change it until the event is over, even after RSVPs close.
+// lepak: "Just Lepak Only" (migrations/017), coming to a paid event without
+// a ticket, with meals if they like (meals then names them). It takes none
+// of the event's spaces, only one of its lepak places when it caps them.
+// Left out, it is false: the whole event, or just meals.
 // payment: for an event that takes payment online (migrations/016,
 // event-rules.js needsCheckout), what the checkout page sends to get a
 // ticket for the whole event: the method picked (one the event offers) and,
@@ -33,9 +37,9 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
-import { canManage } from '../_lib/users.js';
+import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
-import { chooseMeals, takesVolunteers, needsCheckout, paymentOptions, ticketPrice, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { chooseMeals, takesVolunteers, needsCheckout, paymentOptions, tierOptions, storedTiers, ticketPrice, lepakOffered, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { deletePaymentFiles } from '../_lib/payments.js';
 
@@ -49,6 +53,8 @@ const RESULTS = {
   rsvp_closed: [409, 'rsvp_closed'],
   event_full: [409, 'event_full'],
   meal_full: [409, 'meal_full'],
+  lepak_full: [409, 'lepak_full'],
+  lepak_not_offered: [400, 'lepak_not_offered'],
   event_over: [409, 'event_over'],
 };
 
@@ -104,6 +110,14 @@ async function checkoutTicket(event, userId, payment) {
   const priced = ticketPrice(event, { tierIndex, tierName, volunteerDiscount: standing.discount });
   if (!priced.ok) {
     return priced;
+  }
+  // A tier can take its own ways to pay (event-rules.js tierOptions).
+  let options = paymentOptions(event);
+  if (priced.tier !== null) {
+    options = tierOptions(event, storedTiers(event)[tierIndex]);
+  }
+  if (!options.includes(payment.method)) {
+    return { ok: false, error: 'payment_method_required' };
   }
   let status = 'none';
   if (ONLINE_METHODS.includes(payment.method)) {
@@ -164,6 +178,7 @@ export default route('events/rsvp', async (request, response) => {
     return fail(response, 400, 'bad_request');
   }
   let meals = [];
+  let lepak = false;
   // A cross-border event (migrations/015) takes a new RSVP only from someone
   // with a country of origin on their account; someone already going can
   // still change their meals or take it back.
@@ -182,22 +197,29 @@ export default route('events/rsvp', async (request, response) => {
       return fail(response, 400, 'volunteers_not_wanted');
     }
     meals = choice.meals;
+    if (body.lepak !== undefined && typeof body.lepak !== 'boolean') {
+      return fail(response, 400, 'bad_request');
+    }
+    lepak = body.lepak === true;
+    if (lepak && !lepakOffered(event)) {
+      return fail(response, 400, 'lepak_not_offered');
+    }
     // A ticket for the whole event, at an event taking payment online, by
     // someone not already holding one: it needs a method and a tier.
     const before = await attendance(event.id, session.user.id);
     let ticket = null;
     let heldWholeEvent = false;
-    if (before.going && before.meals.length === 0) {
+    if (before.going && before.meals.length === 0 && !before.lepak) {
       heldWholeEvent = true;
     }
-    if (meals.length === 0 && !heldWholeEvent && needsCheckout(event)) {
+    if (meals.length === 0 && !lepak && !heldWholeEvent && needsCheckout(event)) {
       await withVolunteerSource(event);
       ticket = await checkoutTicket(event, session.user.id, body.payment);
       if (!ticket.ok) {
         return fail(response, 400, ticket.error);
       }
     }
-    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals });
+    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals, p_lepak: lepak });
     if (error) {
       throw error;
     }
@@ -214,10 +236,14 @@ export default route('events/rsvp', async (request, response) => {
     if (ticket && (result === 'ok' || result === 'changed')) {
       await writePayment(event.id, session.user.id, ticket.columns);
     }
-    // From the whole event to just meals: a payment not yet confirmed is
-    // dropped, screenshot and all. A confirmed one is kept for the editors
-    // (any refund is between the person and the organisers).
-    if (result === 'changed' && meals.length > 0 && before.payment && ['awaiting', 'submitted'].includes(before.payment.payment_status)) {
+    // From the whole event to just meals or lepak: a payment not yet
+    // confirmed is dropped, screenshot and all. A confirmed one is kept for
+    // the editors (any refund is between the person and the organisers).
+    let leftTicket = lepak;
+    if (meals.length > 0) {
+      leftTicket = true;
+    }
+    if (result === 'changed' && leftTicket && before.payment && ['awaiting', 'submitted'].includes(before.payment.payment_status)) {
       await writePayment(event.id, session.user.id, NO_PAYMENT);
       await deletePaymentFiles([before.payment.payment_proof_path]);
     }
@@ -226,14 +252,14 @@ export default route('events/rsvp', async (request, response) => {
       volunteerChanged = await setVolunteer(event.id, session.user.id, body.volunteer);
     }
     if (result === 'ok') {
-      const details = { meals, volunteer: body.volunteer === true };
+      const details = { meals, lepak, volunteer: body.volunteer === true };
       if (ticket) {
         details.payment = { method: ticket.columns.payment_method, tier: ticket.columns.payment_tier, amount: ticket.columns.payment_amount };
       }
       await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details });
     }
     if (result === 'changed') {
-      await audit(request, { action: 'rsvp.meals_changed', actorId: session.user.id, eventId: event.id, details: { meals } });
+      await audit(request, { action: 'rsvp.meals_changed', actorId: session.user.id, eventId: event.id, details: { meals, lepak } });
     }
     if (volunteerChanged && result !== 'ok') {
       await audit(request, { action: 'rsvp.volunteer_changed', actorId: session.user.id, eventId: event.id, details: { volunteer: body.volunteer } });
@@ -272,8 +298,9 @@ export default route('events/rsvp', async (request, response) => {
       signedIn: true,
       going: body.going === true,
       meals,
+      lepak,
       rsvpNumber: mine.rsvpNumber,
-      canManage: canManage(session.user),
+      canManage: await canEditEvent(session.user, shown.id),
       volunteer: mine.volunteer,
       volunteered: standing.volunteered,
       discount: standing.discount,

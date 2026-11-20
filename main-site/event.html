@@ -128,9 +128,13 @@
                                 <input type="radio" name="rsvpFor" value="event" id="rsvpForEvent" checked>
                                 <span data-i18n="event.for-event">The whole event</span>
                             </label>
-                            <label class="check">
+                            <label class="check" id="rsvpForMealsRow">
                                 <input type="radio" name="rsvpFor" value="meals" id="rsvpForMeals">
                                 <span data-i18n="event.for-meals">I only want to show up for the meal</span>
+                            </label>
+                            <label class="check" id="rsvpForLepakRow" hidden>
+                                <input type="radio" name="rsvpFor" value="lepak" id="rsvpForLepak">
+                                <span id="rsvpForLepakText"></span>
                             </label>
                             <div class="rsvp-meal-list" id="rsvpMealList" role="group" aria-labelledby="rsvpMealListLabel" hidden>
                                 <span class="small muted" id="rsvpMealListLabel" data-i18n="event.meals-pick">Which meals?</span>

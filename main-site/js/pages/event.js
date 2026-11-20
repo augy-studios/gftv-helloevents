@@ -15,10 +15,12 @@ const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(
 let event = null;
 let preview = false;
 let descriptionLang = preferredDescriptionLang();
-// What this person is coming for: the whole event, or only some of the
-// meals the event offers (ids). Taken from the server while they are going;
-// picked here before they say they are going.
-let choice = { onlyMeals: false, meals: [] };
+// What this person is coming for: mode 'event' (the whole event, with a
+// ticket where the event sells them), 'meals' (only some of the meals the
+// event offers) or 'lepak' ("Just Lepak Only", migrations/017: no ticket,
+// with any meals ticked as well); meals the ids ticked. Taken from the
+// server while they are going; picked here before they say they are going.
+let choice = { mode: 'event', meals: [] };
 // The meals the tick boxes were last drawn for, so they are redrawn only
 // when those change (not under a box being ticked).
 let mealsDrawn = '';
@@ -171,9 +173,24 @@ function mealOpen(meal) {
   return meal.left > 0;
 }
 
+// Whether "Just Lepak Only" can be picked: the event takes lepak RSVPs and
+// has a place left, or this person is lepak already.
+function lepakOpen() {
+  if (!event.lepak.offered) {
+    return false;
+  }
+  if (event.viewer.going && event.viewer.lepak) {
+    return true;
+  }
+  if (event.lepak.left === null) {
+    return true;
+  }
+  return event.lepak.left > 0;
+}
+
 // Whether someone not yet going can still say they are coming: RSVPs open,
-// or the event full but a meal with a place left (people coming just for a
-// meal take none of the event's spaces).
+// or the event full but a meal or a lepak place left (neither takes one of
+// the event's spaces).
 function canJoinNow() {
   if (event.rsvp === 'open') {
     return true;
@@ -181,7 +198,18 @@ function canJoinNow() {
   if (event.rsvp !== 'full') {
     return false;
   }
-  return event.meals.some(mealOpen);
+  if (event.meals.some(mealOpen)) {
+    return true;
+  }
+  return lepakOpen();
+}
+
+// Whether this person holds a place at the whole event (a ticket).
+function holdsWholeEvent() {
+  if (!event.viewer.going || event.viewer.lepak) {
+    return false;
+  }
+  return event.viewer.meals.length === 0;
 }
 
 // Whether "The whole event" can be picked: there is a space, or this person
@@ -190,10 +218,7 @@ function wholeEventOpen() {
   if (event.rsvp === 'open') {
     return true;
   }
-  if (!event.viewer.going) {
-    return false;
-  }
-  return event.viewer.meals.length === 0;
+  return holdsWholeEvent();
 }
 
 // The meal choice as the server has it, while this person is going. Before
@@ -201,11 +226,20 @@ function wholeEventOpen() {
 function syncChoice() {
   const offered = event.meals.map((meal) => meal.id);
   if (event.viewer.going) {
-    choice = { onlyMeals: event.viewer.meals.length > 0, meals: [...event.viewer.meals] };
+    let mode = 'event';
+    if (event.viewer.lepak) {
+      mode = 'lepak';
+    } else if (event.viewer.meals.length > 0) {
+      mode = 'meals';
+    }
+    choice = { mode, meals: [...event.viewer.meals] };
     return;
   }
-  if (offered.length === 0) {
-    choice.onlyMeals = false;
+  if (choice.mode === 'meals' && offered.length === 0) {
+    choice.mode = 'event';
+  }
+  if (choice.mode === 'lepak' && !event.lepak.offered) {
+    choice.mode = 'event';
   }
   choice.meals = choice.meals.filter((id) => offered.includes(id));
 }
@@ -213,18 +247,32 @@ function syncChoice() {
 // The meals to send: none for the whole event, otherwise the ones ticked,
 // in the event's order.
 function chosenMeals() {
-  if (!choice.onlyMeals) {
+  if (choice.mode === 'event') {
     return [];
   }
   return event.meals.map((meal) => meal.id).filter((id) => choice.meals.includes(id));
 }
 
-// Whether the choice can be sent: the whole event, or at least one meal.
+// Whether the choice can be sent: the whole event, lepak (with or without
+// meals), or at least one meal.
 function choiceReady() {
-  if (!choice.onlyMeals) {
+  if (choice.mode !== 'meals') {
     return true;
   }
   return chosenMeals().length > 0;
+}
+
+// "Just Lepak Only" (or the editor's words), with the places left when the
+// event caps them.
+function lepakChoiceText() {
+  const label = event.lepak.label;
+  if (event.lepak.left === null) {
+    return label;
+  }
+  if (event.lepak.left === 0) {
+    return translate('event.lepak-full', { label });
+  }
+  return translate('event.lepak-left', { label, count: event.lepak.left });
 }
 
 // One tick box per meal the event offers, drawn again only when the meals
@@ -265,24 +313,42 @@ function renderMealChoice() {
   if (going && (event.rsvp === 'full' || event.rsvp === 'closed')) {
     canChange = true;
   }
+  const hasMeals = event.meals.length > 0;
   let shown = false;
-  if (event.viewer.signedIn && event.meals.length > 0 && canChange) {
+  if (event.viewer.signedIn && (hasMeals || event.lepak.offered) && canChange) {
     shown = true;
   }
   byId('rsvpMeals').hidden = !shown;
   if (!shown) {
     return;
   }
-  // With the event full, someone without a space can only come for a meal.
+  // With the event full, someone without a space can only come for a meal
+  // or lepak.
   const wholeOpen = wholeEventOpen();
   byId('rsvpForEvent').disabled = !wholeOpen;
-  if (!wholeOpen) {
-    choice.onlyMeals = true;
+  if (!wholeOpen && choice.mode === 'event') {
+    if (hasMeals) {
+      choice.mode = 'meals';
+    } else {
+      choice.mode = 'lepak';
+    }
+  }
+  byId('rsvpForMealsRow').hidden = !hasMeals;
+  byId('rsvpForLepakRow').hidden = !event.lepak.offered;
+  if (event.lepak.offered) {
+    byId('rsvpForLepak').disabled = !lepakOpen();
+    byId('rsvpForLepakText').textContent = lepakChoiceText();
   }
   drawMealChecks();
-  byId('rsvpForEvent').checked = !choice.onlyMeals;
-  byId('rsvpForMeals').checked = choice.onlyMeals;
-  byId('rsvpMealList').hidden = !choice.onlyMeals;
+  byId('rsvpForEvent').checked = choice.mode === 'event';
+  byId('rsvpForMeals').checked = choice.mode === 'meals';
+  byId('rsvpForLepak').checked = choice.mode === 'lepak';
+  // The meals to tick: for just meals, or alongside lepak.
+  let mealListShown = false;
+  if (hasMeals && choice.mode !== 'event') {
+    mealListShown = true;
+  }
+  byId('rsvpMealList').hidden = !mealListShown;
   byId('rsvpMealsHint').hidden = choiceReady();
 }
 
@@ -300,13 +366,10 @@ function checkoutHref() {
 // (migrations/016): the event takes payment online and this person does not
 // hold a place at the whole event yet.
 function ticketNeeded() {
-  if (!event.payment.checkout || choice.onlyMeals) {
+  if (!event.payment.checkout || choice.mode !== 'event') {
     return false;
   }
-  if (event.viewer.going && event.viewer.meals.length === 0) {
-    return false;
-  }
-  return true;
+  return !holdsWholeEvent();
 }
 
 // Someone going: where their payment stands, with the way back to the
@@ -354,7 +417,11 @@ function renderRsvp() {
   const canJoin = canJoinNow();
   byId('rsvpStatus').hidden = !going;
   let statusText = translate('event.you-are-going');
-  if (going && event.viewer.meals.length > 0) {
+  if (going && event.viewer.lepak && event.viewer.meals.length > 0) {
+    statusText = translate('event.you-are-going-lepak-meals', { label: event.lepak.label, meals: mealsText(event.meals, event.viewer.meals) });
+  } else if (going && event.viewer.lepak) {
+    statusText = translate('event.you-are-going-lepak', { label: event.lepak.label });
+  } else if (going && event.viewer.meals.length > 0) {
     statusText = translate('event.you-are-going-for', { meals: mealsText(event.meals, event.viewer.meals) });
   }
   byId('rsvpStatusText').textContent = statusText;
@@ -532,6 +599,10 @@ function renderTiers() {
     if (items.length) {
       body.push(createElement('ul', { class: 'tier-benefits' }, items));
     }
+    // How this tier is paid for, when it differs from the event's.
+    if (tier.methods.length > 0 && JSON.stringify(tier.methods) !== JSON.stringify(event.payment.methods)) {
+      body.push(createElement('p', { class: 'tier-methods', text: paymentMethodsText(tier.methods) }));
+    }
     return createElement('article', { class: 'tier-card' }, body);
   });
   byId('ticketTiers').replaceChildren(...cards);
@@ -688,6 +759,7 @@ byId('rsvpBtn').addEventListener('click', () => {
     const body = { slug: event.slug, going: !event.viewer.going };
     if (body.going) {
       body.meals = chosenMeals();
+      body.lepak = choice.mode === 'lepak';
     }
     if (body.going && !byId('rsvpVolunteerRow').hidden) {
       body.volunteer = volunteerPick;
@@ -709,17 +781,18 @@ function saveChoice() {
     return;
   }
   const meals = chosenMeals();
-  if (JSON.stringify(meals) === JSON.stringify(event.viewer.meals)) {
+  const lepak = choice.mode === 'lepak';
+  if (JSON.stringify(meals) === JSON.stringify(event.viewer.meals) && lepak === event.viewer.lepak) {
     return;
   }
-  // From just meals to the whole event, where that takes a ticket: off to
-  // the checkout page to get one.
-  if (meals.length === 0 && ticketNeeded()) {
+  // From just meals or lepak to the whole event, where that takes a ticket:
+  // off to the checkout page to get one.
+  if (choice.mode === 'event' && ticketNeeded()) {
     location.href = checkoutHref();
     return;
   }
   choiceSaving = withBusy(null, byId('rsvpError'), async () => {
-    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals });
+    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals, lepak });
     event = data.event;
     render();
   }).finally(() => {
@@ -735,7 +808,7 @@ function saveChoice() {
 
 byId('rsvpMeals').addEventListener('change', (changed) => {
   if (changed.target.name === 'rsvpFor') {
-    choice.onlyMeals = byId('rsvpForMeals').checked;
+    choice.mode = changed.target.value;
   } else if (changed.target.hasAttribute('data-meal')) {
     choice.meals = [...byId('rsvpMealChecks').querySelectorAll('input:checked')].map((box) => box.value);
   }
@@ -759,7 +832,7 @@ byId('rsvpVolunteer').addEventListener('change', () => {
   }
   byId('rsvpVolunteer').disabled = true;
   withBusy(null, byId('rsvpError'), async () => {
-    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals: event.viewer.meals, volunteer: wanted });
+    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals: event.viewer.meals, lepak: event.viewer.lepak, volunteer: wanted });
     event = data.event;
     render();
   }).finally(() => {

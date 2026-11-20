@@ -68,6 +68,7 @@ export const LIMITS = Object.freeze({
   linkLabel: 40,
   paymentInstructions: 1000,
   paymentReference: 120,
+  lepakLabel: 40,
 });
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -136,10 +137,42 @@ export function isReleased(row, now = Date.now()) {
 
 // The same rule as a PostgREST filter, applied in the query so unreleased
 // rows never leave the database for a public request.
-export function releasedFilter(query, nowIso = new Date().toISOString()) {
+// alsoAll: more PostgREST groups ("or(...)") every row must also match,
+// such as a search's (searchGroups). They go in the same or() filter as the
+// release time, nested under and(), since a query takes one or().
+export function releasedFilter(query, nowIso = new Date().toISOString(), alsoAll = []) {
   // The timestamp is quoted because it contains PostgREST's reserved "." and
   // ":" characters. It is always a Date#toISOString(), never user input.
-  return query.in('status', ['published', 'cancelled']).or(`publish_at.is.null,publish_at.lte."${nowIso}"`);
+  const released = `publish_at.is.null,publish_at.lte."${nowIso}"`;
+  const statuses = query.in('status', ['published', 'cancelled']);
+  if (alsoAll.length === 0) {
+    return statuses.or(released);
+  }
+  return statuses.or(`and(or(${released}),${alsoAll.join(',')})`);
+}
+
+// The fields the feed's search looks in, and its limits.
+const SEARCH_COLUMNS = ['title', 'summary', 'venue_name', 'city', 'country', 'organiser_name'];
+export const MAX_SEARCH_LENGTH = 80;
+const MAX_SEARCH_WORDS = 5;
+
+// The words of a search as typed: lowercased, at most MAX_SEARCH_WORDS, with
+// anything PostgREST reads as syntax or a wildcard taken out, so a search is
+// only ever text. [] for none.
+export function searchWords(value) {
+  return cleanText(value, MAX_SEARCH_LENGTH)
+    .slice(0, MAX_SEARCH_LENGTH)
+    .toLowerCase()
+    .replace(/["\\(),%_*]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word !== '')
+    .slice(0, MAX_SEARCH_WORDS);
+}
+
+// One PostgREST group per word, each matching an event with that word in
+// any of SEARCH_COLUMNS, for releasedFilter: every word must be found.
+export function searchGroups(words) {
+  return words.map((word) => `or(${SEARCH_COLUMNS.map((column) => `${column}.ilike."%${word}%"`).join(',')})`);
 }
 
 // Whether the event has finished: its end, or its start when it has no end,
@@ -1000,10 +1033,48 @@ function readTier(entry) {
   if (!previousDisplay) {
     previousDisplay = 'reference';
   }
+  // Its own ways to pay (migrations/016): any of PAYMENT_METHODS, none for
+  // the event's own; its own payment link (blank for the event's). Its QR
+  // code is uploaded on its own (api/manage/payment-qr.js) and kept by the
+  // server across saves, by the tier's id.
+  let methods = entry.paymentMethods;
+  if (methods === undefined || methods === null) {
+    methods = [];
+  }
+  if (!Array.isArray(methods) || methods.some((method) => !PAYMENT_METHODS.includes(method))) {
+    return { ok: false, field: 'tierPaymentMethods' };
+  }
+  const link = httpsUrl(entry.paymentLink);
+  if (!link.ok) {
+    return { ok: false, field: 'tierPaymentLink' };
+  }
+  let id = entry.id;
+  if (typeof id !== 'string' || !TIER_ID.test(id)) {
+    id = newTierId();
+  }
   return {
     ok: true,
-    tier: { name, price: price.value, benefits, includes_previous: entry.includesPrevious === true, previous_display: previousDisplay },
+    tier: {
+      id,
+      name,
+      price: price.value,
+      benefits,
+      includes_previous: entry.includesPrevious === true,
+      previous_display: previousDisplay,
+      payment_methods: PAYMENT_METHODS.filter((method) => methods.includes(method)),
+      payment_link: link.url,
+      payment_qr_path: null,
+    },
   };
+}
+
+// A tier's id: "t-" and 4 to 16 lowercase letters or digits. The edit form
+// makes one for each new tier; one stored before tiers had ids gets one from
+// its place in the list (storedTiers), the same each time it is read.
+const TIER_ID = /^t-[a-z0-9]{4,16}$/;
+
+function newTierId() {
+  return `t-${globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
 }
 
 // Ticket tiers (migrations/008): the list, each checked, and whether they are
@@ -1087,12 +1158,32 @@ export function storedTiers(row) {
     if (!Number.isFinite(price)) {
       price = 0;
     }
+    let id = tier.id;
+    if (typeof id !== 'string' || !TIER_ID.test(id)) {
+      id = `t-tier${tiers.length + 1}`;
+    }
+    let methods = [];
+    if (Array.isArray(tier.payment_methods)) {
+      methods = PAYMENT_METHODS.filter((method) => tier.payment_methods.includes(method));
+    }
+    let link = null;
+    if (typeof tier.payment_link === 'string' && tier.payment_link.startsWith('https://')) {
+      link = tier.payment_link;
+    }
+    let qrPath = null;
+    if (typeof tier.payment_qr_path === 'string' && tier.payment_qr_path.startsWith('qr/')) {
+      qrPath = tier.payment_qr_path;
+    }
     tiers.push({
+      id,
       name: tier.name,
       price,
       benefits,
       includes_previous: tier.includes_previous === true,
       previous_display: previousDisplay,
+      payment_methods: methods,
+      payment_link: link,
+      payment_qr_path: qrPath,
     });
   }
   // The first tier has no tier before it to include.
@@ -1249,38 +1340,129 @@ function hasSingleAmount(row) {
   return false;
 }
 
+// Whether an event sells its tickets in tiers (with at least one tier).
+export function sellsTiers(row) {
+  if (row.tiers_enabled !== true) {
+    return false;
+  }
+  return storedTiers(row).length > 0;
+}
+
+// A tier's ways to pay as ticked: its own, or the event's when it ticks
+// none. tier: one of storedTiers(row).
+export function tierMethods(row, tier) {
+  if (tier.payment_methods.length > 0) {
+    return tier.payment_methods;
+  }
+  return storedMethods(row);
+}
+
+// The payment link and QR code (Storage path) a tier's buyers use: its own,
+// or the event's. null when there is none.
+export function tierLink(row, tier) {
+  if (tier && tier.payment_link) {
+    return tier.payment_link;
+  }
+  if (row.payment_link) {
+    return row.payment_link;
+  }
+  return null;
+}
+
+export function tierQrPath(row, tier) {
+  if (tier && tier.payment_qr_path) {
+    return tier.payment_qr_path;
+  }
+  if (row.payment_qr_path) {
+    return row.payment_qr_path;
+  }
+  return null;
+}
+
+// The tier someone's ticket is for, by the name kept at checkout, or null.
+export function tierNamed(row, name) {
+  if (!sellsTiers(row) || !name) {
+    return null;
+  }
+  const match = storedTiers(row).find((tier) => tier.name === name);
+  if (!match) {
+    return null;
+  }
+  return match;
+}
+
+// The ways a tier can be paid for now, in order: onsite whenever ticked,
+// link and qr once there is a link or QR code for it (its own or the
+// event's). Empty for an event that is not paid.
+export function tierOptions(row, tier) {
+  if (!row || row.price_type !== 'paid') {
+    return [];
+  }
+  return tierMethods(row, tier).filter((method) => {
+    if (method === 'onsite') {
+      return true;
+    }
+    if (method === 'link') {
+      return tierLink(row, tier) !== null;
+    }
+    return tierQrPath(row, tier) !== null;
+  });
+}
+
 // Why each ticked online method cannot be offered yet, for the edit form:
-// a list of 'not_paid', 'no_single_price', 'no_link' and 'no_qr'. Empty
-// when every ticked method works.
+// a list of { code, tier }, code one of 'not_paid', 'no_single_price',
+// 'no_link' and 'no_qr', tier the tier's name for a tier's own ways to pay
+// (null for the event's). Empty when every ticked method works.
 export function paymentProblems(row) {
-  const methods = storedMethods(row);
-  const online = methods.filter((method) => ONLINE_METHODS.includes(method));
   const problems = [];
-  if (online.length === 0) {
+  const tiers = [];
+  if (sellsTiers(row)) {
+    tiers.push(...storedTiers(row));
+  }
+  const ticked = [storedMethods(row), ...tiers.map((tier) => tierMethods(row, tier))].flat();
+  if (!ticked.some((method) => ONLINE_METHODS.includes(method))) {
     return problems;
   }
   if (row.price_type !== 'paid') {
-    problems.push('not_paid');
+    problems.push({ code: 'not_paid', tier: null });
     return problems;
   }
-  if (!hasSingleAmount(row)) {
-    problems.push('no_single_price');
+  if (tiers.length === 0) {
+    const methods = storedMethods(row);
+    if (!hasSingleAmount(row)) {
+      problems.push({ code: 'no_single_price', tier: null });
+    }
+    if (methods.includes('link') && !row.payment_link) {
+      problems.push({ code: 'no_link', tier: null });
+    }
+    if (methods.includes('qr') && !row.payment_qr_path) {
+      problems.push({ code: 'no_qr', tier: null });
+    }
+    return problems;
   }
-  if (methods.includes('link') && !row.payment_link) {
-    problems.push('no_link');
-  }
-  if (methods.includes('qr') && !row.payment_qr_path) {
-    problems.push('no_qr');
+  for (const tier of tiers) {
+    const methods = tierMethods(row, tier);
+    if (methods.includes('link') && tierLink(row, tier) === null) {
+      problems.push({ code: 'no_link', tier: tier.name });
+    }
+    if (methods.includes('qr') && tierQrPath(row, tier) === null) {
+      problems.push({ code: 'no_qr', tier: tier.name });
+    }
   }
   return problems;
 }
 
-// The methods a checkout offers for this event, in order: onsite whenever it
-// is ticked, link and qr only once they can be used. Empty for an event
-// that is not paid.
+// The methods a checkout offers for this event, in order: with tiers, every
+// way any tier can be paid for (tierOptions); without, onsite whenever it is
+// ticked, link and qr only once they can be used. Empty for an event that is
+// not paid.
 export function paymentOptions(row) {
   if (!row || row.price_type !== 'paid') {
     return [];
+  }
+  if (sellsTiers(row)) {
+    const offered = storedTiers(row).flatMap((tier) => tierOptions(row, tier));
+    return PAYMENT_METHODS.filter((method) => offered.includes(method));
   }
   const methods = storedMethods(row);
   const single = hasSingleAmount(row);
@@ -1296,6 +1478,16 @@ export function paymentOptions(row) {
     }
     return Boolean(row.payment_qr_path);
   });
+}
+
+// The ways someone holding a ticket can pay for it: their tier's (by the
+// name kept at checkout), or the event's.
+export function ticketOptions(row, tierName) {
+  const tier = tierNamed(row, tierName);
+  if (tier) {
+    return tierOptions(row, tier);
+  }
+  return paymentOptions(row);
 }
 
 // Whether getting a ticket for the whole event goes through /checkout: a
@@ -1342,6 +1534,62 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
   discount = Math.round(discount * 100) / 100;
   const amount = Math.round((price - discount) * 100) / 100;
   return { ok: true, tier, price, amount, discount };
+}
+
+// ---------------------------------------------------------------------------
+// "Just Lepak Only" (migrations/017): coming to a paid event without a
+// ticket, to hang out, with meals if they like. Takes none of the event's
+// spaces; the editor can cap how many it takes and rename the choice.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_LEPAK_LABEL = 'Just Lepak Only';
+
+// The lepak fields: switched on, the cap (blank for none) and the editor's
+// own words (blank: "Just Lepak Only"). Never refused for a free event: it
+// is offered only while the event is paid (lepakOffered), and kept for when
+// it is paid again. With none of these fields at all the stored ones are
+// kept, so a page from before lepak cannot wipe them.
+function readLepak(body, fields) {
+  const given = ['lepakEnabled', 'lepakLimit', 'lepakLabel'].some((name) => body[name] !== undefined);
+  if (!given) {
+    return null;
+  }
+  fields.lepak_enabled = body.lepakEnabled === true;
+  const limit = readMealLimit(body.lepakLimit);
+  if (!limit.ok) {
+    return 'lepakLimit';
+  }
+  fields.lepak_limit = limit.limit;
+  const label = cleanText(body.lepakLabel, LIMITS.lepakLabel);
+  if (label.length > LIMITS.lepakLabel) {
+    return 'lepakLabel';
+  }
+  fields.lepak_label = null;
+  if (label !== '') {
+    fields.lepak_label = label;
+  }
+  return null;
+}
+
+// Whether an event takes lepak RSVPs: a paid event with it switched on.
+export function lepakOffered(row) {
+  if (!row || row.lepak_enabled !== true) {
+    return false;
+  }
+  return row.price_type === 'paid';
+}
+
+// What the choice says: the editor's words, or "Just Lepak Only".
+export function lepakLabel(row) {
+  if (row && typeof row.lepak_label === 'string' && row.lepak_label.trim() !== '') {
+    return row.lepak_label;
+  }
+  return DEFAULT_LEPAK_LABEL;
+}
+
+// The lepak cap as stored, or null for none.
+export function lepakLimit(row) {
+  return storedLimit(row.lepak_limit);
 }
 
 // A payment reference as typed: { ok: true, reference } (null when blank)
@@ -1622,7 +1870,7 @@ export function itemTimes(item, timeZone) {
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readCapacity, readMeals, readVolunteers, readTimetable];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readLepak, readCapacity, readMeals, readVolunteers, readTimetable];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
