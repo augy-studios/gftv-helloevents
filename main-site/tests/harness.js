@@ -63,7 +63,10 @@ export const SECRET_FIELDS = [
   'chat_id', 'pending_telegram_chat_id', 'staff_notes', 'created_by', 'updated_by', 'user_id',
 ];
 
+// Matched as keys ("email":), so a value that happens to be one of the
+// words (a contact field of the type "email", migrations/021) is not taken
+// for one.
 export function leaks(value) {
   const text = JSON.stringify(value);
-  return SECRET_FIELDS.filter((f) => text.includes(`"${f}"`));
+  return SECRET_FIELDS.filter((f) => text.includes(`"${f}":`));
 }

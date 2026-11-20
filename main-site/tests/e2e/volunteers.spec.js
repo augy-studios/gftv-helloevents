@@ -78,9 +78,10 @@ test('a convention takes volunteers, an editor confirms them, and the next conve
   await page.locator('#f-startDate').fill(NEXT.startDate);
   await page.locator('#f-startDate').blur();
   await expect(page.locator('#editorTitle')).toHaveText(`Editing ${NEXT.title}`);
-  await openSection(page, 'Price and RSVP');
+  await openSection(page, 'Basics');
   await page.locator('#f-status').selectOption('published');
   await expect(status).toHaveText('All changes saved');
+  await openSection(page, 'Price and RSVP');
   await page.locator('#f-volunteerDiscountEnabled').check();
   await expect(page.locator('#volunteerSourcesNone')).toBeHidden();
   await page.locator('#f-volunteerDiscountFrom').selectOption(convention.id);

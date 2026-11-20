@@ -9,7 +9,7 @@
 import { route, guard, ok, fail, query } from '../_lib/http.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage } from '../_lib/users.js';
-import { releasedEventBySlug, anyEventBySlug, attendance, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
+import { releasedEventBySlug, anyEventBySlug, attendance, withVolunteerSource, volunteerStanding, contactSuggestion, eventAsksContact, DETAIL_COLUMNS } from '../_lib/events.js';
 import { checkoutView } from '../_lib/serialize.js';
 
 // The event for this person to check out from, or null.
@@ -25,6 +25,10 @@ export async function checkoutAnswer(row, user) {
   await withVolunteerSource(row);
   const mine = await attendance(row.id, user.id);
   const standing = await volunteerStanding(row, user.id);
+  let contactSuggest = {};
+  if (!mine.going && eventAsksContact(row)) {
+    contactSuggest = await contactSuggestion(user.id);
+  }
   return checkoutView(row, {
     going: mine.going,
     meals: mine.meals,
@@ -34,6 +38,8 @@ export async function checkoutAnswer(row, user) {
     discount: standing.discount,
     country: user.country,
     payment: mine.payment,
+    contact: mine.contact,
+    contactSuggest,
   });
 }
 

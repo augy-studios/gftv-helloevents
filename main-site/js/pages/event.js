@@ -11,6 +11,7 @@ import { renderTimetable } from '../timetable.js';
 import { renderEventGallery } from '../event-gallery.js';
 import { renderRichText } from '../rich-dom.js';
 import { startTours } from '../tour.js';
+import { drawContactForm } from '../contact-form.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -35,6 +36,10 @@ let choiceAgain = false;
 // Whether "I would like to volunteer" is ticked before this person says
 // they are going (once going, the server's answer says).
 let volunteerPick = false;
+// The contact details form (migrations/021), and what it was drawn for, so
+// a re-render keeps what is being typed.
+let contactForm = null;
+let contactDrawn = '';
 
 function renderCover() {
   const box = byId('eventCover');
@@ -505,6 +510,55 @@ function renderRsvp() {
     note = translate('event.full-meals-open');
   }
   byId('rsvpNote').textContent = note;
+  // The contact details asked for: with "I am going" for someone joining
+  // here (a ticket's go with it on the checkout page), and to fill in or
+  // change for someone going.
+  let contactShown = false;
+  if (event.contact.fields.length > 0 && signedIn) {
+    if (going) {
+      contactShown = true;
+    } else if (!rsvpButtonHidden && !ticketNeeded()) {
+      contactShown = true;
+    }
+  }
+  renderContact(contactShown);
+}
+
+// The contact details box: drawn again only when what it shows changed.
+function renderContact(shown) {
+  const box = byId('rsvpContact');
+  box.hidden = !shown;
+  if (!shown) {
+    return;
+  }
+  const going = event.viewer.going;
+  const drawFor = JSON.stringify([event.contact, going, event.viewer.contact, getLocale()]);
+  if (drawFor !== contactDrawn) {
+    contactDrawn = drawFor;
+    contactForm = drawContactForm(byId('rsvpContactFields'), {
+      fields: event.contact.fields,
+      rule: event.contact.rule,
+      values: event.viewer.contact,
+      idPrefix: 'rsvpContact',
+    });
+  }
+  let missing = false;
+  if (going && event.viewer.contactMissing) {
+    missing = true;
+  }
+  byId('rsvpContactMissing').hidden = !missing;
+  byId('rsvpContactSave').hidden = !going;
+  if (!going) {
+    byId('rsvpContactSaved').hidden = true;
+  }
+}
+
+// Whether the contact details go with "I am going": the box is shown.
+function contactAsked() {
+  if (contactForm === null) {
+    return false;
+  }
+  return !byId('rsvpContact').hidden;
 }
 
 // How people can pay, in words: "Pay on the day, by payment link or by QR
@@ -770,11 +824,22 @@ byId('rsvpBtn').addEventListener('click', () => {
       return;
     }
   }
+  // Joining: the contact details asked for are checked before sending.
+  if (!event.viewer.going && contactAsked()) {
+    const problem = contactForm.check();
+    if (problem) {
+      byId('rsvpError').textContent = problem;
+      return;
+    }
+  }
   withBusy(byId('rsvpBtn'), byId('rsvpError'), async () => {
     const body = { slug: event.slug, going: !event.viewer.going };
     if (body.going) {
       body.meals = chosenMeals();
       body.lepak = choice.mode === 'lepak';
+      if (contactAsked()) {
+        body.contact = contactForm.read();
+      }
     }
     if (body.going && !byId('rsvpVolunteerRow').hidden) {
       body.volunteer = volunteerPick;
@@ -853,6 +918,23 @@ byId('rsvpVolunteer').addEventListener('change', () => {
   }).finally(() => {
     byId('rsvpVolunteer').disabled = false;
     renderVolunteer();
+  });
+});
+
+// Someone going fills in or changes their contact details.
+byId('rsvpContactSave').addEventListener('click', () => {
+  byId('rsvpContactSaved').hidden = true;
+  const problem = contactForm.check();
+  if (problem) {
+    byId('rsvpError').textContent = problem;
+    return;
+  }
+  byId('rsvpError').textContent = '';
+  withBusy(byId('rsvpContactSave'), byId('rsvpError'), async () => {
+    const data = await post('/api/events/rsvp', { slug: event.slug, contact: contactForm.read() });
+    event = data.event;
+    render();
+    byId('rsvpContactSaved').hidden = false;
   });
 });
 

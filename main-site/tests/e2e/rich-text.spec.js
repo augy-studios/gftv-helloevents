@@ -111,6 +111,44 @@ test('text pasted from Word or Google Docs keeps its formatting; Automatic black
   await expect(description.locator('td')).toHaveText(['Time', 'Panel']);
 });
 
+// Pastes plain text only, as Telegram Desktop and Discord's "Copy Text" do.
+async function pasteText(page, text) {
+  await editor(page).evaluate((element, pastedText) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', pastedText);
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, text);
+}
+
+test('a paste from Discord or Telegram keeps its formatting without the app\'s dark theme; markdown becomes formatting', async ({ page }) => {
+  await openEvent(page);
+  await editor(page).fill('');
+  await cursorAtEnd(page);
+  // A Discord message as the browser copies it, with Discord's theme on it.
+  await pasteHtml(page, '<meta charset="utf-8"><div class="markup__75297 messageContent_c19a55" style="color: rgb(219, 222, 225); '
+    + 'font-family: &quot;gg sans&quot;, sans-serif; white-space: pre-wrap; background-color: rgb(49, 51, 56);">'
+    + 'Meet at <strong>7pm</strong>\nBring <img class="emoji" src="https://discord.com/assets/abc.svg" alt="🦊"></div>', 'Meet at 7pm');
+  await expect(editor(page).locator('strong')).toHaveText('7pm');
+  await expect(editor(page)).toContainText('Bring 🦊');
+  await expect(editor(page).locator('br')).toHaveCount(1);
+  await expect(editor(page).locator('[style*="background"], img')).toHaveCount(0);
+  await expect(page.locator('#galleryList .gallery-item')).toHaveCount(0);
+
+  await page.keyboard.press('Enter');
+  await pasteText(page, '## Rules\n- Be **kind**\n- Ask in https://example.org/help');
+  await expect(editor(page).locator('h3')).toHaveText('Rules');
+  await expect(editor(page).locator('li')).toHaveText(['Be kind', 'Ask in https://example.org/help']);
+  await expect(editor(page).locator('li strong')).toHaveText('kind');
+  await expect(editor(page).locator('li a')).toHaveAttribute('href', 'https://example.org/help');
+
+  await saveByLeaving(page);
+  await page.goto(`/e/${event.slug}`);
+  const description = page.locator('#eventDescription');
+  await expect(description.locator('strong').first()).toHaveText('7pm');
+  await expect(description.locator('h3')).toHaveText('Rules');
+  await expect(description.locator('li a')).toHaveAttribute('href', 'https://example.org/help');
+});
+
 test('pictures in a paste are copied into the gallery, where they were', async ({ page }) => {
   await openEvent(page);
   await editor(page).fill('');

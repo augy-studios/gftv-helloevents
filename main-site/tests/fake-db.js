@@ -33,11 +33,11 @@ const DEFAULTS = {
     timetable_view: 'timeline', timetable_rooms: [], timetable_items: [],
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
     payment_methods: [], payment_link: null, payment_qr_path: null, payment_instructions: null,
-    lepak_enabled: false, lepak_limit: null, lepak_label: null,
+    lepak_enabled: false, lepak_limit: null, lepak_label: null, contact_fields: [], contact_rule: 'any',
     cover_source_image_id: null, cover_crop: null,
   }),
   gftvevents_attendees: () => ({
-    meals: [], reminders_sent: [], volunteer: false, lepak: false,
+    meals: [], reminders_sent: [], volunteer: false, lepak: false, contact: {},
     payment_method: null, payment_status: 'none', payment_tier: null, payment_amount: null, payment_currency: null,
     payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null,
   }),

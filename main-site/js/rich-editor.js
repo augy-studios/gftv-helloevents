@@ -25,7 +25,7 @@
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { cleanHtml, cleanElement, richFragment, playStickers, applyInlineStyles } from './rich-dom.js';
-import { plainToHtml, readableOn, parseCrop, cropText, croppedAddress } from './rich-text.js';
+import { plainToHtml, markdownToHtml, pasteSource, readableOn, parseCrop, cropText, croppedAddress } from './rich-text.js';
 import { cropPicture } from './picture-crop.js';
 import { openModal, closeModal, toast } from './ui.js';
 
@@ -795,6 +795,25 @@ async function pasteFiles(files) {
   }
 }
 
+// Puts cleaned paste HTML in at the cursor. Returns false when it holds
+// nothing to put in.
+function insertCleaned(editor, cleaned) {
+  if (cleaned.html.replace(/<p><br><\/p>/g, '') === '') {
+    return false;
+  }
+  // A single paragraph goes in as inline content, so it joins the
+  // paragraph the cursor is in, as pasting a few words does in Word.
+  let inserted = cleaned.html;
+  const single = /^<p>((?:(?!<\/?p[ >]).)*)<\/p>$/s.exec(inserted);
+  if (single) {
+    inserted = single[1];
+  }
+  insertHtml(inserted);
+  changed();
+  copyPendingPictures(editor);
+  return true;
+}
+
 function onPaste(event) {
   const data = event.clipboardData;
   if (!data) {
@@ -805,18 +824,9 @@ function onPaste(event) {
   saveSelection();
   const html = data.getData('text/html');
   if (html) {
-    const cleaned = cleanHtml(html, { mode: 'paste', ownCopy: html.includes('data-helloevents-copy') });
-    if (cleaned.html.replace(/<p><br><\/p>/g, '') !== '') {
-      // A single paragraph goes in as inline content, so it joins the
-      // paragraph the cursor is in, as pasting a few words does in Word.
-      let inserted = cleaned.html;
-      const single = /^<p>((?:(?!<\/?p[ >]).)*)<\/p>$/s.exec(inserted);
-      if (single) {
-        inserted = single[1];
-      }
-      insertHtml(inserted);
-      changed();
-      copyPendingPictures(editor);
+    // From Discord or Telegram Web: without the app's theme (rich-text.js).
+    const cleaned = cleanHtml(html, { mode: 'paste', ownCopy: html.includes('data-helloevents-copy'), source: pasteSource(html) });
+    if (insertCleaned(editor, cleaned)) {
       return;
     }
   }
@@ -827,6 +837,12 @@ function onPaste(event) {
   }
   const text = data.getData('text/plain');
   if (!text) {
+    return;
+  }
+  // Markdown (Discord's "Copy Text", or typed) as formatting, and web
+  // addresses (Telegram Desktop writes a link out as its address) as links.
+  const marked = markdownToHtml(text);
+  if (marked !== null && insertCleaned(editor, cleanHtml(marked, { mode: 'paste' }))) {
     return;
   }
   if (text.includes('\n')) {

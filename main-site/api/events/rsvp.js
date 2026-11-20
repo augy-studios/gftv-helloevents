@@ -1,5 +1,6 @@
-// POST /api/events/rsvp  { slug, going: true | false, meals?: [id], volunteer?: true | false,
-//                          lepak?: true | false, payment?: { method, tier?, tierName? } }
+// POST /api/events/rsvp  { slug, going?: true | false, meals?: [id], volunteer?: true | false,
+//                          lepak?: true | false, payment?: { method, tier?, tierName? },
+//                          contact?: { field id: value } }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
 // meals: when the event offers meals people can come to on their own, the
@@ -23,6 +24,13 @@
 // worked out here, with any volunteer benefit, never taken from the page.
 // Someone going just for a meal pays nothing; someone already going keeps
 // the payment they have.
+// contact: the contact details the event asks for (migrations/021,
+// js/contact-fields.js), by field id. Joining needs them as the event's
+// rule says (at least one, all, or none); someone already going can send
+// them with a change, or on their own with going left out, to fill them in
+// or change them. Left out, they stay as they were. Refused with
+// contact_required or contact_invalid, and the field's id when one is to
+// blame.
 // Joining goes through the gftvevents_rsvp database function, which locks the
 // event row, so two people cannot both take the last space. Only released,
 // open, not-yet-over events can be joined; anything else answers the same
@@ -44,6 +52,7 @@ import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles } from '../_lib/payments.js';
+import { storedContactFields, storedContactRule, readContactAnswers } from '../../js/contact-fields.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
 // taken (now or before), or the status and error code to refuse with.
@@ -138,6 +147,31 @@ async function checkoutTicket(event, userId, payment) {
   };
 }
 
+// The contact details sent, checked against the event's fields and rule:
+// { ok: true, contact } or { ok: false, error, field }.
+function checkContact(event, given) {
+  return readContactAnswers(storedContactFields(event), storedContactRule(event), given);
+}
+
+function contactRefusal(response, check) {
+  const extra = {};
+  if (check.field) {
+    extra.field = check.field;
+  }
+  return fail(response, 400, check.error, extra);
+}
+
+async function writeContact(eventId, userId, contact) {
+  const { error } = await database()
+    .from(TABLES.attendees)
+    .update({ contact })
+    .eq('event_id', eventId)
+    .eq('user_id', userId);
+  if (error) {
+    throw error;
+  }
+}
+
 async function writePayment(eventId, userId, columns) {
   const { error } = await database()
     .from(TABLES.attendees)
@@ -179,6 +213,10 @@ export default route('events/rsvp', async (request, response) => {
   if (body.volunteer !== undefined && typeof body.volunteer !== 'boolean') {
     return fail(response, 400, 'bad_request');
   }
+  if (body.contact !== undefined && (body.contact === null || typeof body.contact !== 'object' || Array.isArray(body.contact))) {
+    return fail(response, 400, 'bad_request');
+  }
+  let contactSent = null;
   let meals = [];
   let lepak = false;
   // A cross-border event (migrations/015) takes a new RSVP only from someone
@@ -209,6 +247,14 @@ export default route('events/rsvp', async (request, response) => {
     // A ticket for the whole event, at an event taking payment online, by
     // someone not already holding one: it needs a method and a tier.
     const before = await attendance(event.id, session.user.id);
+    // Contact details: needed to join; sent with a change, checked too.
+    if (!before.going || body.contact !== undefined) {
+      const check = checkContact(event, body.contact);
+      if (!check.ok) {
+        return contactRefusal(response, check);
+      }
+      contactSent = check.contact;
+    }
     let ticket = null;
     let heldWholeEvent = false;
     if (before.going && before.meals.length === 0 && !before.lepak) {
@@ -237,6 +283,9 @@ export default route('events/rsvp', async (request, response) => {
     }
     if (ticket && (result === 'ok' || result === 'changed')) {
       await writePayment(event.id, session.user.id, ticket.columns);
+    }
+    if (contactSent !== null) {
+      await writeContact(event.id, session.user.id, contactSent);
     }
     // From the whole event to just meals or lepak: a payment not yet
     // confirmed is dropped, screenshot and all. A confirmed one is kept for
@@ -280,6 +329,18 @@ export default route('events/rsvp', async (request, response) => {
       await deletePaymentFiles([before.payment.payment_proof_path]);
     }
     await audit(request, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
+  } else if (body.going === undefined && body.contact !== undefined) {
+    // Just the contact details, from someone going.
+    const before = await attendance(event.id, session.user.id);
+    if (!before.going) {
+      return fail(response, 409, 'not_going');
+    }
+    const check = checkContact(event, body.contact);
+    if (!check.ok) {
+      return contactRefusal(response, check);
+    }
+    await writeContact(event.id, session.user.id, check.contact);
+    await audit(request, { action: 'rsvp.contact_changed', actorId: session.user.id, eventId: event.id, details: { fields: Object.keys(check.contact) } });
   } else {
     return fail(response, 400, 'bad_request');
   }
@@ -300,9 +361,9 @@ export default route('events/rsvp', async (request, response) => {
   ok(response, {
     event: publicEventDetail(shown, {
       signedIn: true,
-      going: body.going === true,
-      meals,
-      lepak,
+      going: mine.going,
+      meals: mine.meals,
+      lepak: mine.lepak,
       rsvpNumber: mine.rsvpNumber,
       canManage: await canEditEvent(session.user, shown.id),
       volunteer: mine.volunteer,
@@ -310,6 +371,7 @@ export default route('events/rsvp', async (request, response) => {
       discount: standing.discount,
       country: session.user.country,
       payment: mine.payment,
+      contact: mine.contact,
     }),
   });
 });

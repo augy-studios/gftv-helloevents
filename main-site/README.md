@@ -85,7 +85,13 @@ the functions with the service role key. No Supabase Auth, no request signing.
   real lists, Google Docs' bold spans become bold, and so on). So a description stays readable
   in dark mode, near-black and near-white text colours and near-white page backgrounds are left
   out (the text follows the theme), and highlighted text gets a colour readable on its highlight;
-  colours chosen on purpose are kept. Pasted pictures are copied into the event's gallery and land
+  colours chosen on purpose are kept. A copy from Discord or Telegram Web keeps its bold,
+  italic, underline, strikethrough, code, links, quotes, lists, headings and line breaks but not
+  the app's theme (its grey-on-dark colours, font and size), as does light grey on dark grey from
+  any dark-themed page; emoji drawn as pictures go in as the emoji (a custom one as its
+  `:name:`), and avatars are left out. Plain text with markdown in it (Discord's "Copy Text")
+  becomes formatting, and web addresses in pasted text become links (Telegram Desktop copies
+  only plain text, a link written out as "text (address)"). Pasted pictures are copied into the event's gallery and land
   where they were: one from another website is fetched by the server
   (`api/_lib/fetch-picture.js`: http(s) only, no private or internal addresses, checked when
   connecting, at most 3 redirects, 15 MB and 12 seconds), one pasted as a file or data by the
@@ -144,8 +150,10 @@ the functions with the service role key. No Supabase Auth, no request signing.
   is kept in the address (`/manage?slug=...#editor`), so a reload reopens it. The form's sections
   are tabs of their own, stuck under the page header while it scrolls: Basics, When and where,
   Price and RSVP, Meals, and Attendees and notes. When a change is refused, the tab holding the
-  field is marked with a dot. Delete (admins only) asks first, and offers "Set to Cancelled
-  instead", which keeps the event and its RSVP list and tells the people going.
+  field is marked with a dot. The event's Status (Draft, Published, Cancelled) and release time
+  are in a Publishing box at the top of Basics, tinted by the status and saying what it means.
+  Delete (admins only) asks first, and offers "Set to Cancelled instead", which keeps the event
+  and its RSVP list and tells the people going.
 - **Event links.** The form's "Event link" field is the event's address (`/e/<link>`), made from
   the title when left blank. A typed link is tidied (lowercase, hyphens) and checked
   (`GET /api/manage/events?checkSlug=`) before it is saved; one another event has is not saved,
@@ -271,6 +279,18 @@ the functions with the service role key. No Supabase Auth, no request signing.
   unless the editor typed other words. Lepak people are going like anyone else (address, RSVP ID,
   reminders), take none of the event's spaces (so a full event still takes them), can tick meals
   too, and have their own cap. Editors see them marked on the attendee list, with a count.
+- **Contact details** (migrations/021, `js/contact-fields.js`). Under Price and RSVP, an editor
+  can ask the people going how to reach them: tick Phone number, Telegram username and Discord
+  username, and add up to five fields of their own, each with a label and the kind of value typed
+  in it (a phone number, an email address, a username, any text). A rule says what people must
+  give: at least one of them (the default), all of them, or none. The RSVP box and the checkout
+  page show the fields, filled in from what the person gave other events (and their linked
+  Telegram), say what is missing or wrong before anything is sent, and the server checks every
+  value again (a Telegram username of 5 to 32 letters, digits and underscores; a Discord
+  username, lowercase; a phone number of 6 to 15 digits; and so on). Someone already going can
+  fill them in or change them from the RSVP box, and is told when the event asks for more than
+  they gave. Only the event's editors see them, on the attendee list, a phone number, email or
+  Telegram username as a link.
 - **Editors of one event** (migrations/018). An admin adds any account active in the last 30 days
   as an editor of a specific event, from that event's Editors tab (admins only). An event editor
   sees only their events on `/manage` (no New event, no staff tools), edits every section and
@@ -329,7 +349,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 020) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 021) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -353,7 +373,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    pages, the edit form and the cover upload read its table and the events' two new columns. Run
    `020_rich_descriptions_stickers.sql` before deploying rich descriptions and sticker packs: it
    allows longer descriptions, adds the sticker tables and creates the private
-   `gftvevents_stickers` Storage bucket.
+   `gftvevents_stickers` Storage bucket. Run `021_contact_details.sql` before deploying contact
+   details: the event pages, RSVPs, checkout, the edit form and the attendee list read its
+   columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

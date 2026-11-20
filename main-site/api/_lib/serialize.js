@@ -47,6 +47,7 @@ import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
 import { galleryImageUrl } from './gallery.js';
 import { displayDescription } from './rich-text.js';
+import { storedContactFields, storedContactRule, storedContact, contactComplete } from '../../js/contact-fields.js';
 import { qrUrl } from './payments.js';
 
 // ---------------------------------------------------------------------------
@@ -185,7 +186,42 @@ export function attendeeView(row, event = {}, standing = {}) {
     volunteered: standing.volunteered === true,
     pastVolunteer: standing.pastVolunteer === true,
     payment: attendeePayment(row),
+    contact: attendeeContact(event, row.contact),
     rsvpAt: row.created_at,
+  };
+}
+
+// The contact details someone gave (migrations/021), for the event's
+// editors: one entry for each of the event's fields they filled in, in the
+// event's order.
+function attendeeContact(event, raw) {
+  const fields = storedContactFields(event);
+  const given = storedContact(fields, raw);
+  return fields
+    .filter((field) => given[field.id] !== undefined)
+    .map((field) => ({ id: field.id, type: field.type, label: field.label, value: given[field.id] }));
+}
+
+// The contact details asked for (migrations/021), for this person: what
+// someone going gave, and whether it is still short of what the event asks
+// (it asked after they RSVPed, or asks more now); for anyone else, what to
+// fill the form in with (viewer.contactSuggest: their linked Telegram, what
+// they gave other events).
+function viewerContact(row, viewer) {
+  const fields = storedContactFields(row);
+  if (viewer.going === true) {
+    const myContact = storedContact(fields, viewer.contact);
+    return { myContact, contactMissing: !contactComplete(fields, storedContactRule(row), myContact) };
+  }
+  return { myContact: storedContact(fields, viewer.contactSuggest), contactMissing: false };
+}
+
+// The contact details an event asks for, for its page: the fields and the
+// rule (js/contact-fields.js); no fields, nothing asked.
+function contactView(row) {
+  return {
+    fields: storedContactFields(row).map((field) => ({ id: field.id, type: field.type, label: field.label })),
+    rule: storedContactRule(row),
   };
 }
 
@@ -762,6 +798,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (viewer.going === true && viewer.payment) {
     myPayment = { method: missingToNull(viewer.payment.payment_method), status: paymentStatusOf(viewer.payment) };
   }
+  const { myContact, contactMissing } = viewerContact(row, viewer);
 
   return {
     ...card,
@@ -784,6 +821,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     tiers: tiersView(row),
     meals: mealsView(row, addressShown),
     lepak: lepakView(row),
+    contact: contactView(row),
     timetable: timetableDetail(row),
     volunteers: volunteersView(row),
     // How people pay, and whether a ticket goes through /checkout.
@@ -800,6 +838,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       volunteered: viewer.volunteered === true,
       volunteerDiscount,
       needsCountry,
+      contact: myContact,
+      contactMissing,
     },
   };
 }
@@ -957,6 +997,8 @@ export function managedEvent(row) {
     lepakEnabled: row.lepak_enabled === true,
     lepakLimit: stringOrBlank(row.lepak_limit),
     lepakLabel: emptyToBlank(row.lepak_label),
+    contactFields: storedContactFields(row),
+    contactRule: storedContactRule(row),
     paymentMethods: storedPaymentMethods(row),
     paymentLink: emptyToBlank(row.payment_link),
     paymentInstructions: emptyToBlank(row.payment_instructions),
@@ -1063,6 +1105,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
       withoutTicket = true;
     }
   }
+  const { myContact, contactMissing } = viewerContact(row, viewer);
 
   return {
     slug: card.slug,
@@ -1080,12 +1123,15 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     paymentQrUrl,
     takesVolunteers: takesVolunteers(row),
     needsCountry,
+    contact: contactView(row),
     viewer: {
       going: viewer.going === true,
       withoutTicket,
       rsvpNumber,
       volunteer,
       payment: mine,
+      contact: myContact,
+      contactMissing,
     },
   };
 }

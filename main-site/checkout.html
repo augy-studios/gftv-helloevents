@@ -93,6 +93,12 @@
                     <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
                 </label>
 
+                <!-- The contact details the event asks for (migrations/021). -->
+                <fieldset class="checkout-step" id="contactStep" hidden>
+                    <legend class="section-label" data-i18n="contact.legend">How the organisers can reach you</legend>
+                    <div id="contactFields"></div>
+                </fieldset>
+
                 <fieldset class="checkout-step" id="methodStep">
                     <legend data-i18n="checkout.method-title">How you will pay</legend>
                     <div class="choice-list" id="methodList" role="radiogroup" aria-label="How you will pay" data-i18n-attr="aria-label:checkout.method-title"></div>

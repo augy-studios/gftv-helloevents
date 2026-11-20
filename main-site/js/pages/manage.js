@@ -45,6 +45,9 @@ import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANG
 import { setTiers, readTiers, startTiers, relabelTiers, addTier, syncTierPayment, TIERS_CHANGED } from '../manage-tiers.js';
 import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
+import { setContact, readContact, startContact, relabelContact, CONTACT_CHANGED } from '../manage-contact.js';
+import { contactText, contactHref } from '../contact-fields.js';
+import { contactLabel } from '../contact-form.js';
 import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, setPaymentProblems, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
 
 const byId = (id) => document.getElementById(id);
@@ -86,6 +89,8 @@ const BLANK = {
   externalUrlLabel: 'tickets_website',
   timetableRooms: [],
   timetableItems: [],
+  contactFields: [],
+  contactRule: 'any',
 };
 
 let currentUser = null;
@@ -296,6 +301,7 @@ function setForm(values) {
   }
   setTimetable(rooms, items);
   setPayment(values);
+  setContact(values);
   fillVolunteerSources(values.volunteerDiscountFrom);
   setCover(values);
   syncDependent();
@@ -484,6 +490,7 @@ function readForm() {
   values.volunteerDiscountFrom = byId('f-volunteerDiscountFrom').value;
   Object.assign(values, readTimetable());
   Object.assign(values, readPayment());
+  Object.assign(values, readContact());
   return values;
 }
 
@@ -572,6 +579,10 @@ function syncDependent() {
   }
   // "Just Lepak Only" is for a paid event; its words and places mean
   // something only while it is on.
+  // What the event's status means, and its colour on the Publishing box.
+  const status = byId('f-status').value;
+  byId('publishBox').dataset.status = status;
+  byId('statusMeaning').textContent = translate(`manage.status-meaning.${status}`);
   byId('lepakNotPaid').hidden = paid;
   byId('lepakFields').hidden = !paid;
   for (const name of ['lepakLabel', 'lepakLimit']) {
@@ -652,7 +663,7 @@ function savesOnChange(element) {
 const DRAFT_CARDS = '.tier-edit-card, .room-row, .timetable-item-card';
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel', 'f-lepakEnabled'].includes(event.target.id)
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel', 'f-lepakEnabled', 'f-status'].includes(event.target.id)
     || event.target.hasAttribute('data-payment-method')) {
     syncDependent();
   }
@@ -717,6 +728,7 @@ form.addEventListener('focusout', (event) => {
 });
 form.addEventListener(LOCATIONS_CHANGED, () => autosave());
 form.addEventListener(MEALS_CHANGED, () => autosave());
+form.addEventListener(CONTACT_CHANGED, () => autosave());
 form.addEventListener(TIERS_CHANGED, () => autosave({ force: true }));
 form.addEventListener(TIMETABLE_CHANGED, () => autosave({ force: true }));
 
@@ -824,6 +836,7 @@ const FIELD_TABS = {
   locations: 'when', locationLabel: 'when', customLabel: 'when', venueName: 'when', venueAddress: 'when', city: 'when', country: 'when', mapsUrl: 'when',
   ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
+  contactFields: 'price', contactLabel: 'price',
   timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
   timetableItems: 'timetable', itemTitle: 'timetable', itemDate: 'timetable', itemStart: 'timetable', itemEnd: 'timetable', itemNote: 'timetable',
 };
@@ -1146,6 +1159,29 @@ function isConvention() {
 // whether they signed up to volunteer and whether they get the volunteer
 // benefit for having volunteered at the earlier convention, and a
 // Volunteered box an editor ticks for the ones who really did.
+// The contact details someone gave (migrations/021), each named, a phone
+// number, email or Telegram username as a link to reach them; null for
+// none.
+function attendeeContact(attendee) {
+  if (!Array.isArray(attendee.contact) || attendee.contact.length === 0) {
+    return null;
+  }
+  const parts = [];
+  for (const entry of attendee.contact) {
+    if (parts.length > 0) {
+      parts.push(' · ');
+    }
+    const text = contactText(entry.type, entry.value);
+    const href = contactHref(entry.type, entry.value);
+    let value = createElement('span', { text });
+    if (href) {
+      value = createElement('a', { class: 'text-link', href, text, target: '_blank', rel: 'noopener noreferrer' });
+    }
+    parts.push(`${contactLabel(entry)}: `, value);
+  }
+  return createElement('span', { class: 'small attendee-contact' }, parts);
+}
+
 function attendeeRow(attendee) {
   let name = attendee.displayName;
   if (!name) {
@@ -1200,6 +1236,7 @@ function attendeeRow(attendee) {
     createElement('span', { class: 'item-main' }, [
       createElement('span', { text: name }),
       createElement('span', { class: 'muted small', text: details.join(' · ') }),
+      attendeeContact(attendee),
     ]),
     ...controls,
     createElement('button', {
@@ -1434,7 +1471,8 @@ byId('cancelInstead').addEventListener('click', async () => {
   closeModal('deleteModal');
   byId('manageNotice').textContent = '';
   byId('f-status').value = 'cancelled';
-  editorTabs.open('price');
+  syncDependent();
+  editorTabs.open('basics');
   await autosave({ force: true });
   // A save already on its way when this was asked saves this straight after.
   while (saving) {
@@ -1472,6 +1510,7 @@ startMeals();
 startTiers({ getEvent: () => editing, onProblems: setPaymentProblems });
 startTimetable();
 startPayment({ getEvent: () => editing });
+startContact();
 startEditors({ getEvent: () => editing });
 
 // The edit form's section tabs, kept out of the address (it already says
@@ -1576,6 +1615,7 @@ onChange(() => {
     renderStatus();
     relabelLocations();
     relabelMeals();
+    relabelContact();
     relabelTiers();
     relabelTimetable();
     fillVolunteerSources(byId('f-volunteerDiscountFrom').value);

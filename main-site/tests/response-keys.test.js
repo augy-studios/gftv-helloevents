@@ -108,10 +108,14 @@ const nest = (name, paths) => [name, ...paths.map((path) => `${name}.${path}`)];
 // A list of objects' paths under a name.
 const listOf = (name, paths) => [name, ...paths.map((path) => `${name}[].${path}`)];
 
+// Maps keyed by the event's own ids, not by names the code chooses: the
+// contact details someone gave, by the event's field ids (migrations/021).
+const KEYED_BY_EVENT = ['event.viewer.contact', 'checkout.viewer.contact'];
+
 // The answer was a success, and its keys are exactly "ok" plus expected.
 function assertKeys(response, expected, opaque = []) {
   assert.equal(response.status, 200, JSON.stringify(response.json));
-  assert.deepEqual(keyPaths(response.json, opaque), [...new Set(['ok', ...expected])].sort());
+  assert.deepEqual(keyPaths(response.json, [...KEYED_BY_EVENT, ...opaque]), [...new Set(['ok', ...expected])].sort());
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +162,8 @@ const DETAIL = [
   ...nest('volunteers', ['wanted', 'discount']),
   ...nest('payment', ['checkout', 'methods']),
   ...nest('lepak', ['offered', 'label', 'limit', 'left']),
-  ...nest('viewer', ['signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status'])]),
+  ...nest('contact', [...listOf('fields', ['id', 'type', 'label']), 'rule']),
+  ...nest('viewer', ['signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status']), 'contact', 'contactMissing']),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
 const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
@@ -179,6 +184,7 @@ const EDITOR = [
   ...listOf('timetableItems', ['title', 'date', 'start', 'end', 'room', 'note']), 'staffNotes',
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
   'lepakEnabled', 'lepakLimit', 'lepakLabel',
+  ...listOf('contactFields', ['id', 'type', 'label']), 'contactRule',
 ];
 const COVER = ['coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop'];
 // The gallery (migrations/019): in the edit form, and on the event page.
@@ -187,6 +193,7 @@ const GALLERY = [...listOf('images', GALLERY_IMAGE), 'limit'];
 const CROP = ['x', 'y', 'width', 'height'];
 const ATTENDEE = [
   'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'lepak', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt',
+  ...listOf('contact', ['id', 'type', 'label', 'value']),
   ...nest('payment', ['method', 'status', 'tier', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
 ];
 // The staff tools under the events on /manage.
@@ -401,6 +408,12 @@ test('a reset for a public account lists its ways back in, and each step answers
 
 // A timetable with a room and an item, and a link, so their keys are pinned
 // too.
+// Contact details asked for (migrations/021): a ready-made field and one of
+// the editor's own; optional, so an RSVP can leave them out.
+const CONTACT_ROWS = {
+  contact_fields: [{ id: 'phone', type: 'phone', label: null }, { id: 'cfur123', type: 'text', label: 'Fursona' }],
+  contact_rule: 'optional',
+};
 const TIMETABLE_ROWS = {
   external_url: 'https://tickets.example.com/',
   timetable_view: 'grid',
@@ -422,6 +435,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
     tiers_enabled: true,
     ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
     ...TIMETABLE_ROWS,
+    ...CONTACT_ROWS,
   });
   addEvent({ slug: 'tba-meet', dates_hidden: true, starts_at: null, price_type: 'free', price_min: null, price_max: null, currency: null });
 
@@ -430,7 +444,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
   assertKeys(await on().call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
 
   const { b } = await member();
-  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true } }), nest('event', DETAIL));
+  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, contact: { phone: '+65 9123 4567' } } }), nest('event', DETAIL));
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, meals: ['lunch'] } }), nest('event', DETAIL));
   assertKeys(await b.call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
   assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber', 'paymentStatus'])]);
@@ -447,12 +461,13 @@ test('a convention with volunteers, and its volunteer benefit, carry only what t
     tiers_enabled: true,
     ticket_tiers: [{ name: 'Basic', price: 10, benefits: ['Entry'], includes_previous: false, previous_display: 'reference' }],
     ...TIMETABLE_ROWS,
+    ...CONTACT_ROWS,
   });
   const { b, id: otterId } = await member();
   db.table('gftvevents_volunteers').push({ event_id: lastYear.id, user_id: otterId, confirmed_by: null, confirmed_at: new Date().toISOString() });
 
   assertKeys(await on().call(detail, { query: { slug: 'mega-con-2026' } }), ['preview', ...nest('event', DETAIL_WITH_DISCOUNT)]);
-  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'mega-con-2026', going: true, volunteer: true } }), nest('event', DETAIL_WITH_DISCOUNT));
+  assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'mega-con-2026', going: true, volunteer: true, contact: { cfur123: 'Otter' } } }), nest('event', DETAIL_WITH_DISCOUNT));
   assertKeys(await b.call(detail, { query: { slug: 'mega-con-2026' } }), ['preview', ...nest('event', DETAIL_WITH_DISCOUNT)]);
 
   const { b: editor } = await staff('editor', { is_editor: true });
@@ -480,6 +495,8 @@ test('the event list, the edit form, attendees and the cover answer only what /m
         timetableView: 'grid',
         timetableRooms: [{ id: 'r-jade1', name: 'Panel 1 Jade', tag: 'Level G' }],
         timetableItems: [{ title: 'Opening', date: '2030-01-01', start: '10:00', end: '11:00', room: 'r-jade1', note: '' }],
+        contactFields: [{ id: 'telegram' }, { id: 'cinsta1', type: 'username', label: 'Instagram' }],
+        contactRule: 'any',
       },
     },
 
@@ -489,8 +506,8 @@ test('the event list, the edit form, attendees and the cover answer only what /m
   assertKeys(await editor.call(manage, { method: 'POST', body: { action: 'update', id, event: { ...made.json.event, title: 'Mega Con Two' } } }), nest('event', EDITOR));
 
   const { b: otter } = await member();
-  await otter.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
-  await editor.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
+  await otter.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, contact: { telegram: '@otter_fox' } } });
+  await editor.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, contact: { cinsta1: 'editor.cat' } } });
   assertKeys(await editor.call(manage), listOf('events', SUMMARY));
   assertKeys(await editor.call(manage, { query: { checkSlug: 'mega-con', id } }), ['free']);
   assertKeys(await editor.call(manage, { query: { id } }), [...nest('event', EDITOR), ...listOf('attendees', ATTENDEE)]);

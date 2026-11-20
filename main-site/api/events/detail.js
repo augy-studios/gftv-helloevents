@@ -11,7 +11,7 @@
 import { route, guard, ok, fail, query } from '../_lib/http.js';
 import { currentSession } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
-import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
+import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, contactSuggestion, eventAsksContact, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
@@ -54,11 +54,15 @@ export default route('events/detail', async (request, response) => {
   await withVolunteerSource(row);
   await withGallery(row);
   await withDescriptionPictures(row);
-  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false };
+  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
   let standing = { volunteered: false, discount: false };
+  let contactSuggest = {};
   if (session) {
     mine = await attendance(row.id, session.user.id);
     standing = await volunteerStanding(row, session.user.id);
+    if (!mine.going && eventAsksContact(row)) {
+      contactSuggest = await contactSuggestion(session.user.id);
+    }
   }
   const event = publicEventDetail(row, {
     signedIn: Boolean(session),
@@ -72,6 +76,8 @@ export default route('events/detail', async (request, response) => {
     discount: standing.discount,
     country: countryOfSession(session),
     payment: mine.payment,
+    contact: mine.contact,
+    contactSuggest,
   });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.

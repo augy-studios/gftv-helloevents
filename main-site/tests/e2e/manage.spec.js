@@ -109,7 +109,13 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await locationField(page, 0, 'country').selectOption(NEW_EVENT.country);
   await openSection(page, 'Price and RSVP');
   await page.locator('#f-capacity').fill(NEW_EVENT.capacity);
+  // The status is first thing under Basics, in the Publishing box.
+  await openSection(page, 'Basics');
+  await expect(page.locator('#publishBox')).toHaveAttribute('data-status', 'draft');
+  await expect(page.locator('#statusMeaning')).toHaveText(/^Only editors can see it/);
   await page.locator('#f-status').selectOption('published');
+  await expect(page.locator('#publishBox')).toHaveAttribute('data-status', 'published');
+  await expect(page.locator('#statusMeaning')).toHaveText(/^Live: anyone can find it/);
   await openSection(page, 'Attendees and notes');
   await page.locator('#f-staffNotes').fill(NEW_EVENT.staffNotes);
   await page.locator('#f-staffNotes').blur();
@@ -226,7 +232,7 @@ test('an event with its times to be confirmed, both descriptions and three locat
   await locationField(page, 2, 'customLabel').fill('Dinner');
   await locationField(page, 2, 'venueName').fill('Tepian Tebrau');
   // A pick from a list saves at once.
-  await openSection(page, 'Price and RSVP');
+  await openSection(page, 'Basics');
   await page.locator('#f-status').selectOption('published');
   await expect(status(page)).toHaveText(SAVED);
 
@@ -399,8 +405,9 @@ test('an admin asked to delete an event can set it to Cancelled instead', async 
   await dialog.getByRole('button', { name: 'Set to Cancelled instead' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('#manageNotice')).toHaveText('The event is now cancelled.');
-  await expect(page.locator('#epanel-price')).toBeVisible();
+  await expect(page.locator('#epanel-basics')).toBeVisible();
   await expect(page.locator('#f-status')).toHaveValue('cancelled');
+  await expect(page.locator('#publishBox')).toHaveAttribute('data-status', 'cancelled');
   await expect(status(page)).toHaveText(SAVED);
   // Still there, and offered no second time.
   await page.locator('#editorDelete').click();

@@ -4,6 +4,7 @@
 // Pure functions, no database, so tests/unit.test.js can run them directly.
 
 import { cleanDescription } from './rich-text.js';
+import { readContactFields, readContactRule } from '../../js/contact-fields.js';
 
 export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
@@ -1582,6 +1583,30 @@ function readLepak(body, fields) {
   return null;
 }
 
+// The contact details the event asks the people going for
+// (migrations/021, js/contact-fields.js): the fields and the rule. With
+// neither field at all the stored ones are kept, so a page from before
+// cannot wipe them.
+function readContact(body, fields) {
+  if (body.contactFields === undefined && body.contactRule === undefined) {
+    return null;
+  }
+  const read = readContactFields(body.contactFields);
+  if (!read.ok) {
+    if (Number.isInteger(read.index)) {
+      fields.badContact = read.index;
+    }
+    return read.field;
+  }
+  const rule = readContactRule(body.contactRule);
+  if (rule === null) {
+    return 'contactRule';
+  }
+  fields.contact_fields = read.fields;
+  fields.contact_rule = rule;
+  return null;
+}
+
 // Whether an event takes lepak RSVPs: a paid event with it switched on.
 export function lepakOffered(row) {
   if (!row || row.lepak_enabled !== true) {
@@ -1881,7 +1906,7 @@ export function itemTimes(item, timeZone) {
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readLepak, readCapacity, readMeals, readVolunteers, readTimetable];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readLepak, readContact, readCapacity, readMeals, readVolunteers, readTimetable];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
@@ -1914,6 +1939,9 @@ export function validateEvent(input) {
       }
       if (fields.badItem !== undefined) {
         problem.item = fields.badItem;
+      }
+      if (fields.badContact !== undefined) {
+        problem.contact = fields.badContact;
       }
       return problem;
     }

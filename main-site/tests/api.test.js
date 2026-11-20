@@ -305,7 +305,7 @@ test('someone can come only for the meals an event offers, change their choice, 
 
   const going = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['m-tea123', 'lunch'] } });
   assert.equal(going.status, 200);
-  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, lepak: false, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, volunteered: false, volunteerDiscount: false, needsCountry: false, payment: { method: null, status: 'none' } });
+  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, lepak: false, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, volunteered: false, volunteerDiscount: false, needsCountry: false, payment: { method: null, status: 'none' }, contact: {}, contactMissing: false });
   assert.equal(going.json.event.going, 0, 'a meal-only attendee takes no space');
 
   const changed = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['dinner'] } });

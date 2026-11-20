@@ -148,6 +148,15 @@
                             </div>
                             <p class="small muted" id="rsvpMealsHint" hidden data-i18n="event.meals-pick-one">Tick at least one meal.</p>
                         </fieldset>
+                        <!-- The contact details the event asks for (migrations/021,
+                             js/contact-form.js). -->
+                        <fieldset class="rsvp-contact" id="rsvpContact" hidden>
+                            <legend data-i18n="contact.legend">How the organisers can reach you</legend>
+                            <p class="callout warn small" id="rsvpContactMissing" hidden data-i18n="contact.missing">The organisers ask how to reach you. Fill this in, then save it.</p>
+                            <div id="rsvpContactFields"></div>
+                            <button class="btn btn-small" type="button" id="rsvpContactSave" hidden><span data-icon="check"></span><span data-i18n="contact.save">Save my contact details</span></button>
+                            <p class="small muted" id="rsvpContactSaved" role="status" hidden data-i18n="contact.saved">Saved.</p>
+                        </fieldset>
                         <label class="check rsvp-volunteer" id="rsvpVolunteerRow" hidden>
                             <input type="checkbox" id="rsvpVolunteer">
                             <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>

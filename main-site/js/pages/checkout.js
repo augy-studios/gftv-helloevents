@@ -13,13 +13,14 @@
 // an editor confirms it, they can report again or pay another way.
 
 import { session } from '../app.js';
-import { t as translate, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, withBusy, errorText } from '../ui.js';
 import { iconNode } from '../icons.js';
 import { whenText, formatMoney, tierPriceText } from '../format.js';
 import { proofPicture } from '../picture-file.js';
 import { startTours } from '../tour.js';
+import { drawContactForm } from '../contact-form.js';
 
 const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -32,6 +33,10 @@ let checkout = null;
 // method.
 let pickedTicket = 0;
 let pickedMethod = null;
+// The contact details form (migrations/021), and what it was drawn for, so
+// a re-render keeps what is being typed.
+let contactForm = null;
+let contactDrawn = '';
 // The screenshot chosen for the report, as a data: URL, or null.
 let proof = null;
 
@@ -190,8 +195,30 @@ function renderOrderBox() {
   }
   renderTickets();
   byId('volunteerRow').hidden = !checkout.takesVolunteers;
+  renderContact();
   renderMethods();
   renderOrder();
+}
+
+// The contact details the event asks for, sent with the ticket.
+function renderContact() {
+  const asked = checkout.contact.fields.length > 0;
+  byId('contactStep').hidden = !asked;
+  if (!asked) {
+    contactForm = null;
+    return;
+  }
+  const drawFor = JSON.stringify([checkout.contact, checkout.viewer.contact, getLocale()]);
+  if (drawFor === contactDrawn && contactForm) {
+    return;
+  }
+  contactDrawn = drawFor;
+  contactForm = drawContactForm(byId('contactFields'), {
+    fields: checkout.contact.fields,
+    rule: checkout.contact.rule,
+    values: checkout.viewer.contact,
+    idPrefix: 'checkoutContact',
+  });
 }
 
 // The payment's state in words, and its tone.
@@ -325,6 +352,9 @@ async function reserve() {
   if (checkout.takesVolunteers) {
     body.volunteer = byId('volunteerPick').checked;
   }
+  if (contactForm) {
+    body.contact = contactForm.read();
+  }
   await post('/api/events/rsvp', body);
   await load();
   window.scrollTo({ top: 0 });
@@ -352,6 +382,14 @@ byId('methodList').addEventListener('change', (changed) => {
 });
 
 byId('reserveBtn').addEventListener('click', () => {
+  // The contact details asked for are checked before anything is sent.
+  if (contactForm) {
+    const problem = contactForm.check();
+    if (problem) {
+      byId('reserveError').textContent = problem;
+      return;
+    }
+  }
   withBusy(byId('reserveBtn'), byId('reserveError'), reserve);
 });
 

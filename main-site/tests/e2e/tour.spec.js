@@ -127,7 +127,7 @@ test('the Manage tour covers the tabs each role has', async ({ page }) => {
   // An editor cannot delete, so that step is left out.
   await expect(dots(page)).toHaveCount(3);
   await finish(page);
-  await expect(text(page)).toHaveText(/^The event's address/);
+  await expect(text(page)).toHaveText(/^Draft, Published or Cancelled/);
   await finish(page);
   expect(await seen(page)).toEqual(['manage', 'hint', 'manage.events', 'manage.editor', 'editor.basics']);
 });

@@ -59,6 +59,7 @@ const BLOCKISH = new Set([
   'p', 'div', 'section', 'article', 'header', 'footer', 'main', 'aside', 'nav', 'center', 'address',
   'figure', 'figcaption', 'dd', 'dt', 'dl', 'form', 'fieldset', 'details', 'summary', 'legend', 'body', 'html',
 ]);
+const CODE_TAGS = new Set(['code', 'kbd', 'samp', 'tt']);
 const HEADINGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 // Elements that start a new block wherever they are.
 const BLOCK_LEVEL = new Set([...BLOCKISH, ...HEADINGS, 'pre', 'blockquote', 'ul', 'ol', 'li', 'table', 'hr', 'tr', 'td', 'th', 'tbody', 'thead', 'tfoot']);
@@ -168,6 +169,439 @@ export function looksRich(value) {
   return RICH_START.test(String(value));
 }
 
+// ---------------------------------------------------------------------------
+// Pastes from chat apps: Discord and Telegram
+//
+// What each puts on the clipboard:
+//   - Discord and Telegram Web, a selection copied: HTML in the app's own
+//     markup, with the browser's copy of its theme on it (light grey text
+//     on dark grey, in the app's font), emoji as pictures with the emoji as
+//     their alt text, and a message's line breaks as newlines in text that
+//     keeps its white space (white-space: pre-wrap);
+//   - Discord's "Copy Text": the message's markdown, as plain text;
+//   - Telegram Desktop: plain text only (its formatting stays inside
+//     Telegram), a link written out as "text (address)".
+// So, when pasting: HTML from a chat app loses the theme's colours, fonts
+// and sizes (neither app lets a message choose them) but keeps its bold,
+// italic, underline, strikethrough, code, links, quotes, lists and
+// headings; emoji pictures from anywhere go in as the emoji themselves (or
+// a custom emoji as its :name:), not as gallery pictures; avatars are left
+// out; and plain text with markdown in it (markdownToHtml) is read as
+// formatting, with web addresses turned into links.
+// ---------------------------------------------------------------------------
+
+const DISCORD_MARKS = /\bsrc="https?:\/\/(?:[\w-]+\.)*discord(?:app)?\.(?:com|net)\/|\bclass="[^"]*\b(?:markup|messageContent|blockquoteContainer|inlineCode|codeContainer|emojiContainer|spoilerContent|messageListItem)[_-]|gg (?:sans|mono)/i;
+const TELEGRAM_MARKS = /\bsrc="https?:\/\/web\.telegram\.org\/|data-entity-type="?MessageEntity|\bclass="[^"]*\b(?:text-entity-\w+|translatable-message|spoilers-container|custom-emoji)\b/i;
+
+// Which chat app pasted HTML was copied from: 'discord', 'telegram' or ''.
+export function pasteSource(html) {
+  const text = String(html).slice(0, MAX_HTML * 10);
+  if (DISCORD_MARKS.test(text)) {
+    return 'discord';
+  }
+  if (TELEGRAM_MARKS.test(text)) {
+    return 'telegram';
+  }
+  return '';
+}
+
+// Text that is only emoji: every character part of one, and at least one
+// that is a picture (not just a digit or a #).
+const EMOJI_CHARACTERS = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|⃣)+$/u;
+const EMOJI_PICTURE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u;
+
+function emojiOnly(text) {
+  if (!EMOJI_CHARACTERS.test(text)) {
+    return false;
+  }
+  return EMOJI_PICTURE.test(text);
+}
+
+const MARKDOWN_MAX = 50000;
+const MARKDOWN_LINE_MAX = 4000;
+const MARKDOWN_DEPTH = 8;
+const FENCE_LINE = /^\s*```/;
+const HEADING_LINE = /^(#{1,3}) +(\S.*)$/;
+const SUBTEXT_LINE = /^-# +(\S.*)$/;
+const QUOTE_LINE = /^> |^>$/;
+const QUOTE_REST = /^>>> ?(.*)$/;
+const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)]) +(\S.*)$/;
+// Longest first, so *** is not read as ** and *.
+const MARKDOWN_PAIRS = [
+  ['***', '<strong><em>', '</em></strong>'],
+  ['___', '<u><em>', '</em></u>'],
+  ['**', '<strong>', '</strong>'],
+  ['__', '<u>', '</u>'],
+  ['~~', '<s>', '</s>'],
+  // A spoiler: shown as its text.
+  ['||', '', ''],
+  ['*', '<em>', '</em>'],
+  ['_', '<em>', '</em>'],
+];
+const MARKDOWN_ESCAPABLE = '\\*_~`|[]()<>#-.!:';
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+const BARE_ADDRESS = /https?:\/\/[^\s<>]+/iy;
+const MASKED_LINK = /\[([^[\]\n]+)\]\(<?(https?:\/\/[^\s()<>]+(?:\([^\s()<>]*\)[^\s()<>]*)*)>?\)/iy;
+const ANGLE_ADDRESS = /<(https?:\/\/[^\s<>]+)>/iy;
+// Discord's own: a custom emoji, and a timestamp (shown in the reader's
+// time).
+const CUSTOM_EMOJI = /<a?:(\w{2,32}):\d{5,25}>/y;
+const TIMESTAMP = /<t:(-?\d{1,13})(?::[tTdDfFR])?>/y;
+
+// Plain text with Discord's markdown (which Telegram's mostly shares) as
+// HTML for the paste cleaner: # headings, > and >>> quotes, - and 1. lists,
+// ``` code blocks, **bold**, *italic* or _italic_, __underline__,
+// ~~strikethrough~~, `code`, ||spoilers||, [masked](https://links) and bare
+// web addresses as links. Text with none of that gives null (it is pasted
+// as plain text, as it always was).
+export function markdownToHtml(text) {
+  const source = String(text).replace(/\r\n?/g, '\n');
+  if (source.length > MARKDOWN_MAX) {
+    return null;
+  }
+  const html = markdownBlocks(source.split('\n'), false);
+  if (html === plainToHtml(source)) {
+    return null;
+  }
+  return html;
+}
+
+function markdownBlocks(lines, inQuote) {
+  let html = '';
+  let paragraph = [];
+  const flush = () => {
+    if (paragraph.join('').trim() !== '') {
+      html += `<p>${paragraph.map(markdownInline).join('<br>')}</p>`;
+    }
+    paragraph = [];
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === '') {
+      flush();
+      continue;
+    }
+    if (FENCE_LINE.test(line)) {
+      const fenced = codeFence(lines, index);
+      if (fenced) {
+        flush();
+        html += fenced.html;
+        index = fenced.end;
+        if (fenced.rest) {
+          paragraph.push(fenced.rest);
+        }
+        continue;
+      }
+    }
+    let match = HEADING_LINE.exec(line);
+    if (match) {
+      flush();
+      const level = match[1].length;
+      html += `<h${level}>${markdownInline(match[2])}</h${level}>`;
+      continue;
+    }
+    match = SUBTEXT_LINE.exec(line);
+    if (match) {
+      paragraph.push(match[1]);
+      continue;
+    }
+    if (!inQuote) {
+      match = QUOTE_REST.exec(line);
+      if (match) {
+        flush();
+        const inner = markdownBlocks([match[1], ...lines.slice(index + 1)], true);
+        if (inner) {
+          html += `<blockquote>${inner}</blockquote>`;
+        }
+        break;
+      }
+      if (QUOTE_LINE.test(line)) {
+        flush();
+        const quoted = [];
+        while (index < lines.length && QUOTE_LINE.test(lines[index])) {
+          quoted.push(lines[index].replace(/^> ?/, ''));
+          index += 1;
+        }
+        index -= 1;
+        const inner = markdownBlocks(quoted, true);
+        if (inner) {
+          html += `<blockquote>${inner}</blockquote>`;
+        }
+        continue;
+      }
+    }
+    if (LIST_LINE.test(line)) {
+      flush();
+      const items = [];
+      while (index < lines.length) {
+        const item = LIST_LINE.exec(lines[index]);
+        if (!item) {
+          break;
+        }
+        items.push({
+          indent: item[1].replace(/\t/g, '    ').length,
+          ordered: /\d/.test(item[2]),
+          number: parseInt(item[2], 10),
+          text: item[3],
+        });
+        index += 1;
+      }
+      index -= 1;
+      html += markdownList(items);
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flush();
+  return html;
+}
+
+// A ``` code block starting on lines[start]: { html, end (its last line),
+// rest (text after the closing ```) }, or null when it is never closed.
+function codeFence(lines, start) {
+  const opening = lines[start].replace(/^\s*```/, '');
+  const closesHere = opening.indexOf('```');
+  if (closesHere >= 0) {
+    return { html: codeBlock([opening.slice(0, closesHere)]), end: start, rest: opening.slice(closesHere + 3).trim() };
+  }
+  const code = [];
+  // ```js names the language; the code starts on the next line.
+  if (!/^[\w+#.-]*$/.test(opening.trim())) {
+    code.push(opening);
+  }
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const close = lines[index].indexOf('```');
+    if (close >= 0) {
+      code.push(lines[index].slice(0, close));
+      return { html: codeBlock(code), end: index, rest: lines[index].slice(close + 3).trim() };
+    }
+    code.push(lines[index]);
+  }
+  return null;
+}
+
+function codeBlock(code) {
+  const lines = [...code];
+  while (lines.length > 0 && lines[0].trim() === '') {
+    lines.shift();
+  }
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+  if (lines.length === 0) {
+    return '';
+  }
+  return `<pre><code>${escapeText(lines.join('\n'))}</code></pre>`;
+}
+
+// Markdown list lines as lists, nested by their indent.
+function markdownList(items) {
+  let html = '';
+  const open = [];
+  for (const item of items) {
+    let tag = 'ul';
+    if (item.ordered) {
+      tag = 'ol';
+    }
+    let start = '';
+    if (tag === 'ol' && item.number > 1 && item.number < 100000) {
+      start = ` start="${item.number}"`;
+    }
+    const text = markdownInline(item.text);
+    while (open.length > 0 && item.indent < open[open.length - 1].indent) {
+      html += `</li></${open.pop().tag}>`;
+    }
+    const top = open[open.length - 1];
+    if (!top || item.indent > top.indent) {
+      html += `<${tag}${start}><li>${text}`;
+      open.push({ indent: item.indent, tag });
+    } else if (top.tag !== tag) {
+      html += `</li></${open.pop().tag}><${tag}${start}><li>${text}`;
+      open.push({ indent: item.indent, tag });
+    } else {
+      html += `</li><li>${text}`;
+    }
+  }
+  while (open.length > 0) {
+    html += `</li></${open.pop().tag}>`;
+  }
+  return html;
+}
+
+function markdownInline(line) {
+  if (line.length > MARKDOWN_LINE_MAX) {
+    return escapeText(line);
+  }
+  return markdownSpan(line, 0);
+}
+
+// A web address found in text, without the punctuation after it (the full
+// stop ending a sentence, the bracket around it, the ** of bold around it).
+function trimAddress(address) {
+  let trimmed = address;
+  for (;;) {
+    const last = trimmed[trimmed.length - 1];
+    if ('.,;:!?\'"*_~|'.includes(last)) {
+      trimmed = trimmed.slice(0, -1);
+    } else if (last === ')' && (trimmed.match(/\(/g) || []).length < (trimmed.match(/\)/g) || []).length) {
+      trimmed = trimmed.slice(0, -1);
+    } else {
+      return trimmed;
+    }
+  }
+}
+
+function markdownLink(address, label) {
+  return `<a href="${escapeAttribute(address)}">${label}</a>`;
+}
+
+// Where the mark closing one opened at start is, or -1.
+function closingMark(text, start, mark) {
+  const from = start + mark.length;
+  let single = false;
+  if (mark === '*' || mark === '_') {
+    single = true;
+  }
+  if (from >= text.length || /\s/.test(text[from])) {
+    return -1;
+  }
+  // A single * or _ inside a word (2*3*4, snake_case_name) is not italic.
+  if (single && start > 0 && LETTER_OR_DIGIT.test(text[start - 1])) {
+    return -1;
+  }
+  let at = text.indexOf(mark, from + 1);
+  while (at >= 0) {
+    let fits = !/\s/.test(text[at - 1]);
+    if (single) {
+      const after = text[at + 1];
+      if (text[at - 1] === mark || after === mark || (after !== undefined && LETTER_OR_DIGIT.test(after))) {
+        fits = false;
+      }
+    }
+    if (fits) {
+      return at;
+    }
+    at = text.indexOf(mark, at + 1);
+  }
+  return -1;
+}
+
+function stickyMatch(pattern, text, index) {
+  pattern.lastIndex = index;
+  return pattern.exec(text);
+}
+
+function markdownSpan(text, depth) {
+  if (depth > MARKDOWN_DEPTH) {
+    return escapeText(text);
+  }
+  let html = '';
+  let plain = '';
+  const emit = (piece) => {
+    html += escapeText(plain) + piece;
+    plain = '';
+  };
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === '\\' && index + 1 < text.length && MARKDOWN_ESCAPABLE.includes(text[index + 1])) {
+      plain += text[index + 1];
+      index += 2;
+      continue;
+    }
+    if (char === '`') {
+      const run = /`+/y;
+      run.lastIndex = index;
+      const ticks = run.exec(text)[0];
+      const close = text.indexOf(ticks, index + ticks.length);
+      if (close > index + ticks.length) {
+        let code = text.slice(index + ticks.length, close);
+        if (code.length > 2 && code.startsWith(' ') && code.endsWith(' ')) {
+          code = code.slice(1, -1);
+        }
+        emit(`<code>${escapeText(code)}</code>`);
+        index = close + ticks.length;
+      } else {
+        plain += ticks;
+        index += ticks.length;
+      }
+      continue;
+    }
+    if (char === '[') {
+      const link = stickyMatch(MASKED_LINK, text, index);
+      if (link) {
+        emit(markdownLink(link[2], markdownSpan(link[1], depth + 1)));
+        index += link[0].length;
+        continue;
+      }
+    }
+    if (char === '<') {
+      const angle = stickyMatch(ANGLE_ADDRESS, text, index);
+      if (angle) {
+        emit(markdownLink(angle[1], escapeText(angle[1])));
+        index += angle[0].length;
+        continue;
+      }
+      const custom = stickyMatch(CUSTOM_EMOJI, text, index);
+      if (custom) {
+        plain += `:${custom[1]}:`;
+        index += custom[0].length;
+        continue;
+      }
+      const time = stickyMatch(TIMESTAMP, text, index);
+      if (time) {
+        const when = new Date(Number(time[1]) * 1000);
+        if (Number.isNaN(when.getTime())) {
+          plain += time[0];
+        } else {
+          plain += when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        }
+        index += time[0].length;
+        continue;
+      }
+    }
+    if ((char === 'h' || char === 'H') && (index === 0 || !LETTER_OR_DIGIT.test(text[index - 1]))) {
+      const bare = stickyMatch(BARE_ADDRESS, text, index);
+      if (bare) {
+        const address = trimAddress(bare[0]);
+        if (/^https?:\/\/[^/?#]+/i.test(address)) {
+          emit(markdownLink(address, escapeText(address)));
+          index += address.length;
+          continue;
+        }
+      }
+    }
+    if ('*_~|'.includes(char)) {
+      let matched = false;
+      for (const [mark, open, close] of MARKDOWN_PAIRS) {
+        if (!text.startsWith(mark, index)) {
+          continue;
+        }
+        const end = closingMark(text, index, mark);
+        if (end > 0) {
+          emit(`${open}${markdownSpan(text.slice(index + mark.length, end), depth + 1)}${close}`);
+          index = end + mark.length;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // The whole run of marks is text: none of them opens anything.
+        let end = index;
+        while (text[end] === char) {
+          end += 1;
+        }
+        plain += text.slice(index, end);
+        index = end;
+      }
+      continue;
+    }
+    plain += char;
+    index += 1;
+  }
+  return html + escapeText(plain);
+}
+
 // An attribute's value as a string, '' when it is not there.
 function attrText(adapter, node, name) {
   const value = adapter.attr(node, name);
@@ -274,6 +708,23 @@ function highlightColour(value) {
     return '';
   }
   return hex(colour);
+}
+
+// Whether text in colour on background (both #rrggbb) is a dark theme's:
+// light grey on dark grey.
+function darkTheme(colour, background) {
+  const text = parseColour(colour);
+  const behind = parseColour(background);
+  if (!text || !behind) {
+    return false;
+  }
+  if (colourfulness(text) >= 0.15 || lightness(text) <= 0.3) {
+    return false;
+  }
+  if (colourfulness(behind) >= 0.15) {
+    return false;
+  }
+  return lightness(behind) < 0.1;
 }
 
 // Text that can be read on a highlight colour (#rrggbb).
@@ -399,7 +850,7 @@ function inlineFormats(tag, element, adapter) {
     formats.sup = true;
   } else if (tag === 'mark') {
     span.background = '#ffff00';
-  } else if (tag === 'code' || tag === 'kbd' || tag === 'samp' || tag === 'tt') {
+  } else if (CODE_TAGS.has(tag)) {
     span.font = 'monospace';
   } else if (tag === 'font') {
     const colour = adapter.attr(element, 'color');
@@ -599,6 +1050,82 @@ export function cleanRichTree(root, adapter, options = {}) {
     headingMap = PASTED_HEADING;
   }
   const stats = { textLength: 0, pictures: 0, galleryIds: new Set(), stickerIds: new Set() };
+  // A paste from a chat app (pasteSource), whose colours, fonts and sizes
+  // are its theme.
+  let chat = '';
+  if (mode === 'paste' && (options.source === 'discord' || options.source === 'telegram')) {
+    chat = options.source;
+  }
+
+  // An element's inline formats and span (inlineFormats), as this paste
+  // keeps them.
+  function formatsOf(tag, node) {
+    const found = inlineFormats(tag, node, adapter);
+    if (mode !== 'paste') {
+      return found;
+    }
+    if (chat) {
+      // Only code keeps a font of its own: monospace.
+      const span = {};
+      if (CODE_TAGS.has(tag)) {
+        span.font = 'monospace';
+      }
+      return { formats: found.formats, span };
+    }
+    // A copy from any dark-themed page: light grey text on a dark grey
+    // background is the page's theme, not a highlight.
+    const { span } = found;
+    if (span.colour && span.background && parseStyle(adapter.attr(node, 'style')).color && darkTheme(span.colour, span.background)) {
+      delete span.colour;
+      delete span.background;
+    }
+    return found;
+  }
+
+  // Whether an element keeps its text's newlines (white-space: pre and
+  // the like), as Discord's and Telegram's messages do.
+  function keepsNewlines(node) {
+    if (mode !== 'paste') {
+      return false;
+    }
+    const value = parseStyle(adapter.attr(node, 'style'))['white-space'];
+    if (!value) {
+      return false;
+    }
+    return /^(pre|pre-wrap|pre-line|break-spaces)$/i.test(value.trim());
+  }
+
+  // An emoji drawn as a picture (Discord's, Telegram Web's, Slack's...) as
+  // the emoji itself, or a custom one as its :name:; null for a picture.
+  function emojiText(element) {
+    if (mode !== 'paste') {
+      return null;
+    }
+    const alt = attrText(adapter, element, 'alt').trim();
+    if (!alt || alt.length > 64) {
+      return null;
+    }
+    if (emojiOnly(alt)) {
+      return alt;
+    }
+    // A custom emoji, marked as an emoji by its class.
+    if (/^:[\w~-]{1,40}:$/.test(alt) && /emoji/i.test(attrText(adapter, element, 'class'))) {
+      return alt;
+    }
+    return null;
+  }
+
+  // A chat app's pictures that are not the message's own: avatars, role
+  // icons, badges.
+  function chatChrome(element) {
+    if (!chat) {
+      return false;
+    }
+    if (/avatar/i.test(attrText(adapter, element, 'class'))) {
+      return true;
+    }
+    return /\/(?:avatars|role-icons|clan-badges|guild-tag-badges|avatar-decoration-presets|app-icons)\//i.test(attrText(adapter, element, 'src'));
+  }
 
   // A picture, as this mode writes it, or ''.
   function picture(element, tag) {
@@ -725,7 +1252,7 @@ export function cleanRichTree(root, adapter, options = {}) {
       let text = adapter.text(node);
       if (inPre) {
         stats.textLength += text.length;
-        return text.split('\n').map(escapeText).join('<br>');
+        return text.replace(/\r\n?/g, '\n').split('\n').map(escapeText).join('<br>');
       }
       text = text.replace(/[\t\n\r\f ]+/g, ' ');
       stats.textLength += text.trim().length;
@@ -744,6 +1271,16 @@ export function cleanRichTree(root, adapter, options = {}) {
     if (tag === 'br') {
       return '<br>';
     }
+    if (tag === 'img') {
+      const emoji = emojiText(node);
+      if (emoji !== null) {
+        stats.textLength += emoji.length;
+        return escapeText(emoji);
+      }
+      if (chatChrome(node)) {
+        return '';
+      }
+    }
     if (tag === 'img' || tag === 'video') {
       return picture(node, tag);
     }
@@ -754,7 +1291,7 @@ export function cleanRichTree(root, adapter, options = {}) {
     // link): its content, on a line of its own.
     if (BLOCK_LEVEL.has(tag)) {
       let preformatted = inPre;
-      if (tag === 'pre') {
+      if (tag === 'pre' || keepsNewlines(node)) {
         preformatted = true;
       }
       const content = inline(adapter.children(node), active, depth + 1, preformatted);
@@ -763,7 +1300,7 @@ export function cleanRichTree(root, adapter, options = {}) {
       }
       return `${content}<br>`;
     }
-    const { formats, span } = inlineFormats(tag, node, adapter);
+    const { formats, span } = formatsOf(tag, node);
     let open = '';
     let close = '';
     const now = { ...active };
@@ -791,7 +1328,11 @@ export function cleanRichTree(root, adapter, options = {}) {
         now.link = true;
       }
     }
-    const content = inline(adapter.children(node), now, depth + 1, inPre);
+    let preformatted = inPre;
+    if (keepsNewlines(node)) {
+      preformatted = true;
+    }
+    const content = inline(adapter.children(node), now, depth + 1, preformatted);
     if (content === '') {
       return '';
     }
@@ -890,7 +1431,13 @@ export function cleanRichTree(root, adapter, options = {}) {
     if (tag === 'hr') {
       return '<hr>';
     }
-    if (HEADINGS.has(tag)) {
+    // Discord's message header (who wrote it, and when) is an <h3>: a
+    // paragraph, not a heading.
+    let chatHeader = false;
+    if (chat === 'discord' && /(^|\s)header[-_]/.test(attrText(adapter, node, 'class'))) {
+      chatHeader = true;
+    }
+    if (HEADINGS.has(tag) && !chatHeader) {
       const content = blockInline(node, depth, false);
       if (!hasContent(content)) {
         return '';
@@ -941,8 +1488,12 @@ export function cleanRichTree(root, adapter, options = {}) {
   // (a <p style="color:..."> or <h2 style="font-size:...">) kept on a span.
   function blockInline(node, depth, inPre) {
     const tag = adapter.tag(node);
-    const { span } = inlineFormats(tag, node, adapter);
-    let content = inline(adapter.children(node), {}, depth + 1, inPre).replace(/^\s+|\s+$/g, '').replace(/(<br>)+$/, '');
+    const { span } = formatsOf(tag, node);
+    let preformatted = inPre;
+    if (keepsNewlines(node)) {
+      preformatted = true;
+    }
+    let content = inline(adapter.children(node), {}, depth + 1, preformatted).replace(/^\s+|\s+$/g, '').replace(/(<br>)+$/, '');
     const styleText = spanStyle(span);
     if (styleText && hasContent(content)) {
       content = `<span style="${escapeAttribute(styleText)}">${content}</span>`;
@@ -987,11 +1538,11 @@ export function cleanRichTree(root, adapter, options = {}) {
         if (adapter.type(child) === 'element' && (adapter.tag(child) === 'ul' || adapter.tag(child) === 'ol')) {
           nestedLists += list(child, adapter.tag(child), { align: '', indent: 0 }, depth + 1);
         } else {
-          content += inlineNode(child, {}, depth + 1, false);
+          content += inlineNode(child, {}, depth + 1, keepsNewlines(item));
         }
       }
       content = content.replace(/^\s+|\s+$/g, '').replace(/(<br>)+$/, '');
-      const { span } = inlineFormats(itemTag, item, adapter);
+      const { span } = formatsOf(itemTag, item);
       const styleText = spanStyle(span);
       if (styleText && hasContent(content)) {
         content = `<span style="${escapeAttribute(styleText)}">${content}</span>`;

@@ -4,6 +4,7 @@
 
 import { database, TABLES } from './supabase.js';
 import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive, lepakOffered, searchGroups } from './event-rules.js';
+import { CONTACT_PRESETS, storedContactFields } from '../../js/contact-fields.js';
 
 // "going" on cards and pages counts the people coming to the whole event,
 // who take its spaces (gftvevents_full_attendees, migrations/009); people
@@ -21,7 +22,7 @@ export const DETAIL_COLUMNS =
   'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers, ' +
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
   'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
-  'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label';
+  'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label, contact_fields, contact_rule';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -136,11 +137,13 @@ export const PAYMENT_COLUMNS =
 // whole event, migrations/007), whether they signed up to volunteer
 // (migrations/012), their RSVP ID for this event (migrations/013) and their
 // payment (migrations/016, the stored row's payment columns, or null when
-// not going): { going, meals, volunteer, rsvpNumber, payment }.
+// not going) and the contact details they gave (migrations/021, as stored:
+// { field id: value }): { going, meals, volunteer, rsvpNumber, payment,
+// lepak, contact }.
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`meals, volunteer, rsvp_number, lepak, ${PAYMENT_COLUMNS}`)
+    .select(`meals, volunteer, rsvp_number, lepak, contact, ${PAYMENT_COLUMNS}`)
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -148,7 +151,7 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false };
+    return { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
@@ -158,7 +161,61 @@ export async function attendance(eventId, userId) {
   if (Number.isInteger(data.rsvp_number)) {
     rsvpNumber = data.rsvp_number;
   }
-  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber, payment: data, lepak: data.lepak === true };
+  let contact = {};
+  if (data.contact && typeof data.contact === 'object') {
+    contact = data.contact;
+  }
+  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber, payment: data, lepak: data.lepak === true, contact };
+}
+
+// Whether an event asks the people going for contact details.
+export function eventAsksContact(row) {
+  return storedContactFields(row).length > 0;
+}
+
+// What to fill an event's contact form in with for someone not yet going
+// (migrations/021): the latest phone number, Telegram and Discord
+// usernames they gave any event, and their linked Telegram account's
+// username when they gave none. { field id: value }, ready-made fields only.
+export async function contactSuggestion(userId) {
+  const suggestion = {};
+  const { data, error } = await database()
+    .from(TABLES.attendees)
+    .select('contact, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) {
+    throw error;
+  }
+  let rows = [];
+  if (Array.isArray(data)) {
+    rows = data;
+  }
+  for (const row of rows) {
+    if (!row.contact || typeof row.contact !== 'object') {
+      continue;
+    }
+    for (const id of CONTACT_PRESETS) {
+      if (suggestion[id] === undefined && typeof row.contact[id] === 'string' && row.contact[id] !== '') {
+        suggestion[id] = row.contact[id];
+      }
+    }
+  }
+  if (suggestion.telegram === undefined) {
+    const { data: link, error: linkError } = await database()
+      .from(TABLES.telegram)
+      .select('telegram_username')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (linkError) {
+      throw linkError;
+    }
+    if (link && typeof link.telegram_username === 'string' && link.telegram_username !== '') {
+      suggestion.telegram = link.telegram_username.replace(/^@/, '');
+    }
+  }
+  return suggestion;
 }
 
 // Adds to an event row the earlier convention whose volunteers get its

@@ -182,6 +182,8 @@ export const TOURS = [
     page: 'manage',
     needs: '#epanel-basics',
     steps: [
+      { el: '.field:has(#f-status)', i18n: 'tour.editor.basics-status' },
+      { el: '.field:has(#f-publishLocal)', i18n: 'tour.editor.basics-release' },
       { el: '.field:has(#f-slug)', i18n: 'tour.editor.basics-slug' },
       { el: 'label:has(> #f-crossBorder)', i18n: 'tour.editor.basics-cross-border' },
       { el: '#descriptionSwitch', i18n: 'tour.editor.basics-descriptions' },
@@ -208,8 +210,7 @@ export const TOURS = [
       { el: '#paymentSection', i18n: 'tour.editor.price-payment' },
       { el: '#lepakSection', i18n: 'tour.editor.price-lepak' },
       { el: '.field:has(#f-capacity)', i18n: 'tour.editor.price-capacity' },
-      { el: '.field:has(#f-status)', i18n: 'tour.editor.price-status' },
-      { el: '.field:has(#f-publishLocal)', i18n: 'tour.editor.price-release' },
+      { el: '#contactSection', i18n: 'tour.editor.price-contact' },
       { el: '#volunteerSection', i18n: 'tour.editor.price-volunteers' },
     ],
   },

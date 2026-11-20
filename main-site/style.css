@@ -1278,6 +1278,22 @@ main.wide > .page-card { margin-inline: auto; }
 /* Volunteering (migrations/012): the tick box sits with the meal choice,
    and the thanks or benefit note under it. */
 .rsvp-volunteer { margin-bottom: 0; }
+/* The contact details an event asks for (js/contact-form.js), with the RSVP
+   and on the checkout page. */
+.rsvp-contact { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0.5rem; }
+.rsvp-contact legend { font-weight: 600; margin-bottom: 0.25rem; }
+.rsvp-contact .field, #contactFields .field { margin-bottom: 0.5rem; }
+.rsvp-contact p, #contactFields p { margin: 0; }
+.rsvp-contact input[aria-invalid="true"], #contactFields input[aria-invalid="true"] { border-color: var(--danger); }
+/* The edit form's contact section (js/manage-contact.js): a row for each of
+   the editor's own fields, its label, its kind and Remove. */
+.contact-presets { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+.contact-custom-list { display: grid; gap: 0.5rem; margin: 0.5rem 0; }
+.contact-custom-list:empty { display: none; }
+.contact-custom-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.contact-custom-row .contact-custom-label { flex: 2 1 12rem; min-width: 0; }
+.contact-custom-row .contact-custom-type { flex: 1 1 9rem; min-width: 0; }
+.attendee-contact { overflow-wrap: anywhere; }
 .rsvp .rsvp-volunteer-note { margin-top: 0; }
 #rsvpMealChecks { display: grid; gap: 0.35rem; }
 .event-aside .actions { margin-top: 0; }
@@ -1529,6 +1545,18 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .tab-mark { color: var(--danger); font-weight: 700; }
 .tab[aria-selected="true"] .tab-mark { color: inherit; }
 .editor-panel > fieldset:first-child { margin-top: 0.75rem; }
+/* Basics' Publishing box (manage.html): the event's status, first thing in
+   the form, tinted by what it is. */
+.editor .publish-box {
+  border: 1px solid var(--warn);
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 0.5rem 1rem 1rem;
+  background: var(--callout-warn-bg);
+}
+.editor .publish-box[data-status="published"] { background: var(--callout-ok-bg); border-color: var(--ok); }
+.editor .publish-box[data-status="cancelled"] { background: var(--callout-danger-bg); border-color: var(--danger); }
+.editor .publish-box #f-status { font-weight: 600; }
 /* on a phone the tabs scroll sideways in one row rather than taking half
    the screen */
 @media (max-width: 640px) {

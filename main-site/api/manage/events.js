@@ -67,7 +67,7 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
 
 // The event columns the attendee list needs: the meals it offers, and its
 // kind and volunteer benefit, for who volunteered.
-const ATTENDEE_EVENT_COLUMNS = 'id, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value';
+const ATTENDEE_EVENT_COLUMNS = 'id, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value, contact_fields';
 
 // The event's attendees in RSVP order, as the edit page lists them, each
 // with the meals they are coming for that the event still offers, and for
@@ -78,7 +78,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, lepak, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, lepak, volunteer, contact, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -314,6 +314,9 @@ async function saveEvent(request, response, body, user) {
     }
     if (check.room !== undefined) {
       detail.room = check.room;
+    }
+    if (check.contact !== undefined) {
+      detail.contact = check.contact;
     }
     return fail(response, 400, check.error, detail);
   }

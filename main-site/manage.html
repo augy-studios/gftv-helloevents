@@ -123,6 +123,28 @@
                 </div>
 
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-basics" aria-labelledby="etab-basics">
+                    <!-- Publishing first, so whether the event is live is
+                         the first thing an editor sees. -->
+                    <fieldset class="publish-box" id="publishBox" data-status="draft">
+                        <legend data-i18n="manage.section.publishing">Publishing</legend>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span data-i18n="manage.field.status">Status</span>
+                                <select id="f-status" name="status" aria-describedby="statusMeaning">
+                                    <option value="draft" data-i18n="status.draft">Draft</option>
+                                    <option value="published" data-i18n="status.published">Published</option>
+                                    <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
+                                </select>
+                                <span class="field-hint" id="statusMeaning" aria-live="polite"></span>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
+                                <input id="f-publishLocal" name="publishLocal" type="datetime-local" aria-describedby="publishLocalHint">
+                                <span class="field-hint" id="publishLocalHint" data-i18n="manage.hint.publishLocal">A published event stays hidden until this time, in the event time zone.</span>
+                            </label>
+                            <p class="field-hint span-2" id="statusStaffOnly" hidden data-i18n="manage.hint.status-staff-only">GFTV staff decide when this event goes live: the Status and release time are theirs to change.</p>
+                        </div>
+                    </fieldset>
                     <fieldset>
                         <legend data-i18n="manage.section.basics">Basics</legend>
                         <div class="form-grid">
@@ -472,25 +494,35 @@
                                 <span data-i18n="manage.field.capacity">Spaces (blank for no limit)</span>
                                 <input id="f-capacity" name="capacity" type="number" min="1" step="1" inputmode="numeric">
                             </label>
-                            <label class="field">
-                                <span data-i18n="manage.field.status">Status</span>
-                                <select id="f-status" name="status">
-                                    <option value="draft" data-i18n="status.draft">Draft</option>
-                                    <option value="published" data-i18n="status.published">Published</option>
-                                    <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
-                                </select>
-                            </label>
                             <label class="check span-2">
                                 <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
                                 <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
                             </label>
-                            <p class="field-hint span-2" id="statusStaffOnly" hidden data-i18n="manage.hint.status-staff-only">GFTV staff decide when this event goes live: the Status and release time are theirs to change.</p>
-                            <label class="field span-2">
-                                <span data-i18n="manage.field.publishLocal">Release time (optional)</span>
-                                <input id="f-publishLocal" name="publishLocal" type="datetime-local">
-                                <span class="field-hint" data-i18n="manage.hint.publishLocal">A published event stays hidden until this time, in the event time zone.</span>
-                            </label>
                         </div>
+                    </fieldset>
+
+                    <!-- Contact details asked of the people going
+                         (migrations/021, js/manage-contact.js). -->
+                    <fieldset id="contactSection">
+                        <legend data-i18n="manage.section.contact">Contact details</legend>
+                        <p class="muted small" data-i18n="manage.contact-lede">Ask the people going how to reach them. Tick any you want, or add your own. Only this event's editors see what they give, on the attendee list.</p>
+                        <div class="contact-presets" role="group" aria-label="Ask for" data-i18n-attr="aria-label:manage.contact-ask">
+                            <label class="check"><input type="checkbox" id="f-contactPhone" data-contact-preset="phone"><span data-i18n="contact.field.phone">Phone number</span></label>
+                            <label class="check"><input type="checkbox" id="f-contactTelegram" data-contact-preset="telegram"><span data-i18n="contact.field.telegram">Telegram username</span></label>
+                            <label class="check"><input type="checkbox" id="f-contactDiscord" data-contact-preset="discord"><span data-i18n="contact.field.discord">Discord username</span></label>
+                        </div>
+                        <div class="contact-custom-list" id="contactCustomList"></div>
+                        <div class="actions inline">
+                            <button class="btn" type="button" id="contactAdd"><span data-icon="plus"></span><span data-i18n="manage.contact-add">Add a field of your own</span></button>
+                        </div>
+                        <label class="field">
+                            <span data-i18n="manage.field.contactRule">The people going must give</span>
+                            <select id="f-contactRule" name="contactRule">
+                                <option value="any" data-i18n="manage.contact-rule.any">At least one of these</option>
+                                <option value="all" data-i18n="manage.contact-rule.all">All of these</option>
+                                <option value="optional" data-i18n="manage.contact-rule.optional">None: they are optional</option>
+                            </select>
+                        </label>
                     </fieldset>
 
                     <fieldset id="volunteerSection">

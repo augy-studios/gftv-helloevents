@@ -42,7 +42,6 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await expect(page.locator('#newEvent')).toBeHidden();
   await expect(page.locator('#tab-signups')).toBeHidden();
   await page.locator('#eventList .item-row .btn').click();
-  await openSection(page, 'Price and RSVP');
   await expect(page.locator('#f-status')).toBeDisabled();
   await expect(page.locator('#statusStaffOnly')).toBeVisible();
   await expect(page.locator('#etab-editors')).toBeHidden();
