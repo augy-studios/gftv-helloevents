@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="checkout.meta-title">Checkout | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Checkout | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/checkout">
+    <link rel="canonical" href="https://events.globalfurry.tv/checkout">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="tourBtn" aria-label="Show me around" title="Show me around" data-i18n-attr="aria-label:tour.button,title:tour.button" hidden>
+                <span data-icon="help"></span>
+            </button>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="wide checkout">
+        <p class="back-link"><a class="text-link" id="backToEvent" href="/"><span data-icon="arrow-left"></span><span data-i18n="checkout.back">Back to the event</span></a></p>
+
+        <section class="glass-card page-card loading-card" id="checkoutLoading" aria-busy="true">
+            <span class="delayed"><span class="spinner"></span></span>
+            <span data-i18n="common.loading">Loading</span>
+        </section>
+
+        <section class="glass-card page-card" id="checkoutMissing" hidden>
+            <div class="page-head">
+                <h1 data-i18n="event.missing-title">Event not found</h1>
+                <p data-i18n="event.missing-lede">It may have moved, or it is not public yet.</p>
+            </div>
+            <div class="actions"><a class="btn btn-primary" href="/" data-i18n="event.back">All events</a></div>
+        </section>
+        <div class="callout danger" id="checkoutError" role="alert"></div>
+
+        <div class="checkout-layout" id="checkoutView" hidden>
+            <header class="glass-card checkout-event">
+                <div class="event-cover checkout-cover" id="checkoutCover"></div>
+                <div>
+                    <span class="eyebrow" data-i18n="checkout.eyebrow">Checkout</span>
+                    <h1 id="checkoutTitle"></h1>
+                    <p class="muted" id="checkoutWhen"></p>
+                </div>
+            </header>
+
+            <!-- Before a ticket: the tier, how to pay, the order, and Reserve. -->
+            <section class="glass-card page-card" id="orderBox" hidden>
+                <fieldset class="checkout-step" id="ticketStep">
+                    <legend data-i18n="checkout.ticket-title">Your ticket</legend>
+                    <div class="choice-list" id="ticketList" role="radiogroup" aria-label="Ticket" data-i18n-attr="aria-label:checkout.ticket-title"></div>
+                    <p class="callout ok small" id="discountNote" hidden data-i18n="checkout.discount-note">You volunteered at an earlier convention, so your benefit is taken off.</p>
+                </fieldset>
+
+                <label class="check checkout-volunteer" id="volunteerRow" hidden>
+                    <input type="checkbox" id="volunteerPick">
+                    <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
+                </label>
+
+                <fieldset class="checkout-step" id="methodStep">
+                    <legend data-i18n="checkout.method-title">How you will pay</legend>
+                    <div class="choice-list" id="methodList" role="radiogroup" aria-label="How you will pay" data-i18n-attr="aria-label:checkout.method-title"></div>
+                </fieldset>
+
+                <section class="order-summary" id="orderSummary" aria-labelledby="orderTitle">
+                    <h2 class="section-label" id="orderTitle" data-i18n="checkout.order-title">Your order</h2>
+                    <dl class="order-lines" id="orderLines"></dl>
+                </section>
+
+                <div class="callout warn small" id="countryNeeded" hidden>
+                    <p data-i18n="event.country-needed">This is a cross-border event. Add your country of origin to your account to RSVP.</p>
+                    <a class="btn btn-small u-mt-1" id="countryLink" href="/account#profile"><span data-icon="globe"></span><span data-i18n="event.country-set">Set my country</span></a>
+                </div>
+                <p class="small muted" id="reserveNote"></p>
+                <button class="btn btn-primary btn-block" type="button" id="reserveBtn"></button>
+                <div class="callout danger" id="reserveError" role="alert"></div>
+            </section>
+
+            <!-- Nothing to buy here: closed, full, over, or no payment online. -->
+            <section class="glass-card page-card" id="closedBox" hidden>
+                <p id="closedText"></p>
+                <div class="actions"><a class="btn" id="closedLink"><span data-icon="arrow-left"></span><span data-i18n="checkout.back">Back to the event</span></a></div>
+            </section>
+
+            <!-- Holding a ticket: where the payment stands, and how to pay. -->
+            <section class="glass-card page-card" id="payBox" hidden>
+                <div class="callout" id="payStatus" role="status"><p id="payStatusText"></p></div>
+                <p class="rsvp-number" id="payNumber" hidden></p>
+                <dl class="order-lines" id="payLines"></dl>
+
+                <div id="payHow" hidden>
+                    <h2 class="section-label" data-i18n="checkout.pay-title">Pay</h2>
+                    <p class="prewrap small" id="payInstructions" hidden></p>
+                    <figure class="pay-qr" id="payQrBox" hidden>
+                        <img id="payQr" alt="Payment QR code" data-i18n-attr="alt:checkout.qr-alt">
+                        <figcaption class="small muted" data-i18n="checkout.qr-help">Scan this with your banking or payment app.</figcaption>
+                    </figure>
+                    <a class="btn btn-primary" id="payLink" target="_blank" rel="noopener noreferrer" hidden><span data-icon="external"></span><span data-i18n="checkout.link-open">Open the payment page</span></a>
+
+                    <form id="reportForm" class="u-mt-1" novalidate>
+                        <h2 class="section-label" data-i18n="checkout.report-title">Done paying? Tell the organisers</h2>
+                        <label class="field">
+                            <span data-i18n="checkout.reference">Payment reference</span>
+                            <input id="payReference" type="text" maxlength="120" autocomplete="off" required aria-describedby="payReferenceHint">
+                            <span class="field-hint" id="payReferenceHint" data-i18n="checkout.reference-hint">The transaction or reference number your bank or app shows.</span>
+                        </label>
+                        <div class="field">
+                            <span data-i18n="checkout.proof">Screenshot of the payment (optional)</span>
+                            <label class="btn file-btn" id="payProofPick"><span data-icon="image"></span><span data-i18n="checkout.proof-choose">Choose a screenshot</span><input type="file" id="payProof" accept="image/*" class="visually-hidden"></label>
+                            <span class="small muted" id="payProofName"></span>
+                            <span class="field-hint" data-i18n="checkout.proof-hint">Only the organisers see it. It is deleted if you take back your RSVP.</span>
+                        </div>
+                        <div class="callout danger" id="reportError" role="alert"></div>
+                        <div class="actions inline"><button class="btn btn-primary" type="submit" id="reportSubmit"><span data-icon="check"></span><span id="reportSubmitText"></span></button></div>
+                    </form>
+                </div>
+
+                <div class="u-mt-1" id="switchBox" hidden>
+                    <h2 class="section-label" data-i18n="checkout.switch-title">Pay another way</h2>
+                    <div class="actions inline" id="switchList"></div>
+                    <div class="callout danger" id="switchError" role="alert"></div>
+                </div>
+                <div class="actions"><a class="btn" id="payBack"><span data-icon="arrow-left"></span><span data-i18n="checkout.back">Back to the event</span></a></div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/checkout.js"></script>
+</body>
+
+</html>

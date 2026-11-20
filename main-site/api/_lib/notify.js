@@ -11,6 +11,10 @@
 //   newEvents  a new event is announced, off by default (cron/notify.js,
 //              once per event, when it is released)
 //
+// Plus one that is not a choice, as it answers something the person did:
+// an editor confirmed the payment for their ticket (migrations/016,
+// sendPaymentConfirmed).
+//
 // Each goes to the account's browsers by Web Push (push.js) and, when the
 // account switched "also send to Telegram" on and has a linked chat, to the
 // Telegram bot as a rich message.
@@ -102,7 +106,30 @@ export function noticeFor(kind, row) {
     const message = 'The timetable changed. See the event page for the latest.';
     return { ...notice, heading: 'Timetable updated', lines: [message], intro: message, tag: `event-${row.slug}` };
   }
+  if (kind === 'paid') {
+    const message = 'Your payment is confirmed. See you there.';
+    return { ...notice, heading: 'Payment confirmed', lines: [message], intro: message, tag: `paid-${row.slug}` };
+  }
   return { ...notice, heading: 'New event', tag: `new-${row.slug}` };
+}
+
+// Tells one person an editor confirmed their payment (migrations/016), by
+// push and, when they asked for notices on Telegram, there. Sent whatever
+// their notice choices, as they are waiting for it; an account that is not
+// active hears nothing. row: the event, with what noticeFor reads.
+export async function sendPaymentConfirmed(row, accountId) {
+  const { data, error } = await database()
+    .from(TABLES.accounts)
+    .select('id, status, notify_telegram')
+    .eq('id', accountId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data || data.status !== 'active') {
+    return 0;
+  }
+  return deliver([data], noticeFor('paid', row));
 }
 
 // The linked Telegram chat of each account that has one, as a Map of

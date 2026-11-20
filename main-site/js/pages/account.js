@@ -14,6 +14,7 @@ import { qrSvg } from '../qr.js';
 import { passkeysSupported, createPasskey, passkeyErrorCode } from '../passkeys.js';
 import { pushSupported, currentSubscription, subscribeDevice, unsubscribeDevice } from '../push-client.js';
 import { startTabs } from '../tabs.js';
+import { startTours } from '../tour.js';
 import { fillCountrySelect } from '../choices.js';
 
 const byId = (id) => document.getElementById(id);
@@ -54,10 +55,10 @@ function renderProfile() {
 }
 
 function renderRsvps() {
-  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber })));
+  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, paymentStatus: rsvp.paymentStatus })));
   byId('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
   byId('pastBox').hidden = rsvps.past.length === 0;
-  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber })));
+  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, paymentStatus: rsvp.paymentStatus })));
 }
 
 // The reminder times' tick boxes, each with its hours before the start.
@@ -223,6 +224,7 @@ async function load() {
   renderRsvps();
   renderNotify();
   renderSecurity();
+  startTours('account');
   // Whether this device is subscribed, after the page is drawn.
   const subscription = await currentSubscription();
   let subscribedHere = false;

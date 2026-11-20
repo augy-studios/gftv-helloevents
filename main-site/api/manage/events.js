@@ -13,6 +13,10 @@
 // POST { action: "volunteer-confirm", id, username, staff, volunteered }
 //                              a convention only: mark that someone going did
 //                              (or did not) volunteer at it (migrations/012)
+// POST { action: "payment-confirm", id, username, staff, paid }
+//                              mark someone's ticket paid, after checking
+//                              their payment (or take that back); telling
+//                              them when it is confirmed (migrations/016)
 //
 // Saving a change to when or where a released event happens, to its
 // timetable, or cancelling it, tells the people going (notify.js), in the
@@ -27,10 +31,11 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
 import { validateEvent, isSlug, volunteerDiscountActive, VOLUNTEER_KIND } from '../_lib/event-rules.js';
-import { MANAGE_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
+import { MANAGE_COLUMNS, PAYMENT_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
-import { background, queueEventChange, sendEventChangeWhenDue } from '../_lib/notify.js';
+import { deletePaymentFiles, proofPaths } from '../_lib/payments.js';
+import { background, queueEventChange, sendEventChangeWhenDue, sendPaymentConfirmed } from '../_lib/notify.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -65,7 +70,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, volunteer, account:${TABLES.accounts} ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts} ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -301,11 +306,13 @@ async function deleteEvent(request, response, body, user) {
   if (!isUuid(body.id)) {
     return fail(response, 400, 'bad_request');
   }
+  // The attendees' payment screenshots go with the event.
+  const proofs = await proofPaths(body.id);
   const { data, error } = await database()
     .from(TABLES.events)
     .delete()
     .eq('id', body.id)
-    .select('id, slug, cover_image_path');
+    .select('id, slug, cover_image_path, payment_qr_path');
   if (error) {
     throw error;
   }
@@ -314,6 +321,7 @@ async function deleteEvent(request, response, body, user) {
   }
   const deleted = data[0];
   await deleteCover(deleted.cover_image_path);
+  await deletePaymentFiles([deleted.payment_qr_path, ...proofs]);
   // event_id is set null on the audit rows by the foreign key, so the slug
   // goes in the details to keep the trail readable.
   await audit(request, { action: 'event.deleted', actorId: user.id, details: { slug: deleted.slug } });
@@ -398,6 +406,7 @@ async function removeAttendee(request, response, body, user) {
   if (!match) {
     return fail(response, 404, 'not_found');
   }
+  const proofs = await proofPaths(body.id, match.user_id);
   for (const table of [TABLES.attendees, TABLES.volunteers]) {
     const { error } = await database()
       .from(table)
@@ -408,6 +417,7 @@ async function removeAttendee(request, response, body, user) {
       throw error;
     }
   }
+  await deletePaymentFiles(proofs);
   await audit(request, { action: 'rsvp.removed_by_editor', actorId: user.id, eventId: body.id, details: { username } });
   return ok(response, { attendees: await loadAttendees(event) });
 }
@@ -454,6 +464,67 @@ async function confirmVolunteer(request, response, body, user) {
     action = 'volunteer.confirmed';
   }
   await audit(request, { action, actorId: user.id, eventId: body.id, details: { username } });
+  return ok(response, { attendees: await loadAttendees(event) });
+}
+
+// "payment-confirm": marks someone's ticket paid (paid: true) once an editor
+// has checked their payment, or takes that back (false: back to waiting for
+// a check, or for payment when nothing was reported). Only a ticket with a
+// payment to make (by link or QR code). Confirming tells them.
+async function confirmPayment(request, response, body, user) {
+  if (!isUuid(body.id) || typeof body.paid !== 'boolean') {
+    return fail(response, 400, 'bad_request');
+  }
+  const username = namedUsername(body);
+  if (!username) {
+    return fail(response, 400, 'bad_request');
+  }
+  const event = await loadEvent(body.id);
+  if (!event) {
+    return fail(response, 404, 'not_found');
+  }
+  const match = await findAttendee(body.id, username, body.staff);
+  if (!match) {
+    return fail(response, 404, 'not_found');
+  }
+  const { data: stored, error } = await database()
+    .from(TABLES.attendees)
+    .select(PAYMENT_COLUMNS)
+    .eq('event_id', body.id)
+    .eq('user_id', match.user_id)
+    .single();
+  if (error) {
+    throw error;
+  }
+  if (!['awaiting', 'submitted', 'paid'].includes(stored.payment_status)) {
+    return fail(response, 400, 'payment_not_online');
+  }
+  let columns;
+  if (body.paid) {
+    columns = { payment_status: 'paid', paid_at: new Date().toISOString(), paid_by: user.id };
+  } else {
+    let status = 'awaiting';
+    if (stored.payment_reference) {
+      status = 'submitted';
+    }
+    columns = { payment_status: status, paid_at: null, paid_by: null };
+  }
+  const { error: saveError } = await database()
+    .from(TABLES.attendees)
+    .update(columns)
+    .eq('event_id', body.id)
+    .eq('user_id', match.user_id);
+  if (saveError) {
+    throw saveError;
+  }
+  let action = 'payment.unconfirmed';
+  if (body.paid) {
+    action = 'payment.confirmed';
+  }
+  await audit(request, { action, actorId: user.id, eventId: body.id, details: { username } });
+  if (body.paid && stored.payment_status !== 'paid') {
+    background(sendPaymentConfirmed(event, match.user_id));
+  }
   return ok(response, { attendees: await loadAttendees(event) });
 }
 
@@ -504,6 +575,10 @@ export default route('manage/events', async (request, response) => {
   }
   if (body.action === 'remove-attendee') {
     await removeAttendee(request, response, body, user);
+    return;
+  }
+  if (body.action === 'payment-confirm') {
+    await confirmPayment(request, response, body, user);
     return;
   }
   if (body.action === 'volunteer-confirm') {

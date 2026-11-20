@@ -20,7 +20,8 @@ export const DETAIL_COLUMNS =
   `${CARD_COLUMNS}, price_note, description, description_zh, venue_address, locations, address_attendees_only, online_url, ` +
   'organiser_name, external_url, meal_options, tiers_enabled, ticket_tiers, ' +
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
-  'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border';
+  'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
+  'payment_methods, payment_link, payment_qr_path, payment_instructions';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -109,14 +110,20 @@ export async function withMealCounts(row) {
   return row;
 }
 
+// The attendee columns that say where someone's payment stands
+// (migrations/016), read by attendance and the attendee list.
+export const PAYMENT_COLUMNS =
+  'payment_method, payment_status, payment_tier, payment_amount, payment_currency, payment_reference, payment_proof_path, payment_submitted_at, paid_at';
+
 // Whether someone is going, the meals they are coming for (empty for the
 // whole event, migrations/007), whether they signed up to volunteer
-// (migrations/012) and their RSVP ID for this event (migrations/013):
-// { going, meals, volunteer, rsvpNumber }.
+// (migrations/012), their RSVP ID for this event (migrations/013) and their
+// payment (migrations/016, the stored row's payment columns, or null when
+// not going): { going, meals, volunteer, rsvpNumber, payment }.
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select('meals, volunteer, rsvp_number')
+    .select(`meals, volunteer, rsvp_number, ${PAYMENT_COLUMNS}`)
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -124,7 +131,7 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [], volunteer: false, rsvpNumber: null };
+    return { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
@@ -134,7 +141,7 @@ export async function attendance(eventId, userId) {
   if (Number.isInteger(data.rsvp_number)) {
     rsvpNumber = data.rsvp_number;
   }
-  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber };
+  return { going: true, meals, volunteer: data.volunteer === true, rsvpNumber, payment: data };
 }
 
 // Adds to an event row the earlier convention whose volunteers get its

@@ -167,6 +167,32 @@ the functions with the service role key. No Supabase Auth, no request signing.
   - editors see each attendee's country (or "Country not given") in the attendee list, with a
     count per country ("From: Singapore 40 · Malaysia 12"). Nobody else sees anyone's country, and
     no other event sends it.
+- **Checkout and payment methods** (migrations/016). Under Price and RSVP, a paid event's Payment
+  section ticks any of: **Pay on the day** (a plain RSVP, no payment page), **Payment link** (the
+  editor pastes it) and **QR code** (the editor uploads a picture, any shape, uncropped; kept as a
+  lossless PNG up to 1200 px so it still scans). With a link or QR code ready, the event page's
+  RSVP button becomes **Get a ticket**, which opens `/checkout?slug=...`: one ticket for the whole
+  event, for the person signed in (a tier, when the event sells tiers), any volunteer benefit taken
+  off, the way to pay, and the order. Reserving by link or QR code takes one of the event's spaces
+  at once (no expiry) and shows the link or QR code (only then: neither goes to anyone else) and
+  the organiser's instructions. The person then reports a payment reference and, if they like, a
+  screenshot (WebP, at most 1600 px), and can report again or pay another way until it is
+  confirmed. Editors see each attendee's tier, amount, method, status and reference, open the
+  screenshot (`api/manage/payment-proof.js`, editors only, never cached), and tick **Paid**, which
+  tells the person by push and Telegram. A ticked method that cannot be offered yet is explained
+  under it, never refused: a link or QR code needs one amount (tiers, or no Up to), the link, or
+  the QR code. People coming just for a meal pay nothing here. Taking back a paid RSVP asks first
+  (refunds are the organisers' business). QR codes and screenshots live in the private
+  `gftvevents_payments` bucket, and a screenshot is deleted when it is replaced or its RSVP goes
+  (taken back, removed by an editor, the event or account deleted).
+- **Page tours** (`js/tour.js`, `js/tours.js`, after `docs/page-tour-spec.md`). The first time
+  someone opens the feed, an event, checkout, their account or `/manage`, the page dims and a
+  chalk arrow points at each thing worth knowing, one line at a time, with Next and Skip. Each tab
+  (and each section of the edit form) has its own short tour the first time it is opened, and
+  steps for things that are not on screen (another role's tabs, an empty list) are left out. The
+  header's **?** button replays the tours for the page and tab on show. What has been seen is kept
+  in `localStorage` (`tour.seen`); the end-to-end tests mark every tour seen unless a test asks
+  otherwise.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
@@ -203,7 +229,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 015) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 016) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -218,6 +244,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    Run `014_timetable.sql` before deploying timetables: the event pages and the edit form read
    its columns. Run `015_link_labels_cross_border.sql` before deploying link labels and
    cross-border events: sign-up, the account page, RSVPs and the event pages read its columns.
+   Run `016_checkout_payments.sql` before deploying checkout: the event pages, RSVPs, the edit
+   form and the attendee list read its columns, and it creates the private `gftvevents_payments`
+   Storage bucket.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

@@ -5,6 +5,7 @@ import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api } from '../api.js';
 import { errorText } from '../ui.js';
 import { eventCard } from '../cards.js';
+import { startTours } from '../tour.js';
 
 const byId = (id) => document.getElementById(id);
 const state = { when: 'upcoming', kind: '', offset: 0, events: [], next: null };
@@ -98,4 +99,5 @@ onChange(() => {
   }
 });
 
-load();
+// The tour once the first page of the feed has drawn (or failed to).
+load().finally(() => startTours('home'));

@@ -20,6 +20,9 @@ export const LIMITS = Object.freeze({
   recover: [5, 3600],
   notifyWrite: [30, 900],
   cover: [30, 3600],
+  // Payment reports and QR code uploads (migrations/016): each can carry a
+  // picture.
+  payment: [20, 3600],
   // Google Maps links read for the edit form (api/manage/place.js), kept
   // well inside Nominatim's one request a second.
   placeLookup: [30, 600],

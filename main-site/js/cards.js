@@ -43,11 +43,15 @@ function metaItem(iconName, text) {
 // "cancelled" or "full"), the title, the summary when there is one, and the
 // when, where, price and how many are going (when anyone is). On the
 // account page's My events, rsvpNumber adds the person's RSVP ID for it
-// (migrations/013).
-export function eventCard(event, { rsvpNumber = null } = {}) {
+// (migrations/013), and paymentStatus a chip while their payment is still
+// to make or to be checked (migrations/016).
+export function eventCard(event, { rsvpNumber = null, paymentStatus = 'none' } = {}) {
   const chips = [createElement('span', { class: `chip kind-${event.kind}`, text: translate(`kind.${event.kind}`) })];
   if (rsvpNumber !== null) {
     chips.push(createElement('span', { class: 'chip chip-rsvp-number', text: translate('event.rsvp-number-chip', { number: rsvpNumber }) }));
+  }
+  if (paymentStatus === 'awaiting' || paymentStatus === 'submitted') {
+    chips.push(createElement('span', { class: 'chip chip-warn', text: translate(`event.payment-chip.${paymentStatus}`) }));
   }
   if (event.cancelled) {
     chips.push(createElement('span', { class: 'chip chip-danger', text: translate('event.state.cancelled') }));

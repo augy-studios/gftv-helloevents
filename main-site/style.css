@@ -32,6 +32,16 @@
      mode the page is in. These two are a print rule, not a theme colour. */
   --qr-fg: #000000;
   --qr-bg: #ffffff;
+  /* The page tours' dim and chalk (js/tour.js) are the same in every theme
+     and mode: the tour reads over a light page or a dark one alike, as
+     page-tour-spec.md asks. The second exception, for the same reason. */
+  --tour-dim: rgba(8, 14, 10, 0.86);
+  --tour-backing: rgba(8, 14, 10, 0.92);
+  --tour-glow: rgba(255, 255, 255, 0.35);
+  --tour-chalk: #f6f1e6;
+  --tour-chalk-faint: rgba(246, 241, 230, 0.4);
+  --tour-ink: #1a221d;
+  --tour-shade: rgba(0, 0, 0, 0.6);
 }
 
 /* one block per colour theme x mode */
@@ -1524,4 +1534,131 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 @media (max-width: 480px) {
   .tab { flex: 1 1 calc(50% - 0.4rem); justify-content: center; }
   .pager .btn { padding-inline: 0.6rem; }
+}
+
+/* checkout (checkout.html, migrations/016): the event, the ticket and how
+   to pay as radio cards, the order, and once a ticket is held, the payment */
+.checkout-layout { display: grid; gap: 1rem; width: 100%; max-width: 40rem; margin-inline: auto; }
+.checkout-layout > .page-card { max-width: none; }
+.checkout-event { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 1rem; align-items: center; padding: 1rem; }
+.checkout-event h1 { font-size: clamp(1.25rem, 3vw, 1.75rem); font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.checkout-cover { border-radius: var(--radius-sm); }
+.checkout-step { border: 0; margin: 0 0 1.25rem; padding: 0; }
+.checkout-step legend,
+.order-summary .section-label {
+  margin-bottom: 0.6rem;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--brand-text);
+}
+.choice-list { display: grid; gap: 0.5rem; }
+.choice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color var(--motion), background var(--motion);
+}
+.choice-card:hover { background: var(--surface-hover); }
+.choice-card:has(input:checked) { border-color: var(--brand-dark); background: var(--surface-active); }
+.choice-card:has(input:focus-visible) { outline: 2px solid var(--brand-dark); outline-offset: 2px; }
+.choice-card input { width: 20px; height: 20px; margin-top: 0.1rem; flex: none; accent-color: var(--brand-dark); }
+.choice-body { display: grid; gap: 0.15rem; flex: 1; min-width: 0; }
+.choice-title { font-weight: 600; overflow-wrap: anywhere; }
+.choice-price { display: grid; justify-items: end; gap: 0.1rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.checkout-volunteer { margin-bottom: 1.25rem; }
+.order-summary { margin: 0 0 1rem; padding: 1rem; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
+.order-lines { display: grid; gap: 0.4rem; }
+.order-lines > div { display: flex; justify-content: space-between; gap: 1rem; }
+.order-lines dt { color: var(--text-muted); }
+.order-lines dd { margin: 0; text-align: end; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.order-lines > div:last-child dd { font-weight: 600; }
+#payLines { margin: 0.75rem 0 1rem; }
+.pay-qr { margin: 0.5rem 0 1rem; display: grid; justify-items: start; gap: 0.4rem; }
+/* The QR code at its own shape; on white, so it scans in dark mode too. */
+.pay-qr img { max-width: min(100%, 18rem); max-height: 24rem; height: auto; padding: 0.6rem; border-radius: var(--radius-sm); background: var(--qr-bg); }
+.rsvp-payment p { margin: 0; }
+.chip-warn { background: var(--callout-warn-bg); color: var(--warn); border-color: transparent; }
+
+/* the edit form's Payment section and the attendee list's payments */
+.payment-methods { display: grid; gap: 0.15rem; margin-bottom: 0.75rem; }
+.payment-indent { padding-inline-start: 1.6rem; }
+.pay-qr-preview img { max-width: 12rem; max-height: 16rem; height: auto; padding: 0.5rem; border-radius: var(--radius-sm); background: var(--qr-bg); }
+.payment-problems { margin: 0; padding-inline-start: 1.75rem; }
+.payment-problems:empty { display: none; }
+.attendee-paid { margin-bottom: 0; font-size: 0.875rem; white-space: nowrap; align-items: center; }
+.attendee-paid input { margin-top: 0; }
+
+@media (max-width: 480px) {
+  .checkout-event { grid-template-columns: 5rem minmax(0, 1fr); }
+}
+
+/* page tours (js/tour.js, docs/page-tour-spec.md): above everything, dialogs
+   and the toast included */
+.tour { position: fixed; inset: 0; z-index: 2000; }
+.tour-hole {
+  position: fixed;
+  border-radius: 18px;
+  box-shadow: 0 0 0 200vmax var(--tour-dim), 0 0 24px 8px var(--tour-glow);
+  transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
+  pointer-events: none;
+}
+.tour-arrow { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.tour-line, .tour-head {
+  fill: none;
+  stroke: var(--tour-chalk);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Drawn in over its own length on each step; the script sets --len. */
+.tour-line { stroke-dasharray: var(--len, 600); stroke-dashoffset: var(--len, 600); }
+.tour-line.drawn { animation: tour-draw 0.6s ease forwards; }
+@keyframes tour-draw { to { stroke-dashoffset: 0; } }
+.tour-skip {
+  position: fixed;
+  top: max(16px, calc(env(safe-area-inset-top) + 12px));
+  left: 16px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 1.05rem;
+  color: var(--tour-chalk);
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+/* Placed by the script: left and top on each step. */
+.tour-card { position: fixed; box-sizing: border-box; width: min(460px, calc(100vw - 24px)); color: var(--tour-chalk); }
+/* No room for an arrow: the card on its own backing, over the lit element. */
+.tour-card.solid { padding: 14px 16px; border-radius: 16px; background: var(--tour-backing); box-shadow: 0 8px 30px var(--tour-shade); }
+.tour-text { margin: 0; font-size: 1.3rem; line-height: 1.35; text-shadow: 0 1px 8px var(--tour-shade); }
+.tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.tour-next {
+  padding: 10px 22px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--tour-ink);
+  background: var(--tour-chalk);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tour-skip:focus-visible, .tour-next:focus-visible { outline: 2px solid var(--tour-chalk); outline-offset: 3px; }
+.tour-dots { display: flex; flex-wrap: wrap; gap: 6px; }
+.tour-dots > span { width: 7px; height: 7px; border-radius: 999px; background: var(--tour-chalk-faint); transition: width 0.2s ease; }
+.tour-dots > .on { width: 20px; background: var(--tour-chalk); }
+html.touring { overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-hole { transition: none; }
+  .tour-line.drawn { animation: none; stroke-dashoffset: 0; }
+  .tour-dots > span { transition: none; }
 }

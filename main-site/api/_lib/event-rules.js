@@ -66,6 +66,8 @@ export const LIMITS = Object.freeze({
   itemTitle: 120,
   itemNote: 300,
   linkLabel: 40,
+  paymentInstructions: 1000,
+  paymentReference: 120,
 });
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -1175,6 +1177,187 @@ export function takesVolunteers(row) {
 }
 
 // ---------------------------------------------------------------------------
+// Payment methods and checkout (migrations/016). A paid event takes payment
+// on the day (onsite), by a link the editor pastes, or by a QR code the
+// editor uploads, any one or more. With link or qr on, getting a ticket goes
+// through /checkout, for one ticket for the whole event; people coming just
+// for a meal pay nothing here.
+// ---------------------------------------------------------------------------
+
+export const PAYMENT_METHODS = ['onsite', 'link', 'qr'];
+// The methods paid outside this site, which a checkout reserves a place for
+// and an editor then checks.
+export const ONLINE_METHODS = ['link', 'qr'];
+export const PAYMENT_STATUSES = ['none', 'awaiting', 'submitted', 'paid'];
+
+// The payment fields: which methods are ticked, the link and the
+// instructions. Ticking a method is never refused, so autosave keeps up
+// with the editor: one that cannot be used yet (no link, no QR code, no
+// single price to pay) is simply not offered at checkout, and the form says
+// why (paymentProblems). The QR code itself is uploaded on its own
+// (api/manage/payment-qr.js). With none of these fields at all the stored
+// ones are kept, so a page from before checkout cannot wipe them.
+function readPayment(body, fields) {
+  const given = ['paymentMethods', 'paymentLink', 'paymentInstructions'].some((name) => body[name] !== undefined);
+  if (!given) {
+    return null;
+  }
+  let methods = body.paymentMethods;
+  if (methods === null || methods === undefined) {
+    methods = [];
+  }
+  if (!Array.isArray(methods) || methods.some((method) => !PAYMENT_METHODS.includes(method))) {
+    return 'paymentMethods';
+  }
+  // In a fixed order, each once.
+  fields.payment_methods = PAYMENT_METHODS.filter((method) => methods.includes(method));
+  const link = httpsUrl(body.paymentLink);
+  if (!link.ok) {
+    return 'paymentLink';
+  }
+  fields.payment_link = link.url;
+  const instructions = cleanText(body.paymentInstructions, LIMITS.paymentInstructions);
+  if (instructions.length > LIMITS.paymentInstructions) {
+    return 'paymentInstructions';
+  }
+  fields.payment_instructions = null;
+  if (instructions !== '') {
+    fields.payment_instructions = instructions;
+  }
+  return null;
+}
+
+function storedMethods(row) {
+  if (!row || !Array.isArray(row.payment_methods)) {
+    return [];
+  }
+  return PAYMENT_METHODS.filter((method) => row.payment_methods.includes(method));
+}
+
+// Whether a paid event has one amount to pay: a ticket tier picked at
+// checkout, or a single price with no Up to. A range without tiers has none.
+function hasSingleAmount(row) {
+  if (row.tiers_enabled === true && storedTiers(row).length > 0) {
+    return true;
+  }
+  if (row.price_min === null || row.price_min === undefined) {
+    return false;
+  }
+  if (row.price_max === null || row.price_max === undefined) {
+    return true;
+  }
+  return false;
+}
+
+// Why each ticked online method cannot be offered yet, for the edit form:
+// a list of 'not_paid', 'no_single_price', 'no_link' and 'no_qr'. Empty
+// when every ticked method works.
+export function paymentProblems(row) {
+  const methods = storedMethods(row);
+  const online = methods.filter((method) => ONLINE_METHODS.includes(method));
+  const problems = [];
+  if (online.length === 0) {
+    return problems;
+  }
+  if (row.price_type !== 'paid') {
+    problems.push('not_paid');
+    return problems;
+  }
+  if (!hasSingleAmount(row)) {
+    problems.push('no_single_price');
+  }
+  if (methods.includes('link') && !row.payment_link) {
+    problems.push('no_link');
+  }
+  if (methods.includes('qr') && !row.payment_qr_path) {
+    problems.push('no_qr');
+  }
+  return problems;
+}
+
+// The methods a checkout offers for this event, in order: onsite whenever it
+// is ticked, link and qr only once they can be used. Empty for an event
+// that is not paid.
+export function paymentOptions(row) {
+  if (!row || row.price_type !== 'paid') {
+    return [];
+  }
+  const methods = storedMethods(row);
+  const single = hasSingleAmount(row);
+  return methods.filter((method) => {
+    if (method === 'onsite') {
+      return true;
+    }
+    if (!single) {
+      return false;
+    }
+    if (method === 'link') {
+      return Boolean(row.payment_link);
+    }
+    return Boolean(row.payment_qr_path);
+  });
+}
+
+// Whether getting a ticket for the whole event goes through /checkout: a
+// paid event with link or qr ready to use. With only onsite (or nothing)
+// ticked, the RSVP button on the event page works as it always has.
+export function needsCheckout(row) {
+  return paymentOptions(row).some((method) => ONLINE_METHODS.includes(method));
+}
+
+// What one ticket costs this person: { ok: true, tier, price, amount,
+// discount } (tier: the tier's name or null; price: before the volunteer
+// benefit; discount: what the benefit takes off, 0 when none), or { ok:
+// false, error }. tierIndex and tierName name the tier picked (both, so a
+// tier list that changed meanwhile is caught); ignored without tiers.
+// volunteerDiscount: whether this person gets the event's volunteer benefit
+// (events.js volunteerStanding).
+export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerDiscount = false } = {}) {
+  let tier = null;
+  let price;
+  const tiers = storedTiers(row);
+  if (row.tiers_enabled === true && tiers.length > 0) {
+    if (!Number.isInteger(tierIndex) || tierIndex < 0 || tierIndex >= tiers.length) {
+      return { ok: false, error: 'tier_required' };
+    }
+    if (tiers[tierIndex].name !== tierName) {
+      return { ok: false, error: 'tier_changed' };
+    }
+    tier = tiers[tierIndex].name;
+    price = tiers[tierIndex].price;
+  } else if (hasSingleAmount(row)) {
+    price = Number(row.price_min);
+  } else {
+    return { ok: false, error: 'payment_unavailable' };
+  }
+  let discount = 0;
+  if (volunteerDiscount && volunteerDiscountActive(row)) {
+    const value = Number(row.volunteer_discount_value);
+    if (row.volunteer_discount_type === 'amount') {
+      discount = Math.min(price, value);
+    } else {
+      discount = (price * Math.min(value, 100)) / 100;
+    }
+  }
+  discount = Math.round(discount * 100) / 100;
+  const amount = Math.round((price - discount) * 100) / 100;
+  return { ok: true, tier, price, amount, discount };
+}
+
+// A payment reference as typed: { ok: true, reference } (null when blank)
+// or { ok: false }.
+export function readPaymentReference(value) {
+  const reference = cleanText(value, LIMITS.paymentReference);
+  if (reference.length > LIMITS.paymentReference) {
+    return { ok: false };
+  }
+  if (reference === '') {
+    return { ok: true, reference: null };
+  }
+  return { ok: true, reference };
+}
+
+// ---------------------------------------------------------------------------
 // Timetables (migrations/014). Rooms are the grid's columns, in order; items
 // are what happens, each on a day at a start time, with an optional end
 // (earlier than the start: the next day), room and note. Days and times are
@@ -1439,7 +1622,7 @@ export function itemTimes(item, timeZone) {
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readCapacity, readMeals, readVolunteers, readTimetable];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readCapacity, readMeals, readVolunteers, readTimetable];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field

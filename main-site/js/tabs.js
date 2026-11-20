@@ -6,6 +6,8 @@
 // A tab is hidden with its button's hidden attribute (a section this role
 // may not use); the list itself hides while only one tab is left.
 //
+// Each selection sends a bubbling "tabchange" event from the tablist.
+//
 // useHash: false leaves the address alone, for tabs inside a tab (the edit
 // form's sections inside /manage#editor).
 
@@ -33,6 +35,8 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
     if (onSelect) {
       onSelect(tab.dataset.tab);
     }
+    // For the page tours (js/tour.js): a tab opened may have one of its own.
+    tablist.dispatchEvent(new CustomEvent('tabchange', { bubbles: true, detail: { tab: tab.dataset.tab } }));
   }
 
   function byName(name) {

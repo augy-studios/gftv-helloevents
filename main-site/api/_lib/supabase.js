@@ -51,6 +51,8 @@ export const TABLES = Object.freeze({
   // Cover pictures (migrations/002), a public-read Storage bucket that only
   // the API writes to.
   coversBucket: 'gftvevents_covers',
+  // migrations/016: payment QR codes and screenshots, private (payments.js).
+  paymentsBucket: 'gftvevents_payments',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).

@@ -47,7 +47,7 @@ export default route('events/detail', async (request, response) => {
 
   await withMealCounts(row);
   await withVolunteerSource(row);
-  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null };
+  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null };
   let standing = { volunteered: false, discount: false };
   if (session) {
     mine = await attendance(row.id, session.user.id);
@@ -63,6 +63,7 @@ export default route('events/detail', async (request, response) => {
     volunteered: standing.volunteered,
     discount: standing.discount,
     country: countryOfSession(session),
+    payment: mine.payment,
   });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.

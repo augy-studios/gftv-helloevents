@@ -27,6 +27,7 @@ import { decodeCover, cropToWebp } from '../cover-upload.js';
 import { cropCover } from '../cover-crop.js';
 import { startTools } from '../manage-tools.js';
 import { startTabs } from '../tabs.js';
+import { startTours } from '../tour.js';
 import { fillTimeZoneSelect, fillCurrencyList, currencyLabel, currencyCodeFrom, countryName } from '../choices.js';
 import { setLocations, readLocations, startLocations, relabelLocations, LOCATIONS_CHANGED } from '../manage-locations.js';
 import { startLangSwitch } from '../lang-switch.js';
@@ -34,6 +35,7 @@ import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANG
 import { setTiers, readTiers, startTiers, relabelTiers, addTier, TIERS_CHANGED } from '../manage-tiers.js';
 import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
+import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
 
 const byId = (id) => document.getElementById(id);
 const form = byId('eventForm');
@@ -231,6 +233,7 @@ function setForm(values) {
     items = [];
   }
   setTimetable(rooms, items);
+  setPayment(values);
   fillVolunteerSources(values.volunteerDiscountFrom);
   let coverUrl = values.coverImageUrl;
   if (!coverUrl) {
@@ -409,6 +412,7 @@ function readForm() {
   values.meals = readMeals();
   values.volunteerDiscountFrom = byId('f-volunteerDiscountFrom').value;
   Object.assign(values, readTimetable());
+  Object.assign(values, readPayment());
   return values;
 }
 
@@ -495,6 +499,7 @@ function syncDependent() {
   } else {
     byId('f-volunteerDiscountValue').removeAttribute('max');
   }
+  syncPayment();
 }
 
 // The two descriptions, both required: [language, text box, form field].
@@ -556,11 +561,13 @@ function savesOnChange(element) {
 const DRAFT_CARDS = '.tier-edit-card, .room-row, .timetable-item-card';
 
 form.addEventListener('change', (event) => {
-  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel'].includes(event.target.id)) {
+  if (['f-priceType', 'f-isOnline', 'f-tiersEnabled', 'f-kind', 'f-volunteerDiscountEnabled', 'f-volunteerDiscountType', 'f-timetableView', 'f-externalUrlLabel'].includes(event.target.id)
+    || event.target.hasAttribute('data-payment-method')) {
     syncDependent();
   }
-  // The attendee list's Volunteered boxes save on their own.
-  if (event.target.closest('#attendeeList')) {
+  // The attendee list's Volunteered and Paid boxes save on their own, and
+  // the QR code uploads on its own.
+  if (event.target.closest('#attendeeList') || event.target.id === 'payQrFile') {
     return;
   }
   // A convention draws people from everywhere, so Kind set to Convention
@@ -800,6 +807,7 @@ function applySaved(saved, sent) {
   if (now.volunteerDiscountFrom === sent.volunteerDiscountFrom && document.activeElement !== byId('f-volunteerDiscountFrom')) {
     fillVolunteerSources(saved.volunteerDiscountFrom);
   }
+  applySavedPayment(saved, now, sent);
   syncDependent();
   markMissingDescriptions();
 }
@@ -1068,8 +1076,15 @@ function attendeeRow(attendee) {
   if (savedCrossBorder) {
     details.push(attendeeCountryText(attendee));
   }
+  const paymentText = attendeePaymentText(attendee);
+  if (paymentText) {
+    details.push(paymentText);
+  }
   details.push(formatDate(attendee.rsvpAt));
-  const controls = [];
+  const controls = attendeePaymentControls(attendee, name, (list) => {
+    attendees = list;
+    renderAttendees();
+  }, byId('editorError'));
   if (convention) {
     const box = createElement('input', { type: 'checkbox' });
     box.checked = attendee.volunteered;
@@ -1107,6 +1122,7 @@ function renderAttendees() {
   renderMealCounts();
   renderVolunteerCounts();
   renderCountryCounts();
+  renderPaymentCounts(attendees);
   let attendeeRows;
   if (attendees.length === 0) {
     attendeeRows = [createElement('li', { class: 'muted small', text: translate('manage.attendees-none') })];
@@ -1330,6 +1346,7 @@ startLocations();
 startMeals();
 startTiers();
 startTimetable();
+startPayment({ getEvent: () => editing });
 
 // The edit form's section tabs, kept out of the address (it already says
 // #editor). A tab picked with the tab bar stuck under the page header (the
@@ -1386,13 +1403,16 @@ async function start() {
       }
     },
   });
-  startTools(currentUser).then(() => tabs.refresh());
+  const toolsReady = startTools(currentUser).then(() => tabs.refresh());
   try {
     await loadList();
   } catch (error) {
     byId('manageError').textContent = errorText(error);
     return;
   }
+  // The tours once the list is drawn and the staff tools' tabs are settled,
+  // so the page's tour finds every tab this role has.
+  toolsReady.finally(() => startTours('manage'));
   // /manage?slug=... from an event page's "Edit this event".
   const slug = new URLSearchParams(location.search).get('slug');
   let match = null;

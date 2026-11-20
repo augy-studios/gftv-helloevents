@@ -32,8 +32,13 @@ const DEFAULTS = {
     volunteers_wanted: false, volunteer_discount_enabled: false, volunteer_discount_from: null, volunteer_discount_type: 'percent', volunteer_discount_value: null,
     timetable_view: 'timeline', timetable_rooms: [], timetable_items: [],
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
+    payment_methods: [], payment_link: null, payment_qr_path: null, payment_instructions: null,
   }),
-  gftvevents_attendees: () => ({ meals: [], reminders_sent: [], volunteer: false }),
+  gftvevents_attendees: () => ({
+    meals: [], reminders_sent: [], volunteer: false,
+    payment_method: null, payment_status: 'none', payment_tier: null, payment_amount: null, payment_currency: null,
+    payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null,
+  }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
@@ -79,7 +84,8 @@ const FKS = {
   gftvevents_backup_codes: [toAccount('user_id')],
   gftvevents_telegram_links: [toAccount('user_id')],
   gftvevents_telegram_link_tokens: [toAccount('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
-  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id')],
+  // migrations/016: paid_by, the editor who confirmed a payment.
+  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('paid_by', 'set null')],
   // migrations/012: confirmed volunteers, and the convention a volunteer
   // benefit is for.
   gftvevents_volunteers: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('confirmed_by', 'set null')],
@@ -354,7 +360,7 @@ export function createFakeDb() {
         counters.push(counter);
       }
       counter.last_number += 1;
-      table('gftvevents_attendees').push({ event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], reminders_sent: [], volunteer: false, rsvp_number: counter.last_number });
+      table('gftvevents_attendees').push({ ...DEFAULTS.gftvevents_attendees(), event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], rsvp_number: counter.last_number });
       return 'ok';
     },
     gftvevents_meal_counts({ p_event_id }) {

@@ -1,13 +1,14 @@
 // One event: /e/<slug>, served from event.html by a rewrite.
 
 import { session } from '../app.js';
-import { t as translate, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 import { renderTimetable } from '../timetable.js';
+import { startTours } from '../tour.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -285,9 +286,68 @@ function renderMealChoice() {
   byId('rsvpMealsHint').hidden = choiceReady();
 }
 
+// Where /checkout takes this person to get a ticket for the whole event,
+// with "I would like to volunteer" carried over when it is ticked.
+function checkoutHref() {
+  let href = `/checkout?slug=${encodeURIComponent(event.slug)}`;
+  if (volunteerPick && !byId('rsvpVolunteerRow').hidden) {
+    href = `${href}&volunteer=1`;
+  }
+  return href;
+}
+
+// Whether the whole event, as chosen now, needs a ticket from /checkout
+// (migrations/016): the event takes payment online and this person does not
+// hold a place at the whole event yet.
+function ticketNeeded() {
+  if (!event.payment.checkout || choice.onlyMeals) {
+    return false;
+  }
+  if (event.viewer.going && event.viewer.meals.length === 0) {
+    return false;
+  }
+  return true;
+}
+
+// Someone going: where their payment stands, with the way back to the
+// checkout page while it is not confirmed (migrations/016). Paying on the
+// day gets a line of its own; nothing to pay, nothing shown.
+function renderPayment() {
+  const box = byId('rsvpPayment');
+  const payment = event.viewer.payment;
+  box.hidden = true;
+  if (!event.viewer.going || !payment.method) {
+    return;
+  }
+  let textKey = 'event.payment-onsite';
+  let linkKey = null;
+  let tone = 'ok';
+  if (payment.status === 'awaiting') {
+    textKey = 'event.payment-awaiting';
+    linkKey = 'event.payment-finish';
+    tone = 'warn';
+  } else if (payment.status === 'submitted') {
+    textKey = 'event.payment-submitted';
+    linkKey = 'event.payment-see';
+  } else if (payment.status === 'paid') {
+    textKey = 'event.payment-paid';
+  }
+  box.hidden = false;
+  box.classList.toggle('warn', tone === 'warn');
+  box.classList.toggle('ok', tone === 'ok');
+  byId('rsvpPaymentText').textContent = translate(textKey);
+  const link = byId('rsvpPaymentLink');
+  link.hidden = linkKey === null;
+  if (linkKey) {
+    link.href = `/checkout?slug=${encodeURIComponent(event.slug)}`;
+    byId('rsvpPaymentLinkText').textContent = translate(linkKey);
+  }
+}
+
 // The RSVP box: "you're going" (and for which meals), a sign-in link for
 // visitors while RSVPs are open, the meal choice, and one button that says
-// Going or Cancel, plus the spaces line.
+// Going or Cancel, plus the spaces line. At an event taking payment online,
+// "Get a ticket" goes to /checkout in place of the Going button.
 function renderRsvp() {
   const signedIn = event.viewer.signedIn;
   const going = event.viewer.going;
@@ -307,6 +367,7 @@ function renderRsvp() {
   }
   renderMealChoice();
   renderVolunteer();
+  renderPayment();
 
   let signInHidden = false;
   if (signedIn || !canJoin) {
@@ -350,11 +411,29 @@ function renderRsvp() {
     buttonDisabled = true;
   }
   rsvpButton.disabled = buttonDisabled;
+  // A ticket from /checkout instead, for someone not going yet.
+  const checkoutLink = byId('rsvpCheckout');
+  checkoutLink.hidden = true;
+  if (!rsvpButtonHidden && !going && ticketNeeded()) {
+    rsvpButton.hidden = true;
+    checkoutLink.hidden = false;
+    checkoutLink.href = checkoutHref();
+  }
   let note = spacesText(event);
   if (event.rsvp === 'full' && event.meals.some(mealOpen)) {
     note = translate('event.full-meals-open');
   }
   byId('rsvpNote').textContent = note;
+}
+
+// How people can pay, in words: "Pay on the day, by payment link or by QR
+// code"; '' when the event says nothing (migrations/016).
+function paymentMethodsText(methods) {
+  if (!methods.length) {
+    return '';
+  }
+  const names = methods.map((method) => translate(`payment.method.${method}`));
+  return translate('event.payment-methods', { methods: new Intl.ListFormat(getLocale(), { type: 'disjunction' }).format(names) });
 }
 
 // A convention's volunteer benefit in words: "20% off", "SGD 15.00 off".
@@ -536,7 +615,7 @@ function render() {
 
   byId('factWhen').textContent = whenText(event.when);
   renderWhere();
-  byId('factPrice').textContent = [priceText(event.price), event.price.note].filter(Boolean).join('. ');
+  byId('factPrice').textContent = [priceText(event.price), event.price.note, paymentMethodsText(event.payment.methods)].filter(Boolean).join('. ');
   renderTiers();
   let goingText;
   if (event.capacity) {
@@ -585,6 +664,7 @@ async function load() {
     byId('eventView').hidden = false;
     render();
     drawTimetable();
+    startTours('event');
   } catch (error) {
     byId('eventLoading').hidden = true;
     if (error.code === 'not_found') {
@@ -596,6 +676,14 @@ async function load() {
 }
 
 byId('rsvpBtn').addEventListener('click', () => {
+  // Taking back a ticket that is paid or reported paid: refunds are up to
+  // the organisers, so ask first.
+  const payment = event.viewer.payment;
+  if (event.viewer.going && ['submitted', 'paid'].includes(payment.status)) {
+    if (!window.confirm(translate('event.payment-cancel-confirm'))) {
+      return;
+    }
+  }
   withBusy(byId('rsvpBtn'), byId('rsvpError'), async () => {
     const body = { slug: event.slug, going: !event.viewer.going };
     if (body.going) {
@@ -622,6 +710,12 @@ function saveChoice() {
   }
   const meals = chosenMeals();
   if (JSON.stringify(meals) === JSON.stringify(event.viewer.meals)) {
+    return;
+  }
+  // From just meals to the whole event, where that takes a ticket: off to
+  // the checkout page to get one.
+  if (meals.length === 0 && ticketNeeded()) {
+    location.href = checkoutHref();
     return;
   }
   choiceSaving = withBusy(null, byId('rsvpError'), async () => {
@@ -660,6 +754,7 @@ byId('rsvpVolunteer').addEventListener('change', () => {
   byId('rsvpError').textContent = '';
   if (!event.viewer.going) {
     volunteerPick = wanted;
+    byId('rsvpCheckout').href = checkoutHref();
     return;
   }
   byId('rsvpVolunteer').disabled = true;

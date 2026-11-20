@@ -16,7 +16,7 @@
 // event's link-preview tags, api/events/page.js; only apps reading the link
 // need those, and they have no service worker.)
 
-const VERSION = '2026-11-19.10';
+const VERSION = '2026-11-20.2';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 
@@ -28,6 +28,7 @@ const PRECACHE = [
   '/manage',
   '/signup',
   '/reset',
+  '/checkout',
   '/404.html',
   '/style.css',
   '/manifest.json',
@@ -70,6 +71,10 @@ const PRECACHE = [
   '/js/cover-crop.js',
   '/js/choices.js',
   '/js/tabs.js',
+  '/js/tour.js',
+  '/js/tours.js',
+  '/js/picture-file.js',
+  '/js/manage-payment.js',
   '/js/lang-switch.js',
   '/js/pages/home.js',
   '/js/pages/event.js',
@@ -78,6 +83,7 @@ const PRECACHE = [
   '/js/pages/manage.js',
   '/js/pages/signup.js',
   '/js/pages/reset.js',
+  '/js/pages/checkout.js',
 ];
 
 // The pages that are part of the shell, by their clean path.

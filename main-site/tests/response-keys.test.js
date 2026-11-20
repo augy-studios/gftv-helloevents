@@ -155,7 +155,8 @@ const DETAIL = [
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
   ...nest('timetable', TIMETABLE),
   ...nest('volunteers', ['wanted', 'discount']),
-  ...nest('viewer', ['signedIn', 'going', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry']),
+  ...nest('payment', ['checkout', 'methods']),
+  ...nest('viewer', ['signedIn', 'going', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status'])]),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
 const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
@@ -174,9 +175,13 @@ const EDITOR = [
   'volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
   'timetableView', ...listOf('timetableRooms', ['id', 'name', 'tag']),
   ...listOf('timetableItems', ['title', 'date', 'start', 'end', 'room', 'note']), 'staffNotes',
+  'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
 ];
 const COVER = ['coverImageUrl', 'hasCover'];
-const ATTENDEE = ['rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt'];
+const ATTENDEE = [
+  'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt',
+  ...nest('payment', ['method', 'status', 'tier', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
+];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];
 const FILTER = ['id', 'term'];
@@ -421,7 +426,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true } }), nest('event', DETAIL));
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, meals: ['lunch'] } }), nest('event', DETAIL));
   assertKeys(await b.call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
-  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber'])]);
+  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber', 'paymentStatus'])]);
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: false } }), nest('event', DETAIL));
 });
 

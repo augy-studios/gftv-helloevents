@@ -46,6 +46,9 @@
             <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
             <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
             <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="tourBtn" aria-label="Show me around" title="Show me around" data-i18n-attr="aria-label:tour.button,title:tour.button" hidden>
+                <span data-icon="help"></span>
+            </button>
             <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
                 <span data-icon="sun"></span>
             </button>
@@ -115,6 +118,10 @@
                     <div class="rsvp" id="rsvpBox">
                         <p class="rsvp-status" id="rsvpStatus" hidden><span data-icon="check"></span><span id="rsvpStatusText">You are going</span></p>
                         <p class="rsvp-number" id="rsvpNumber" hidden></p>
+                        <div class="callout small rsvp-payment" id="rsvpPayment" hidden>
+                            <p id="rsvpPaymentText"></p>
+                            <a class="btn btn-small u-mt-1" id="rsvpPaymentLink" hidden><span data-icon="ticket"></span><span id="rsvpPaymentLinkText"></span></a>
+                        </div>
                         <fieldset class="rsvp-meals" id="rsvpMeals" hidden>
                             <legend class="visually-hidden" data-i18n="event.meals-legend">What you are coming for</legend>
                             <label class="check">
@@ -141,6 +148,7 @@
                             <a class="btn btn-small u-mt-1" id="rsvpCountryLink" href="/account#profile"><span data-icon="globe"></span><span data-i18n="event.country-set">Set my country</span></a>
                         </div>
                         <button class="btn btn-primary btn-block" type="button" id="rsvpBtn" hidden></button>
+                        <a class="btn btn-primary btn-block" id="rsvpCheckout" hidden><span data-icon="ticket"></span><span data-i18n="event.get-ticket">Get a ticket</span></a>
                         <a class="btn btn-primary btn-block" id="rsvpSignIn" href="/login" hidden><span data-icon="lock"></span><span data-i18n="event.sign-in-to-rsvp">Sign in to RSVP</span></a>
                         <p class="small muted" id="rsvpNote"></p>
                         <div class="callout danger" id="rsvpError" role="alert"></div>

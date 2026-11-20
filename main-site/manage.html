@@ -43,6 +43,9 @@
             <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
             <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
             <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="tourBtn" aria-label="Show me around" title="Show me around" data-i18n-attr="aria-label:tour.button,title:tour.button" hidden>
+                <span data-icon="help"></span>
+            </button>
             <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
                 <span data-icon="sun"></span>
             </button>
@@ -310,6 +313,41 @@
                         </div>
                     </fieldset>
 
+                    <!-- How people pay (migrations/016, js/manage-payment.js). -->
+                    <fieldset id="paymentSection">
+                        <legend data-i18n="manage.section.payment">Payment</legend>
+                        <p class="muted small" id="paymentNotPaid" data-i18n="manage.payment-not-paid">Set Price to Paid to choose how people pay.</p>
+                        <div id="paymentFields">
+                            <p class="muted small" data-i18n="manage.payment-lede">Tick every way you take. With a payment link or QR code, people get a ticket on a checkout page: it holds their place, and they tell you when they have paid. You then tick Paid on the attendee list.</p>
+                            <div class="payment-methods" id="f-paymentMethods" role="group" aria-label="Ways to pay" data-i18n-attr="aria-label:manage.section.payment">
+                                <label class="check"><input type="checkbox" id="f-pay-onsite" data-payment-method="onsite"><span data-i18n="manage.payment.onsite">Pay on the day: a plain RSVP, no payment page</span></label>
+                                <label class="check"><input type="checkbox" id="f-pay-link" data-payment-method="link"><span data-i18n="manage.payment.link">Payment link: a page to pay on, such as PayPal or Stripe</span></label>
+                                <label class="field payment-indent" id="paymentLinkField">
+                                    <span data-i18n="manage.field.paymentLink">Payment link</span>
+                                    <input id="f-paymentLink" name="paymentLink" type="url" maxlength="500" placeholder="https://">
+                                </label>
+                                <label class="check"><input type="checkbox" id="f-pay-qr" data-payment-method="qr"><span data-i18n="manage.payment.qr">QR code: a picture people scan to pay, such as PayNow</span></label>
+                                <div class="field payment-indent" id="paymentQrField">
+                                    <span data-i18n="manage.field.paymentQr">QR code</span>
+                                    <div class="pay-qr-preview" id="payQrPreview" hidden><img id="payQrImage" alt="Payment QR code" data-i18n-attr="alt:checkout.qr-alt"></div>
+                                    <p class="field-hint" id="payQrSaveFirst" data-i18n="manage.hint.payment-qr-save-first">A QR code can be added once the event has saved.</p>
+                                    <p class="field-hint" data-i18n="manage.hint.payment-qr">Any shape works, uncropped. It is kept as sharp as it came, up to 1200 pixels on its longest side.</p>
+                                    <div class="actions inline">
+                                        <label class="btn file-btn" id="payQrPick"><span data-icon="image"></span><span data-i18n="manage.payment-qr-choose">Choose the QR code</span><input type="file" id="payQrFile" accept="image/*" class="visually-hidden"></label>
+                                        <button class="btn btn-quiet" type="button" id="payQrRemove" hidden><span data-i18n="manage.payment-qr-remove">Remove the QR code</span></button>
+                                    </div>
+                                    <div class="callout danger" id="payQrError" role="alert"></div>
+                                </div>
+                            </div>
+                            <label class="field">
+                                <span data-i18n="manage.field.paymentInstructions">Instructions (optional)</span>
+                                <textarea id="f-paymentInstructions" name="paymentInstructions" maxlength="1000" rows="3" aria-describedby="paymentInstructionsHint"></textarea>
+                                <span class="field-hint" id="paymentInstructionsHint" data-i18n="manage.hint.paymentInstructions">Shown with the link or QR code, such as "Put your RSVP ID in the reference".</span>
+                            </label>
+                            <ul class="callout warn small payment-problems" id="paymentProblems" hidden></ul>
+                        </div>
+                    </fieldset>
+
                     <fieldset>
                         <legend data-i18n="manage.section.rsvp">RSVP and publishing</legend>
                         <div class="form-grid">
@@ -465,6 +503,7 @@
                         <h3 id="attendeesTitle" class="section-label"></h3>
                         <p class="muted small" id="attendeesMeals" hidden></p>
                         <p class="muted small" id="attendeesVolunteers" hidden></p>
+                        <p class="muted small" id="attendeesPayments" hidden></p>
                         <p class="muted small" id="attendeesCountries" hidden></p>
                         <ul class="item-list" id="attendeeList"></ul>
                     </section>

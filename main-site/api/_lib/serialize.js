@@ -41,10 +41,11 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
+import { qrUrl } from './payments.js';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -177,7 +178,43 @@ export function attendeeView(row, event = {}, standing = {}) {
     volunteer: row.volunteer === true,
     volunteered: standing.volunteered === true,
     pastVolunteer: standing.pastVolunteer === true,
+    payment: attendeePayment(row),
     rsvpAt: row.created_at,
+  };
+}
+
+// Where a payment stands (migrations/016): 'awaiting', 'submitted' or
+// 'paid', and 'none' for anything else.
+function paymentStatusOf(row) {
+  if (['awaiting', 'submitted', 'paid'].includes(row.payment_status)) {
+    return row.payment_status;
+  }
+  return 'none';
+}
+
+// The payment methods ticked on an event, in their fixed order.
+function storedPaymentMethods(row) {
+  if (!Array.isArray(row.payment_methods)) {
+    return [];
+  }
+  return PAYMENT_METHODS.filter((method) => row.payment_methods.includes(method));
+}
+
+// An attendee's payment, for editors: how they are paying, where it stands,
+// the tier and amount asked at checkout, the reference they gave, whether
+// there is a screenshot to look at (api/manage/payment-proof.js), and when
+// they reported it and when it was confirmed.
+function attendeePayment(row) {
+  return {
+    method: missingToNull(row.payment_method),
+    status: paymentStatusOf(row),
+    tier: missingToNull(row.payment_tier),
+    amount: numberOrNull(row.payment_amount),
+    currency: missingToNull(row.payment_currency),
+    reference: missingToNull(row.payment_reference),
+    hasProof: Boolean(row.payment_proof_path),
+    submittedAt: missingToNull(row.payment_submitted_at),
+    paidAt: missingToNull(row.paid_at),
   };
 }
 
@@ -686,6 +723,12 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (row.cross_border === true && viewer.signedIn === true && !viewer.country) {
     needsCountry = true;
   }
+  // Someone going: how they are paying and where it stands (migrations/016).
+  // Anyone else: nothing to pay.
+  let myPayment = { method: null, status: 'none' };
+  if (viewer.going === true && viewer.payment) {
+    myPayment = { method: missingToNull(viewer.payment.payment_method), status: paymentStatusOf(viewer.payment) };
+  }
 
   return {
     ...card,
@@ -707,9 +750,12 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     meals: mealsView(row, addressShown),
     timetable: timetableDetail(row),
     volunteers: volunteersView(row),
+    // How people pay, and whether a ticket goes through /checkout.
+    payment: { checkout: needsCheckout(row), methods: paymentOptions(row) },
     viewer: {
       signedIn: viewer.signedIn === true,
       going: viewer.going === true,
+      payment: myPayment,
       rsvpNumber,
       meals: myMeals,
       canManage: viewer.canManage === true,
@@ -729,7 +775,7 @@ export function myRsvpView(row, now = Date.now()) {
   if (event) {
     card = publicEventCard(event, now);
   }
-  return { event: card, rsvpNumber: missingToNull(row.rsvp_number) };
+  return { event: card, rsvpNumber: missingToNull(row.rsvp_number), paymentStatus: paymentStatusOf(row) };
 }
 
 // An editor's list row: what the list on /manage shows (title, status, kind,
@@ -814,7 +860,124 @@ export function managedEvent(row) {
     volunteerDiscountType: volunteerDiscountType(row),
     volunteerDiscountValue: stringOrBlank(row.volunteer_discount_value),
     ...managedTimetable(row),
+    paymentMethods: storedPaymentMethods(row),
+    paymentLink: emptyToBlank(row.payment_link),
+    paymentInstructions: emptyToBlank(row.payment_instructions),
+    ...managedPaymentQr(row),
     staffNotes: emptyToBlank(row.staff_notes),
+  };
+}
+
+// The payment QR code (migrations/016), also the whole answer to an upload
+// or removal (api/manage/payment-qr.js), and why any ticked online method
+// cannot be offered yet (event-rules.js paymentProblems), which a new QR
+// code can change.
+export function managedPaymentQr(row) {
+  return {
+    paymentQrUrl: emptyToBlank(qrUrl(row)),
+    paymentProblems: paymentProblems(row),
+  };
+}
+
+// The tickets a checkout offers: each tier (or the one price, when the
+// event has no tiers), with its price and what it costs this person after
+// any volunteer benefit. index is what the page sends back to pick a tier
+// (null without tiers).
+function checkoutTickets(row, volunteerDiscount) {
+  const tiers = storedTiers(row);
+  if (row.tiers_enabled === true && tiers.length > 0) {
+    return tiers.map((tier, index) => {
+      const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount });
+      return { index, name: tier.name, benefits: tier.benefits, price: priced.price, amount: priced.amount };
+    });
+  }
+  const priced = ticketPrice(row, { volunteerDiscount });
+  if (!priced.ok) {
+    return [];
+  }
+  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount }];
+}
+
+// Someone's own payment at checkout, from their attendee row.
+function myCheckoutPayment(stored) {
+  return {
+    method: missingToNull(stored.payment_method),
+    status: paymentStatusOf(stored),
+    tier: missingToNull(stored.payment_tier),
+    amount: numberOrNull(stored.payment_amount),
+    currency: missingToNull(stored.payment_currency),
+    reference: missingToNull(stored.payment_reference),
+    hasProof: Boolean(stored.payment_proof_path),
+  };
+}
+
+// The checkout page (migrations/016), for someone signed in. Only call this
+// for a released event, or for an editor. viewer: as for publicEventDetail,
+// with payment the person's attendee row (its payment columns) or null.
+//
+// The event's title, cover and dates, the tickets with their prices (shown
+// here even when the event page hides them: this person is about to pay),
+// the ways to pay, the organiser's instructions, and the person's own place
+// and payment. The payment link and QR code go only to someone who has
+// reserved a place paying that way.
+export function checkoutView(row, viewer = {}, now = Date.now()) {
+  const card = publicEventCard(row, now);
+  let volunteerDiscount = false;
+  if (viewer.discount === true && volunteerDiscountActive(row)) {
+    volunteerDiscount = true;
+  }
+  let mine = null;
+  let paymentLink = null;
+  let paymentQrUrl = null;
+  if (viewer.going === true && viewer.payment) {
+    mine = myCheckoutPayment(viewer.payment);
+    if (mine.method === 'link' && mine.status !== 'none') {
+      paymentLink = emptyToNull(row.payment_link);
+    }
+    if (mine.method === 'qr' && mine.status !== 'none') {
+      paymentQrUrl = qrUrl(row);
+    }
+  }
+  let needsCountry = false;
+  if (row.cross_border === true && !viewer.country) {
+    needsCountry = true;
+  }
+  let rsvpNumber = null;
+  let volunteer = false;
+  let onlyMeals = false;
+  if (viewer.going === true) {
+    if (Number.isInteger(viewer.rsvpNumber)) {
+      rsvpNumber = viewer.rsvpNumber;
+    }
+    volunteer = viewer.volunteer === true;
+    if (Array.isArray(viewer.meals) && viewer.meals.length > 0) {
+      onlyMeals = true;
+    }
+  }
+
+  return {
+    slug: card.slug,
+    title: card.title,
+    coverImageUrl: card.coverImageUrl,
+    when: card.when,
+    rsvp: card.rsvp,
+    currency: emptyToNull(row.currency),
+    tickets: checkoutTickets(row, volunteerDiscount),
+    volunteerDiscount,
+    methods: paymentOptions(row),
+    checkout: needsCheckout(row),
+    instructions: emptyToNull(row.payment_instructions),
+    paymentLink,
+    paymentQrUrl,
+    takesVolunteers: takesVolunteers(row),
+    needsCountry,
+    viewer: {
+      going: viewer.going === true,
+      onlyMeals,
+      rsvpNumber,
+      volunteer,
+      payment: mine,
+    },
   };
 }
 

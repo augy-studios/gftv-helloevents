@@ -11,6 +11,7 @@
 //                    Cloudflare Turnstile, anything else) is answered here
 //                    with an empty body, or the Turnstile stub, so nothing
 //                    reaches the network; the list of URLs it answered
+//   toursSeen        true (the default): every page tour marked as seen
 //   page             the browser's clock frozen at FIXED_NOW (seed.js), and
 //                    after the test: no console errors and no uncaught
 //                    exceptions on any page it opened
@@ -21,6 +22,7 @@ import { test as base, expect } from '@playwright/test';
 import { totpAt } from '../../api/_lib/totp.js';
 import { FIXED_NOW, PASSWORD, STAFF_TOTP_SECRET } from './seed.js';
 import { TURNSTILE_SCRIPT } from './stubs.js';
+import { TOUR_IDS } from '../../js/tours.js';
 
 export { expect };
 
@@ -92,7 +94,16 @@ export const test = base.extend({
     { auto: true },
   ],
 
-  page: async ({ page }, use) => {
+  // Every page tour (js/tours.js) counts as seen, so none covers the page a
+  // test looks at. tour.spec.js turns this off to test the tours themselves.
+  toursSeen: [true, { option: true }],
+
+  page: async ({ page, toursSeen }, use) => {
+    if (toursSeen) {
+      await page.addInitScript((ids) => {
+        localStorage.setItem('tour.seen', JSON.stringify(ids));
+      }, TOUR_IDS);
+    }
     const problems = [];
     page.on('console', (message) => {
       if (message.type() === 'error') {

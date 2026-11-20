@@ -25,7 +25,7 @@ export default route('me/rsvps', async (request, response) => {
 
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`rsvp_number, event:${TABLES.events} ( ${CARD_COLUMNS} )`)
+    .select(`rsvp_number, payment_status, event:${TABLES.events} ( ${CARD_COLUMNS} )`)
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false })
     .limit(200);
