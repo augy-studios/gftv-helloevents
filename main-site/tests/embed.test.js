@@ -125,3 +125,16 @@ test('the preview picture is the cover as a JPEG, only at its current address', 
   const none = await browser().call(embedImage, { query: { slug: 'harbour-meet' } });
   assert.equal(none.status, 404, 'no version');
 });
+
+test('preview text has real line breaks: no typed <br> or description HTML shows through', async () => {
+  addEvent({ summary: '📍 Location:<br>GV VivoCity<br><br><br>💰 S$8 per person' });
+  addEvent({ slug: 'rich-meet', summary: null, description: '<h2>Plan</h2><p>Doors at <strong>7pm</strong><br>Dress up</p><ul><li>Bring ID</li></ul><p>Line&lt;br&gt;typed</p>' });
+  const summary = meta((await browser().call(page, { query: { slug: 'harbour-meet' } })).body, 'property', 'og:description');
+  assert.equal(summary, 'Sat, 12 Dec, 2:00 pm SGT · Marina Hall, Singapore. 📍 Location:&#10;GV VivoCity&#10;&#10;💰 S$8 per person');
+  const html = (await browser().call(page, { query: { slug: 'rich-meet' } })).body;
+  const description = meta(html, 'property', 'og:description');
+  assert.equal(description, 'Sat, 12 Dec, 2:00 pm SGT · Marina Hall, Singapore. Plan&#10;Doors at 7pm&#10;Dress up&#10;Bring ID&#10;Line&#10;typed');
+  assert.equal(meta(html, 'name', 'twitter:description'), description);
+  assert.equal(meta(html, 'name', 'description'), description);
+  assert.equal(/&lt;|<br|<p>/i.test(description), false);
+});

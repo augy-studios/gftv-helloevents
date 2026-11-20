@@ -22,6 +22,8 @@ import { siteUrl } from '../_lib/env.js';
 import { releasedEventBySlug } from '../_lib/events.js';
 import { embedImageUrl } from '../_lib/covers.js';
 import { whenText, placeText } from '../_lib/event-text.js';
+import { descriptionText } from '../_lib/rich-text.js';
+import { typedBreaksToLines } from '../../js/rich-text.js';
 
 const SITE_NAME = 'GFTV HelloEvents';
 // How much of the summary or description a preview shows.
@@ -42,19 +44,54 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (character) => ESCAPES[character]);
 }
 
-// Text cut to at most max characters, on a word where it can be, with an
-// ellipsis when anything was cut. Line breaks become spaces.
+// Text for a tag's content: escaped, with each line break written as &#10;
+// so the apps that read the preview keep it as a break.
+function escapeAttribute(text) {
+  return escapeHtml(text).replace(/\n/g, '&#10;');
+}
+
+// Text tidied for a preview: spaces run together and trimmed on each line,
+// no more than one blank line in a row, so the breaks it was written with
+// show as breaks (Discord, Telegram and X keep them) rather than as one
+// long line.
+function tidyLines(text) {
+  return String(text)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Text cut to at most max characters, on a word or line break where it can
+// be, with an ellipsis when anything was cut. Line breaks are kept.
 function clip(text, max) {
-  const flat = String(text).replace(/\s+/g, ' ').trim();
-  if (flat.length <= max) {
-    return flat;
+  const tidy = tidyLines(text);
+  if (tidy.length <= max) {
+    return tidy;
   }
-  const cut = flat.slice(0, max - 1);
-  let end = cut.lastIndexOf(' ');
+  const cut = tidy.slice(0, max - 1);
+  let end = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('\n'));
   if (end < max / 2) {
     end = cut.length;
   }
   return `${cut.slice(0, end).replace(/[\s,.;:]+$/, '')}…`;
+}
+
+// The summary, or failing that the description, as plain text with its
+// line breaks: a "<br>" typed into the summary (as a message copied from
+// Telegram can carry) becomes a line, and the description's rich text
+// (HTML) becomes a line for each paragraph, heading or list item, its
+// tags left out.
+function aboutText(row) {
+  if (row.summary) {
+    return typedBreaksToLines(row.summary);
+  }
+  if (row.description) {
+    return typedBreaksToLines(descriptionText(row.description));
+  }
+  return '';
 }
 
 // The preview's description: "Cancelled" when it is, when and where, then
@@ -70,10 +107,7 @@ function previewDescription(row) {
     parts.push(place);
   }
   let line = parts.join(' · ');
-  let about = row.summary;
-  if (!about) {
-    about = row.description;
-  }
+  const about = tidyLines(aboutText(row));
   if (about) {
     line = `${line}. ${about}`;
   }
@@ -94,7 +128,7 @@ export function previewTags(row) {
 // page as it was.
 function setContent(html, attribute, name, value) {
   const pattern = new RegExp(`(<meta ${attribute}="${name}" content=")[^"]*(")`);
-  return html.replace(pattern, (whole, start, end) => `${start}${escapeHtml(value)}${end}`);
+  return html.replace(pattern, (whole, start, end) => `${start}${escapeAttribute(value)}${end}`);
 }
 
 // event.html with the preview's tags in place of the site's.
@@ -104,7 +138,7 @@ export function withPreview(html, tags) {
   // translation script leaves them alone; event.js retitles the page in the
   // reader's language once the event has loaded.
   page = page.replace(/<title[^>]*>[^<]*<\/title>/, `<title>${escapeHtml(`${tags.title} | ${SITE_NAME}`)}</title>`);
-  page = page.replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${escapeHtml(tags.description)}">`);
+  page = page.replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${escapeAttribute(tags.description)}">`);
   page = setContent(page, 'property', 'og:type', 'article');
   page = setContent(page, 'property', 'og:title', tags.title);
   page = setContent(page, 'property', 'og:description', tags.description);
@@ -121,7 +155,7 @@ export function withPreview(html, tags) {
   }
   page = page.replace(
     /(<meta name="twitter:card" content="[^"]*">)/,
-    (whole) => `${whole}\n    <meta name="twitter:title" content="${escapeHtml(tags.title)}">\n    <meta name="twitter:description" content="${escapeHtml(tags.description)}">`
+    (whole) => `${whole}\n    <meta name="twitter:title" content="${escapeHtml(tags.title)}">\n    <meta name="twitter:description" content="${escapeAttribute(tags.description)}">`
   );
   return page;
 }
