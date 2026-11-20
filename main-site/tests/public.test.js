@@ -329,6 +329,32 @@ test('push subscriptions are kept in Redis, checked, capped and removable', asyn
   assert.equal(pushes.length, 9);
 });
 
+test('each card tests its own way in: the device test is push only, the Telegram test the linked chat only', async () => {
+  const m = await member();
+  await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
+  // Not linked yet: the Telegram test says so.
+  assert.equal((await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'telegram' } })).json.error, 'telegram_not_linked');
+  await linkTelegram(m);
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true } });
+  sent = [];
+  pushes = [];
+  // The device test: push only, even with notices also going to Telegram.
+  const device = await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'device' } });
+  assert.deepEqual(device.json, { ok: true });
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].payload.title, 'Test: GFTV HelloEvents');
+  assert.equal(sent.length, 0);
+  // The Telegram test: the linked chat only, even with notices there off.
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: false } });
+  pushes = [];
+  const telegram = await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'telegram' } });
+  assert.deepEqual(telegram.json, { ok: true });
+  assert.equal(pushes.length, 0);
+  const message = sent.find((each) => each.url.endsWith('/sendRichMessage'));
+  assert.equal(message.body.chat_id, 777);
+  assert.equal((await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'sms' } })).json.error, 'bad_request');
+});
+
 test('changing when or where an event happens tells the people going, by push and Telegram, with public fields only', async () => {
   const event = addEvent({ slug: 'moving-meet', description: 'A meet that moves.', description_zh: '会搬家的聚会。', venue_name: 'Old Hall', is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
   const m = await member();

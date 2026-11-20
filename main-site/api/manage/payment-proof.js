@@ -47,7 +47,7 @@ export default route('manage/payment-proof', async (request, response) => {
   }
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`payment_proof_path, account:${TABLES.accounts} ( kind, username, staff:${TABLES.users} ( username ) )`)
+    .select(`payment_proof_path, account:${TABLES.accounts}!user_id ( kind, username, staff:${TABLES.users} ( username ) )`)
     .eq('event_id', eventId)
     .not('payment_proof_path', 'is', null);
   if (error) {

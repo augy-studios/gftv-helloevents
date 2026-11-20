@@ -7,20 +7,24 @@
 //        page before reminder times) is still taken: a day before, or none.
 // POST { action: "subscribe", subscription }   this browser, from PushManager
 // POST { action: "unsubscribe", endpoint }
-// POST { action: "test" }                       a test notice to every device
-//                                               (and the linked chat); no count
+// POST { action: "test", channel?: "device" }   a test notice to every device
+//                                               this account turned push on for
+// POST { action: "test", channel: "telegram" }  a test message to the linked
+//                                               Telegram chat, whether or not
+//                                               notices go there; no count for
+//                                               either
 //
 // prefs, subscribe and unsubscribe answer with the same summary as GET.
 // What each choice sends is described in api/_lib/notify.js.
 
-import { route, guard, readJson, ok, fail } from '../_lib/http.js';
+import { route, guard, readJson, ok, fail, errorDetail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { loadAccount, REMINDER_HOURS, reminderHoursFrom } from '../_lib/users.js';
-import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
-import { pushConfigured, vapidPublicKey, deviceCount, checkSubscription, saveSubscription, removeSubscription } from '../_lib/push.js';
-import { deliver } from '../_lib/notify.js';
+import { linkedChat, telegramConfigured, sendRichTelegram } from '../_lib/telegram.js';
+import { pushConfigured, vapidPublicKey, deviceCount, checkSubscription, saveSubscription, removeSubscription, pushToAccount } from '../_lib/push.js';
+import { eventNoticeMessage } from '../_lib/telegram-messages.js';
 import { siteUrl } from '../_lib/env.js';
 
 // The notification settings the account page shows: the choices, whether
@@ -155,14 +159,35 @@ export default route('me/notifications', async (request, response) => {
     return ok(response, await summary(user));
   }
 
-  if (body.action === 'test') {
-    const account = await loadAccount(user.id);
-    const preferences = account.prefs;
-    // The notice itself is the answer; the page shows no count.
-    await deliver([{ id: user.id, notify_telegram: preferences.telegram }], {
+  // Each card's own test: "This device" tests push only, "Telegram" the
+  // linked chat only. The notice itself is the answer; no count comes back.
+  if (body.action === 'test' && body.channel === 'telegram') {
+    if (!telegramConfigured()) {
+      return fail(response, 400, 'telegram_off');
+    }
+    const link = await linkedChat(user.id);
+    if (!link) {
+      return fail(response, 400, 'telegram_not_linked');
+    }
+    const message = eventNoticeMessage({
       heading: 'Test',
       title: 'GFTV HelloEvents',
-      lines: ['Notifications work on this device.'],
+      intro: 'Notifications work in this chat.',
+      details: [],
+      url: `${siteUrl()}/account`,
+    });
+    try {
+      await sendRichTelegram(link.chat_id, message);
+    } catch (cause) {
+      console.warn('[helloevents] telegram test:', errorDetail(cause));
+      return fail(response, 502, 'telegram_send_failed');
+    }
+    return ok(response);
+  }
+  if (body.action === 'test' && (body.channel === undefined || body.channel === 'device')) {
+    await pushToAccount(user.id, {
+      title: 'Test: GFTV HelloEvents',
+      body: 'Notifications work on this device.',
       url: `${siteUrl()}/account`,
       tag: 'test',
     });

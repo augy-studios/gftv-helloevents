@@ -6,7 +6,7 @@
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
-import { createElement, withBusy, errorText, openModal, closeModal, formatDate } from '../ui.js';
+import { createElement, withBusy, errorText, openModal, closeModal, formatDate, toast } from '../ui.js';
 import { iconNode } from '../icons.js';
 import { eventCard } from '../cards.js';
 import { showCodes } from '../codes.js';
@@ -78,6 +78,7 @@ function renderNotify() {
   byId('notifyTelegramBox').hidden = !settings.telegram.available;
   byId('prefTelegram').disabled = !settings.telegram.linked;
   byId('notifyTelegramNote').hidden = settings.telegram.linked;
+  byId('telegramTest').hidden = !settings.telegram.linked;
 
   // Push on this device needs push set up on the site and a browser that
   // supports it; then one button shows: Turn on, or Turn off.
@@ -291,9 +292,19 @@ byId('pushOff').addEventListener('click', () => {
   });
 });
 
+// Each card tests its own way in: this device's push notifications, or the
+// linked Telegram chat.
 byId('pushTest').addEventListener('click', () => {
   withBusy(byId('pushTest'), byId('notifyError'), async () => {
-    await post('/api/me/notifications', { action: 'test' });
+    await post('/api/me/notifications', { action: 'test', channel: 'device' });
+    toast(translate('notify.test-sent-device'));
+  });
+});
+
+byId('telegramTest').addEventListener('click', () => {
+  withBusy(byId('telegramTest'), byId('notifyError'), async () => {
+    await post('/api/me/notifications', { action: 'test', channel: 'telegram' });
+    toast(translate('notify.test-sent-telegram'));
   });
 });
 

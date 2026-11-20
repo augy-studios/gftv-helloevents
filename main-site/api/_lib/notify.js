@@ -195,7 +195,7 @@ function wantsNotice(account, preference) {
 async function attendeeAccounts(eventId, preference) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`user_id, account:${TABLES.accounts} ( id, status, notify_updates, notify_reminders, notify_telegram )`)
+    .select(`user_id, account:${TABLES.accounts}!user_id ( id, status, notify_updates, notify_reminders, notify_telegram )`)
     .eq('event_id', eventId);
   if (error) {
     throw error;
@@ -604,7 +604,7 @@ export async function sendReminders(now = Date.now()) {
   for (const event of releasedEvents) {
     const { data: rows, error: rowsError } = await database()
       .from(TABLES.attendees)
-      .select(`user_id, created_at, meals, reminders_sent, account:${TABLES.accounts} ( id, status, reminder_hours, notify_telegram )`)
+      .select(`user_id, created_at, meals, reminders_sent, account:${TABLES.accounts}!user_id ( id, status, reminder_hours, notify_telegram )`)
       .eq('event_id', event.id);
     if (rowsError) {
       throw rowsError;

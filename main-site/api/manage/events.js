@@ -70,7 +70,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts} ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, volunteer, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -372,7 +372,7 @@ function namedUsername(body) {
 async function findAttendee(eventId, username, staff) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`user_id, account:${TABLES.accounts} ( kind, username, staff:${TABLES.users} ( username ) )`)
+    .select(`user_id, account:${TABLES.accounts}!user_id ( kind, username, staff:${TABLES.users} ( username ) )`)
     .eq('event_id', eventId);
   if (error) {
     throw error;

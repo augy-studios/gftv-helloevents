@@ -136,11 +136,16 @@ export function createFakeDb() {
     if (!select || select.trim() === '*') return { ...row };
     const out = {};
     for (const part of splitTop(select.replace(/\s+/g, ' '))) {
-      const embed = part.match(/^(?:(\w+):)?(\w+)\s*\((.*)\)$/);
+      // target!hint names the foreign key column when two lead to the same
+      // table (PostgREST refuses to guess: attendees -> accounts by user_id
+      // and by paid_by, migrations/016).
+      const embed = part.match(/^(?:(\w+):)?(\w+)(?:!(\w+))?\s*\((.*)\)$/);
       if (embed) {
-        const [, alias, target, inner] = embed;
+        const [, alias, target, hint, inner] = embed;
         const key = alias || target;
-        const up = (FKS[name] || []).find((fk) => fk.parent === target);
+        const ups = (FKS[name] || []).filter((fk) => fk.parent === target && (!hint || fk.column === hint));
+        if (ups.length > 1) throw new Error(`fake embed: more than one relationship from ${name} to ${target}; add a !hint`);
+        const up = ups[0];
         if (up) {
           const parent = table(target).find((r) => r.id === row[up.column]);
           out[key] = parent ? project(target, parent, inner) : null;

@@ -885,5 +885,8 @@
   "tour.checkout.status": "Where your payment stands. The organisers confirm it once they have checked.",
   "tour.checkout.pay": "Pay here, with the link or by scanning the QR code.",
   "tour.checkout.report": "Then tell the organisers: the payment reference, and a screenshot if you like. Only they see it.",
-  "tour.checkout.switch": "Changed your mind? Pay another way, until the payment is confirmed."
+  "tour.checkout.switch": "Changed your mind? Pay another way, until the payment is confirmed.",
+  "notify.test-sent-device": "Test sent to this device.",
+  "notify.test-sent-telegram": "Test sent to your Telegram chat.",
+  "error.telegram_send_failed": "The test could not be sent to Telegram. Check the bot is not blocked, then try again."
 }
