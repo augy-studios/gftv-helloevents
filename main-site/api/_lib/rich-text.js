@@ -9,10 +9,11 @@
 //   descriptionText(value)      plain text, for link previews
 //
 // A description saved before descriptions were rich is plain text; it is
-// read as paragraphs (plainToHtml).
+// read as paragraphs, with its markdown and any "<br>" typed into it as
+// formatting (plainDescriptionToHtml).
 
 import { parseDocument } from 'htmlparser2';
-import { cleanRichTree, plainToHtml, looksRich, MAX_TEXT, MAX_HTML } from '../../js/rich-text.js';
+import { cleanRichTree, plainDescriptionToHtml, looksRich, MAX_TEXT, MAX_HTML } from '../../js/rich-text.js';
 
 // htmlparser2's tree, read the way js/rich-text.js asks.
 const ADAPTER = {
@@ -61,7 +62,7 @@ export function cleanDescription(input) {
     return { ok: false };
   }
   if (!looksRich(text)) {
-    text = plainToHtml(text);
+    text = plainDescriptionToHtml(text);
   }
   const cleaned = cleanRichTree(parse(text), ADAPTER, { mode: 'store' });
   if (cleaned.textLength > MAX_TEXT || cleaned.html.length > MAX_HTML) {
@@ -78,7 +79,7 @@ function storedHtml(value) {
   if (looksRich(value)) {
     return String(value);
   }
-  return plainToHtml(value);
+  return plainDescriptionToHtml(value);
 }
 
 // The gallery pictures and stickers a description refers to.

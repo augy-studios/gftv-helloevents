@@ -84,13 +84,19 @@
             <section class="glass-card page-card" id="orderBox" hidden>
                 <fieldset class="checkout-step" id="ticketStep">
                     <legend data-i18n="checkout.ticket-title">Your ticket</legend>
-                    <div class="choice-list" id="ticketList" role="radiogroup" aria-label="Ticket" data-i18n-attr="aria-label:checkout.ticket-title"></div>
+                    <p class="small muted" id="ticketHint" hidden data-i18n="checkout.ticket-hint">Tick every ticket you would like. They are paid for together.</p>
+                    <div class="choice-list" id="ticketList" role="radiogroup" aria-label="Your ticket" data-i18n-attr="aria-label:checkout.ticket-title"></div>
                     <p class="callout ok small" id="discountNote" hidden data-i18n="checkout.discount-note">You volunteered at an earlier convention, so your benefit is taken off.</p>
                 </fieldset>
 
                 <label class="check checkout-volunteer" id="volunteerRow" hidden>
                     <input type="checkbox" id="volunteerPick">
                     <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
+                </label>
+                <!-- Whether they are a fursuiter, when the event asks (migrations/023). -->
+                <label class="check checkout-volunteer" id="fursuiterRow" hidden>
+                    <input type="checkbox" id="fursuiterPick">
+                    <span data-i18n="event.fursuiter-check">I'm a fursuiter</span>
                 </label>
 
                 <!-- The contact details the event asks for (migrations/021). -->
@@ -104,6 +110,7 @@
                     <div class="choice-list" id="methodList" role="radiogroup" aria-label="How you will pay" data-i18n-attr="aria-label:checkout.method-title"></div>
                 </fieldset>
 
+                <p class="callout warn small" id="pickProblem" role="status" hidden></p>
                 <section class="order-summary" id="orderSummary" aria-labelledby="orderTitle">
                     <h2 class="section-label" id="orderTitle" data-i18n="checkout.order-title">Your order</h2>
                     <dl class="order-lines" id="orderLines"></dl>

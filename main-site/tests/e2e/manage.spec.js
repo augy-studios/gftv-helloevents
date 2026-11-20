@@ -311,11 +311,11 @@ test('a change saves itself when its field is left, and a refused one says why',
   const summary = 'A walk along the bay, then dinner and dessert.';
   await page.locator('#f-summary').fill(summary);
   await expect(status(page)).toHaveText(SAVED);
-  await page.locator('#f-organiserName').click();
+  await page.locator('#f-title').click();
   await expect(status(page)).toHaveText('Not saved: Check this field: Description (Chinese).');
   await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
   await page.locator('#f-descriptionZh').fill('在喷泉集合。');
-  await page.locator('#f-organiserName').click();
+  await page.locator('#f-title').click();
   await expect(status(page)).toHaveText(SAVED);
   // A box ticked saves at once.
   await openSection(page, 'Price and RSVP');
@@ -352,6 +352,55 @@ test('a change saves itself when its field is left, and a refused one says why',
   await expect(page.locator('#eventForm')).toBeHidden();
   await page.locator('#editorEmptyNew').click();
   await expect(page.locator('#editorTitle')).toHaveText('New event');
+});
+
+test('the organiser is one of GFTV\'s teams, or anyone else typed in under Other', async ({ page }) => {
+  const event = EVENTS.furmeet;
+  await openManage(page);
+  await page.getByRole('button', { name: `Edit ${event.title}` }).click();
+  await expect(status(page)).toHaveText(SAVED);
+  const pick = page.locator('#organiserPick');
+  const other = page.locator('#f-organiserName');
+  // A name that is not a team opens on Other, typed in.
+  await expect(pick).toHaveValue('other');
+  await expect(other).toHaveValue('SG Furmeets');
+  await expect(pick.locator('option')).toHaveText([
+    'Not set',
+    'Community Inclusion and Integration Sub-Committee (CIISC)',
+    'Community Initiative and Outreach (CIO) Division',
+    'Core Coverage Support (CCS) Team',
+    'Media and News (MAWS) Division',
+    'Policy, Action and Leadership (PAL) Division',
+    'Project Starlight Organising Sub-Committee (PSOSC)',
+    'Technology and Infrastructure Development Sub-Committee (TIDSC)',
+    'Other (type a name)',
+  ]);
+  // (This event was written before Chinese descriptions were needed.)
+  await page.locator('#descriptionSwitch').getByRole('button', { name: '中文' }).click();
+  await page.locator('#f-descriptionZh').fill('在喷泉集合。');
+  await page.locator('#f-title').click();
+  await expect(status(page)).toHaveText(SAVED);
+  // A team: saved at once, by its full name; the box goes.
+  await pick.selectOption('maws');
+  await expect(other).toBeHidden();
+  await expect(status(page)).toHaveText(SAVED);
+  await page.reload();
+  await expect(pick).toHaveValue('maws');
+  await page.goto(`/e/${event.slug}`);
+  await expect(page.locator('#eventOrganiser')).toHaveText('Organised by Media and News (MAWS) Division');
+
+  // Other: an empty box to type anyone's name in, saved once left.
+  await page.goto(`/manage?slug=${event.slug}#editor`);
+  await expect(status(page)).toHaveText(SAVED);
+  await pick.selectOption('other');
+  await expect(other).toBeVisible();
+  await expect(other).toHaveValue('');
+  await expect(other).toBeFocused();
+  await other.fill('Paws Malaysia');
+  await page.locator('#f-summary').click();
+  await expect(status(page)).toHaveText(SAVED);
+  await page.goto(`/e/${event.slug}`);
+  await expect(page.locator('#eventOrganiser')).toHaveText('Organised by Paws Malaysia');
 });
 
 test('the event list, the edit form and the staff tools are tabs, and the open tab is kept in the address', async ({ page }) => {

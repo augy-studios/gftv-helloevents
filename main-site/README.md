@@ -80,7 +80,17 @@ the functions with the service role key. No Supabase Auth, no request signing.
   quote); font; size in points; bold, italic, underline, strikethrough, subscript, superscript;
   text colour and highlight, each with "Automatic"; clear formatting; alignment; bullets and
   numbering; indent; links (Ctrl+K); pictures and stickers; tables with row and column tools;
-  horizontal lines. Text pasted from Word, Google Docs or a web page keeps its formatting:
+  horizontal lines. Word's and Google Docs' keyboard shortcuts work in every browser (the editor
+  runs them itself, so Firefox's Ctrl+B bookmarks and Ctrl+I page info do not take over): Ctrl+B,
+  I, U; Ctrl+Shift+X or Alt+Shift+5 strikethrough; Ctrl+, and Ctrl+. subscript and superscript;
+  Ctrl+\\ clear formatting; Ctrl+L, E, R, J alignment; Ctrl+Shift+7 and 8 numbering and
+  bullets; Ctrl+[ and Ctrl+] indent; Ctrl+Shift+< and > font size; Ctrl+Alt+1, 2, 3 headings and
+  Ctrl+Alt+0 normal text; Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z; Ctrl+K (Cmd on a Mac). A plain-text
+  description from before (or one sent without the editor) shows its markdown as formatting,
+  its web addresses as links and a typed `<br>` as a line break (in pasted text too). After a
+  paste with lines in it (a Telegram message's Shift+Enter), a bar under the editor asks whether
+  to keep the lines together or make each line its own paragraph; either can be picked until the
+  editor types on. Text pasted from Word, Google Docs or a web page keeps its formatting:
   `js/rich-text.js` maps it onto what a description can hold (Word's numbered paragraphs become
   real lists, Google Docs' bold spans become bold, and so on). So a description stays readable
   in dark mode, near-black and near-white text colours and near-white page backgrounds are left
@@ -159,10 +169,22 @@ the functions with the service role key. No Supabase Auth, no request signing.
   (`GET /api/manage/events?checkSlug=`) before it is saved; one another event has is not saved,
   and the form offers to add eight random characters to its end or to edit it again.
 - **Ticket tiers** (migrations/008). A paid event can sell tickets in tiers: each has a name, a
-  price and benefits (one per line). From the second tier on, ticking "Includes everything in
-  <previous tier>" (off for a new tier) makes a tier include everything in the tier before it, and the event page either lists those benefits again in full or says
+  price and benefits (one per line). "Includes everything in" lists every other tier (none for a
+  new tier; migrations/022): a sponsor tier can include the attendee pass, and a day pass too,
+  not only the tier before it. A tier that would go round in a loop (one that includes this one,
+  in turn) cannot be picked, and the server breaks any loop it is sent. The event page either
+  lists those benefits again in full (and what the included tier includes in turn) or says
   "Everything in <tier>, plus:". The From and Up to prices then come from the tiers. A hidden
   price hides the tier prices too. Fields in a tier card save when the card is left.
+- **Several tiers at once** (migrations/022). At checkout someone ticks every tier they want and
+  pays for them together. Each tier is bought once per person, unless its card ticks "One person
+  can buy more than one of this tier", with "Most one person can buy" (2 to 20, blank for 20);
+  checkout then asks "How many" for it, and the event page says "One person can buy up to N of
+  these." The tiers in one order must share a way to pay, and by link or QR code only when they
+  all pay to the same one (`event-rules.js basketOptions`); checkout says so when they do not.
+  The volunteer benefit comes off the order's total once. What was bought is kept at checkout
+  (`payment_items`), and in words in `payment_tier` ("Attendee, Day pass × 2") for the attendee
+  list.
 - **Coming just for a meal** (migrations/007). In the edit form's "Coming just for a meal"
   section an editor ticks breakfast, lunch or dinner, and names up to five more ("High tea"). With
   any on, a signed-in person on the event page picks "The whole event" or "I only want to show
@@ -301,6 +323,14 @@ the functions with the service role key. No Supabase Auth, no request signing.
 - **Event list by status.** `/manage`'s event list has Published (released or scheduled), Drafts and
   Cancelled, each with its count and pages; going back from the form opens the status of the event
   that was open.
+- **Fursuiters** (migrations/023). Under Price and RSVP, an editor can tick "Ask people going
+  whether they are fursuiters", on any kind of event. People signed in then see "I'm a
+  fursuiter" by the RSVP button and at checkout; it goes with the RSVP, and someone going can
+  tick or untick it (saved at once) until the event is over. The attendee list marks each
+  fursuiter and counts them. Unticking the setting hides it all and keeps what people said.
+- **Organiser.** The edit form's Organiser is a list of GFTV's teams (`js/manage-organiser.js`,
+  as the GFTV jobs portal lists them: CIISC, CIO, CCS, MAWS, PAL, PSOSC and TIDSC), or **Other**,
+  which shows a box to type anyone's name in. It is stored as text, a team by its full name.
 - **Feed search.** The home page searches title, summary, venue, city, country and organiser, every
   word, within the When and Kind picked, as it is typed; the search is kept in the address
   (`/?q=...`). Typed symbols are only text: the search is a nested PostgREST filter under the
@@ -349,7 +379,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 021) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 023) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -375,7 +405,10 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    allows longer descriptions, adds the sticker tables and creates the private
    `gftvevents_stickers` Storage bucket. Run `021_contact_details.sql` before deploying contact
    details: the event pages, RSVPs, checkout, the edit form and the attendee list read its
-   columns.
+   columns. Run `022_tier_baskets.sql` before deploying tier baskets (several tiers bought at
+   once): RSVPs, checkout, payments and the attendee list read its column. Run
+   `023_fursuiters.sql` before deploying the fursuiter question: the event pages, RSVPs, checkout,
+   the edit form and the attendee list read its columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

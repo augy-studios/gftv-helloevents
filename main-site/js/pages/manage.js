@@ -43,6 +43,7 @@ import { setLocations, readLocations, startLocations, relabelLocations, LOCATION
 import { startLangSwitch } from '../lang-switch.js';
 import { setMeals, readMeals, startMeals, relabelMeals, mealNameFor, MEALS_CHANGED } from '../manage-meals.js';
 import { setTiers, readTiers, startTiers, relabelTiers, addTier, syncTierPayment, TIERS_CHANGED } from '../manage-tiers.js';
+import { startOrganiser, syncOrganiser, relabelOrganiser } from '../manage-organiser.js';
 import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
 import { setContact, readContact, startContact, relabelContact, CONTACT_CHANGED } from '../manage-contact.js';
@@ -66,7 +67,7 @@ const TEXT_FIELDS = [
   'volunteerDiscountType', 'volunteerDiscountValue', 'timetableView', 'externalUrlLabel', 'externalUrlCustomLabel',
   'lepakLabel', 'lepakLimit',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder', 'lepakEnabled'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'fursuitersAsked', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder', 'lepakEnabled'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -268,6 +269,7 @@ function setForm(values) {
   for (const name of CHECK_FIELDS) {
     byId(`f-${name}`).checked = values[name] === true;
   }
+  syncOrganiser({ reset: true });
   setDescription('en', values.description);
   setDescription('zh', values.descriptionZh);
   descriptionSwitch.select('en');
@@ -834,7 +836,7 @@ function renderStatus() {
 // Fields that are not one input of their own, by the section tab they are in.
 const FIELD_TABS = {
   locations: 'when', locationLabel: 'when', customLabel: 'when', venueName: 'when', venueAddress: 'when', city: 'when', country: 'when', mapsUrl: 'when',
-  ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price',
+  ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price', tierMaxPerPerson: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
   contactFields: 'price', contactLabel: 'price',
   timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
@@ -912,6 +914,7 @@ function applySaved(saved, sent) {
     fillVolunteerSources(saved.volunteerDiscountFrom);
   }
   applySavedPayment(saved, now, sent);
+  syncOrganiser();
   syncTierPayment();
   syncDependent();
   markMissingDescriptions();
@@ -1209,6 +1212,9 @@ function attendeeRow(attendee) {
   if (convention && attendee.pastVolunteer) {
     details.push(translate('manage.attendee-past-volunteer'));
   }
+  if (attendee.fursuiter) {
+    details.push(translate('manage.attendee-fursuiter'));
+  }
   if (savedCrossBorder) {
     details.push(attendeeCountryText(attendee));
   }
@@ -1258,6 +1264,7 @@ function renderAttendees() {
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
   renderMealCounts();
   renderVolunteerCounts();
+  renderFursuiterCount();
   renderCountryCounts();
   renderPaymentCounts(attendees);
   renderLepakCount();
@@ -1371,6 +1378,15 @@ function renderVolunteerCounts() {
   }
   box.hidden = !shown;
   box.textContent = translate('manage.attendees-volunteers', { counts: parts.join(' · ') });
+}
+
+// Under the attendee count, how many said they are fursuiters
+// (migrations/023), while the event asks. Hidden while nobody did.
+function renderFursuiterCount() {
+  const box = byId('attendeesFursuiters');
+  const count = attendees.filter((attendee) => attendee.fursuiter).length;
+  box.hidden = count === 0;
+  box.textContent = translate('manage.attendees-fursuiters', { count });
 }
 
 // The form opens in the Manage event tab, in place of its "No event open"
@@ -1508,6 +1524,7 @@ byId('editorToList').addEventListener('click', () => tabs.open('events'));
 startLocations();
 startMeals();
 startTiers({ getEvent: () => editing, onProblems: setPaymentProblems });
+startOrganiser();
 startTimetable();
 startPayment({ getEvent: () => editing });
 startContact();
@@ -1617,6 +1634,7 @@ onChange(() => {
     relabelMeals();
     relabelContact();
     relabelTiers();
+    relabelOrganiser();
     relabelTimetable();
     fillVolunteerSources(byId('f-volunteerDiscountFrom').value);
     fillTimeZoneSelect(byId('f-timezone'), byId('f-timezone').value);

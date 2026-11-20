@@ -156,14 +156,14 @@ const DETAIL = [
   ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName',
   ...nest('externalLink', ['url', 'label', 'customLabel', 'locked']), 'crossBorder', 'gallery',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
-  ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'methods']),
+  ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'maxPerPerson', 'methods']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
   ...nest('timetable', TIMETABLE),
-  ...nest('volunteers', ['wanted', 'discount']),
+  ...nest('volunteers', ['wanted', 'discount']), 'fursuitersAsked',
   ...nest('payment', ['checkout', 'methods']),
   ...nest('lepak', ['offered', 'label', 'limit', 'left']),
   ...nest('contact', [...listOf('fields', ['id', 'type', 'label']), 'rule']),
-  ...nest('viewer', ['signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status']), 'contact', 'contactMissing']),
+  ...nest('viewer', ['signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status']), 'contact', 'contactMissing']),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
 const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
@@ -177,9 +177,9 @@ const EDITOR = [
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop', 'externalUrl',
   'externalUrlLabel', 'externalUrlCustomLabel', 'crossBorder',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
-  ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includesPrevious', 'previousDisplay', 'paymentMethods', 'paymentLink', 'paymentQrUrl']), 'rsvpOpen',
+  ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includes', 'previousDisplay', 'maxPerPerson', 'paymentMethods', 'paymentLink', 'paymentQrUrl']), 'rsvpOpen',
   ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]),
-  'volunteersWanted', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
+  'volunteersWanted', 'fursuitersAsked', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
   'timetableView', ...listOf('timetableRooms', ['id', 'name', 'tag']),
   ...listOf('timetableItems', ['title', 'date', 'start', 'end', 'room', 'note']), 'staffNotes',
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
@@ -192,9 +192,9 @@ const GALLERY_IMAGE = ['id', 'url', 'width', 'height'];
 const GALLERY = [...listOf('images', GALLERY_IMAGE), 'limit'];
 const CROP = ['x', 'y', 'width', 'height'];
 const ATTENDEE = [
-  'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'lepak', 'country', 'volunteer', 'volunteered', 'pastVolunteer', 'rsvpAt',
+  'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'lepak', 'country', 'volunteer', 'fursuiter', 'volunteered', 'pastVolunteer', 'rsvpAt',
   ...listOf('contact', ['id', 'type', 'label', 'value']),
-  ...nest('payment', ['method', 'status', 'tier', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
+  ...nest('payment', ['method', 'status', 'tier', 'items', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
 ];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];

@@ -41,7 +41,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, tierOptions, tierNamed, tierLink, tierQrPath } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
@@ -183,12 +183,22 @@ export function attendeeView(row, event = {}, standing = {}) {
     lepak: row.lepak === true,
     country: attendeeCountry(event, account),
     volunteer: row.volunteer === true,
+    fursuiter: attendeeFursuiter(event, row),
     volunteered: standing.volunteered === true,
     pastVolunteer: standing.pastVolunteer === true,
     payment: attendeePayment(row),
     contact: attendeeContact(event, row.contact),
     rsvpAt: row.created_at,
   };
+}
+
+// Whether someone said they are a fursuiter (migrations/023), shown only
+// while the event asks.
+function attendeeFursuiter(event, row) {
+  if (!asksFursuiters(event)) {
+    return false;
+  }
+  return row.fursuiter === true;
 }
 
 // The contact details someone gave (migrations/021), for the event's
@@ -251,6 +261,7 @@ function attendeePayment(row) {
     method: missingToNull(row.payment_method),
     status: paymentStatusOf(row),
     tier: missingToNull(row.payment_tier),
+    items: paymentItemsView(row),
     amount: numberOrNull(row.payment_amount),
     currency: missingToNull(row.payment_currency),
     reference: missingToNull(row.payment_reference),
@@ -444,29 +455,25 @@ export function offeredMeals(row, chosen) {
 // The ticket tiers on the event page, in order, while they are on (a paid
 // event only; none otherwise). Each is its name, its price (null while the
 // price is hidden: the page then shows the tiers without prices), its own
-// benefits, and, when it includes the tier before it, either those benefits
-// in full (includedBenefits, everything the earlier tiers give, in order)
-// or that tier's name (includesTier), as the editor chose.
+// benefits, and, when it includes another tier (any of them,
+// migrations/022), either those benefits in full (includedBenefits,
+// everything that tier gives, and what it includes in turn, furthest first)
+// or that tier's name (includesTier), as the editor chose; and how many of
+// it one person can buy (maxPerPerson, 1 for once).
 function tiersView(row) {
   if (row.tiers_enabled !== true || row.price_type !== 'paid') {
     return [];
   }
   const tiers = storedTiers(row);
   const priceShown = row.price_hidden !== true;
-  // Everything each tier gives, its own benefits after the ones it includes.
-  const everything = [];
-  return tiers.map((tier, index) => {
-    let included = [];
-    if (tier.includes_previous) {
-      included = everything[index - 1];
-    }
-    everything.push([...included, ...tier.benefits]);
+  return tiers.map((tier) => {
+    const chain = includedTiers(tiers, tier);
     let includedBenefits = [];
     let includesTier = null;
-    if (tier.includes_previous && tier.previous_display === 'full') {
-      includedBenefits = included;
-    } else if (tier.includes_previous) {
-      includesTier = tiers[index - 1].name;
+    if (chain.length > 0 && tier.previous_display === 'full') {
+      includedBenefits = [...chain].reverse().flatMap((each) => each.benefits);
+    } else if (chain.length > 0) {
+      includesTier = chain[0].name;
     }
     let price = null;
     if (priceShown) {
@@ -474,7 +481,7 @@ function tiersView(row) {
     }
     // How this tier can be paid for (migrations/016), when it says.
     const methods = tierOptions(row, tier);
-    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, methods };
+    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, maxPerPerson: tier.max_per_person, methods };
   });
 }
 
@@ -607,8 +614,9 @@ function managedTier(tier, row) {
     name: tier.name,
     price: String(tier.price),
     benefits: tier.benefits.join('\n'),
-    includesPrevious: tier.includes_previous,
+    includes: emptyToBlank(tier.includes),
     previousDisplay: tier.previous_display,
+    maxPerPerson: tier.max_per_person,
     paymentMethods: tier.payment_methods,
     paymentLink: emptyToBlank(tier.payment_link),
     paymentQrUrl: emptyToBlank(qrUrl({ slug: row.slug, payment_qr_path: tier.payment_qr_path })),
@@ -787,6 +795,11 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (row.cross_border === true && viewer.signedIn === true && !viewer.country) {
     needsCountry = true;
   }
+  // Someone going who said they are a fursuiter (migrations/023).
+  let myFursuiter = false;
+  if (viewer.going === true && viewer.fursuiter === true) {
+    myFursuiter = true;
+  }
   // Someone going lepak, without a ticket (migrations/017).
   let myLepak = false;
   if (viewer.going === true && viewer.lepak === true) {
@@ -824,6 +837,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     contact: contactView(row),
     timetable: timetableDetail(row),
     volunteers: volunteersView(row),
+    // Whether people going are asked if they are fursuiters (migrations/023).
+    fursuitersAsked: asksFursuiters(row),
     // How people pay, and whether a ticket goes through /checkout.
     payment: { checkout: needsCheckout(row), methods: paymentOptions(row) },
     viewer: {
@@ -835,6 +850,7 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       meals: myMeals,
       canManage: viewer.canManage === true,
       volunteer,
+      fursuiter: myFursuiter,
       volunteered: viewer.volunteered === true,
       volunteerDiscount,
       needsCountry,
@@ -989,6 +1005,7 @@ export function managedEvent(row) {
       locations: meal.locations.map(managedLocation),
     })),
     volunteersWanted: row.volunteers_wanted === true,
+    fursuitersAsked: row.fursuiters_asked === true,
     volunteerDiscountEnabled: row.volunteer_discount_enabled === true,
     volunteerDiscountFrom: emptyToBlank(row.volunteer_discount_from),
     volunteerDiscountType: volunteerDiscountType(row),
@@ -1030,20 +1047,82 @@ export function managedTierQr(row) {
 // The tickets a checkout offers: each tier (or the one price, when the
 // event has no tiers), with its price and what it costs this person after
 // any volunteer benefit. index is what the page sends back to pick a tier
-// (null without tiers).
+// (null without tiers). Several tiers can be bought at once
+// (migrations/022), each up to maxPerPerson; they can be paid for together
+// in the ways they all take, by link or QR code only when they share one:
+// payTo says which link and which QR code each pays to ("event" for the
+// event's own, else the tier's id), without giving either away before a
+// place is reserved.
 function checkoutTickets(row, volunteerDiscount) {
   const tiers = storedTiers(row);
   if (row.tiers_enabled === true && tiers.length > 0) {
     return tiers.map((tier, index) => {
       const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount });
-      return { index, name: tier.name, benefits: tier.benefits, price: priced.price, amount: priced.amount, methods: tierOptions(row, tier) };
+      let linkTo = 'event';
+      if (tier.payment_link) {
+        linkTo = tier.id;
+      }
+      let qrTo = 'event';
+      if (tier.payment_qr_path) {
+        qrTo = tier.id;
+      }
+      return {
+        index,
+        name: tier.name,
+        benefits: tier.benefits,
+        price: priced.price,
+        amount: priced.amount,
+        maxPerPerson: tier.max_per_person,
+        methods: tierOptions(row, tier),
+        payTo: { link: linkTo, qr: qrTo },
+      };
     });
   }
   const priced = ticketPrice(row, { volunteerDiscount });
   if (!priced.ok) {
     return [];
   }
-  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, methods: paymentOptions(row) }];
+  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, maxPerPerson: 1, methods: paymentOptions(row), payTo: { link: 'event', qr: 'event' } }];
+}
+
+// The tiers someone bought, as kept at checkout (migrations/022): each
+// { name, quantity, price }, or empty for a ticket from before (its one
+// tier is then only in tier).
+function paymentItemsView(stored) {
+  if (!Array.isArray(stored.payment_items)) {
+    return [];
+  }
+  return stored.payment_items
+    .filter((item) => {
+      if (item === null || typeof item !== 'object') {
+        return false;
+      }
+      return typeof item.name === 'string';
+    })
+    .map((item) => {
+      let quantity = Number(item.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        quantity = 1;
+      }
+      return { name: item.name, quantity, price: numberOrNull(item.price) };
+    });
+}
+
+// The volunteer benefit this person gets at checkout, { type ('percent' or
+// 'amount'), value }, or null for none.
+function checkoutBenefit(row, volunteerDiscount) {
+  if (!volunteerDiscount) {
+    return null;
+  }
+  return { type: volunteerDiscountType(row), value: Number(row.volunteer_discount_value) };
+}
+
+// The ways someone holding a ticket can pay for it now, or [] for none.
+function heldMethods(row, viewer) {
+  if (viewer.going !== true || !viewer.payment) {
+    return [];
+  }
+  return ticketOptions(row, viewer.payment);
 }
 
 // Someone's own payment at checkout, from their attendee row.
@@ -1052,6 +1131,7 @@ function myCheckoutPayment(stored) {
     method: missingToNull(stored.payment_method),
     status: paymentStatusOf(stored),
     tier: missingToNull(stored.payment_tier),
+    items: paymentItemsView(stored),
     amount: numberOrNull(stored.payment_amount),
     currency: missingToNull(stored.payment_currency),
     reference: missingToNull(stored.payment_reference),
@@ -1079,8 +1159,13 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
   let paymentQrUrl = null;
   if (viewer.going === true && viewer.payment) {
     mine = myCheckoutPayment(viewer.payment);
-    // The link and QR code of the tier their ticket is for, or the event's.
-    const tier = tierNamed(row, mine.tier);
+    // The link and QR code of the tiers their ticket is for (one for them
+    // all, event-rules.js basketOptions), or the event's.
+    const held = heldTiers(row, viewer.payment);
+    let tier = null;
+    if (held.length > 0) {
+      tier = held[0];
+    }
     if (mine.method === 'link' && mine.status !== 'none') {
       paymentLink = tierLink(row, tier);
     }
@@ -1094,6 +1179,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
   }
   let rsvpNumber = null;
   let volunteer = false;
+  let fursuiter = false;
   // Going without a ticket: just for meals, or lepak (migrations/017).
   let withoutTicket = false;
   if (viewer.going === true) {
@@ -1101,6 +1187,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
       rsvpNumber = viewer.rsvpNumber;
     }
     volunteer = viewer.volunteer === true;
+    fursuiter = viewer.fursuiter === true;
     if ((Array.isArray(viewer.meals) && viewer.meals.length > 0) || viewer.lepak === true) {
       withoutTicket = true;
     }
@@ -1116,12 +1203,18 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     currency: emptyToNull(row.currency),
     tickets: checkoutTickets(row, volunteerDiscount),
     volunteerDiscount,
+    // The benefit itself, so the page can work out a basket's total as the
+    // server will (event-rules.js basketPrice): taken off the total once.
+    volunteerBenefit: checkoutBenefit(row, volunteerDiscount),
     methods: paymentOptions(row),
+    // The ways to pay the ticket held, for "Pay another way".
+    heldMethods: heldMethods(row, viewer),
     checkout: needsCheckout(row),
     instructions: emptyToNull(row.payment_instructions),
     paymentLink,
     paymentQrUrl,
     takesVolunteers: takesVolunteers(row),
+    asksFursuiters: asksFursuiters(row),
     needsCountry,
     contact: contactView(row),
     viewer: {
@@ -1129,6 +1222,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
       withoutTicket,
       rsvpNumber,
       volunteer,
+      fursuiter,
       payment: mine,
       contact: myContact,
       contactMissing,

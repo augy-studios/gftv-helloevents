@@ -88,6 +88,17 @@ test('plain text from before is read as paragraphs, and descriptions turn into p
   assert.equal(descriptionText('<h2>Title</h2><p>One <strong>two</strong><br>three</p><ul><li>a</li><li>b</li></ul>'), 'Title\nOne two\nthree\na\nb');
 });
 
+test('plain text shows its markdown as formatting, and a typed <br> as a line break', () => {
+  const typed = '📍 Location:<br>GV VivoCity<br>(https://maps.app.goo.gl/abc)<br><br>💰 S$8 per person';
+  assert.equal(displayDescription({}, typed), '<p>📍 Location:<br>GV VivoCity<br>(<a href="https://maps.app.goo.gl/abc" target="_blank" rel="noopener noreferrer nofollow">'
+    + 'https://maps.app.goo.gl/abc</a>)</p><p>💰 S$8 per person</p>');
+  assert.equal(descriptionText(typed), '📍 Location:\nGV VivoCity\n(https://maps.app.goo.gl/abc)\n💰 S$8 per person');
+  assert.equal(clean('# Meet\n\nBring **water** and *snacks*, see [the map](https://example.org/map)\n\n- one\n- two'),
+    '<h2>Meet</h2><p>Bring <strong>water</strong> and <em>snacks</em>, see <a href="https://example.org/map">the map</a></p><ul><li>one</li><li>two</li></ul>');
+  // Rich text an editor saved with the <br> still typed out as text.
+  assert.equal(displayDescription({}, '<p>Line one&lt;br&gt;line two&lt;BR /&gt;three &lt;b&gt;</p>'), '<p>Line one<br>line two<br>three &lt;b&gt;</p>');
+});
+
 test('a description is required, has length limits, and a blank editor counts as blank', () => {
   const base = { title: 'Meet', description: '<p>x</p>', descriptionZh: '<p>x</p>', kind: 'furmeet', status: 'draft', priceType: 'free', startDate: '2027-01-01', timezone: 'Asia/Singapore' };
   assert.equal(rules.validateEvent({ ...base, description: '<p><br></p>' }).field, 'description');

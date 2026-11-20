@@ -54,7 +54,7 @@ export default route('events/detail', async (request, response) => {
   await withVolunteerSource(row);
   await withGallery(row);
   await withDescriptionPictures(row);
-  let mine = { going: false, meals: [], volunteer: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
+  let mine = { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
   let standing = { volunteered: false, discount: false };
   let contactSuggest = {};
   if (session) {
@@ -72,6 +72,7 @@ export default route('events/detail', async (request, response) => {
     rsvpNumber: mine.rsvpNumber,
     canManage: isManager,
     volunteer: mine.volunteer,
+    fursuiter: mine.fursuiter,
     volunteered: standing.volunteered,
     discount: standing.discount,
     country: countryOfSession(session),

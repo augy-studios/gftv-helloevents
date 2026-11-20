@@ -302,11 +302,11 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['contact', 'country', 'displayName', 'lepak', 'meals', 'pastVolunteer', 'payment', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
+  assert.deepEqual(Object.keys(staff).sort(), ['contact', 'country', 'displayName', 'fursuiter', 'lepak', 'meals', 'pastVolunteer', 'payment', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
   assert.equal(staff.staff, true);
   const member = ser.attendeeView({ user_id: 'p1', rsvp_number: 7, created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
-  const noPayment = { method: null, status: 'none', tier: null, amount: null, currency: null, reference: null, hasProof: false, submittedAt: null, paidAt: null };
-  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], lepak: false, country: null, volunteer: false, volunteered: false, pastVolunteer: false, payment: noPayment, contact: [], rsvpAt: 'x' });
+  const noPayment = { method: null, status: 'none', tier: null, items: [], amount: null, currency: null, reference: null, hasProof: false, submittedAt: null, paidAt: null };
+  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], lepak: false, country: null, volunteer: false, fursuiter: false, volunteered: false, pastVolunteer: false, payment: noPayment, contact: [], rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
   // An attendee's country goes to the editors of a cross-border event only.
   const traveller = { user_id: 'p2', created_at: 'x', account: { kind: 'public', username: 'lynx', display_name: 'Lynx', country: 'MY' } };
@@ -475,19 +475,108 @@ test('the event page shows tiers with earlier benefits in full or by name, and h
     ],
   });
   assert.deepEqual(ser.publicEventDetail(event, {}, now).tiers, [
-    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null, methods: [] },
-    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null, methods: [] },
-    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null, methods: [] },
-    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor', methods: [] },
-    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null, methods: [] },
+    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [] },
+    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null, maxPerPerson: 1, methods: [] },
+    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null, maxPerPerson: 1, methods: [] },
+    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor', maxPerPerson: 1, methods: [] },
+    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [] },
   ]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_hidden: true }), {}, now).tiers.map((tier) => tier.price), [null, null, null, null, null]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, tiers_enabled: false }), {}, now).tiers, []);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_type: 'free' }), {}, now).tiers, []);
   assert.deepEqual(ser.managedEvent(event).ticketTiers[1], {
-    id: 't-tier2', name: 'Weekend', price: '80', benefits: 'Three days', includesPrevious: true, previousDisplay: 'full',
+    id: 't-tier2', name: 'Weekend', price: '80', benefits: 'Three days', includes: 't-tier1', previousDisplay: 'full', maxPerPerson: 1,
     paymentMethods: [], paymentLink: '', paymentQrUrl: '',
   });
+});
+
+test('a tier can include any other tier, never round in a loop, and one person can buy more of a tier only where allowed', () => {
+  const tiers = [
+    { id: 't-attendee', name: 'Attendee', price: '60', benefits: 'Entry\nBadge' },
+    { id: 't-sponsor1', name: 'Sponsor', price: '150', benefits: 'Sponsor gift', includes: 't-attendee', previousDisplay: 'full' },
+    { id: 't-super001', name: 'Super sponsor', price: '300', benefits: 'Dinner', includes: 't-sponsor1' },
+    { id: 't-daypass1', name: 'Day pass', price: '25', benefits: 'One day', includes: 't-attendee', previousDisplay: 'full', maxPerPerson: '3' },
+  ];
+  const saved = rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: tiers }));
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.deepEqual(saved.fields.ticket_tiers.map((tier) => [tier.id, tier.includes, tier.includes_previous, tier.max_per_person]), [
+    ['t-attendee', null, false, 1],
+    ['t-sponsor1', 't-attendee', true, 1],
+    ['t-super001', 't-sponsor1', true, 1],
+    // The day pass includes the first tier, not the one before it.
+    ['t-daypass1', 't-attendee', false, 3],
+  ]);
+  const event = row({ tiers_enabled: true, ticket_tiers: saved.fields.ticket_tiers });
+  const shown = ser.publicEventDetail(event, {}, now).tiers;
+  assert.deepEqual(shown[3], { name: 'Day pass', price: 25, benefits: ['One day'], includedBenefits: ['Entry', 'Badge'], includesTier: null, maxPerPerson: 3, methods: [] });
+  assert.equal(shown[2].includesTier, 'Sponsor');
+  assert.deepEqual(ser.managedEvent(event).ticketTiers.map((tier) => [tier.includes, tier.maxPerPerson]), [['', 1], ['t-attendee', 1], ['t-sponsor1', 1], ['t-attendee', 3]]);
+
+  // A loop is broken where it closes; an unknown tier, or itself, is none.
+  const looped = rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: [
+    { id: 't-aaaa', name: 'A', price: '1', includes: 't-bbbb' },
+    { id: 't-bbbb', name: 'B', price: '2', includes: 't-aaaa' },
+    { id: 't-cccc', name: 'C', price: '3', includes: 't-cccc' },
+    { id: 't-dddd', name: 'D', price: '4', includes: 't-gone' },
+  ] }));
+  assert.deepEqual(looped.fields.ticket_tiers.map((tier) => tier.includes), [null, 't-aaaa', null, null]);
+  // A form from before still says "includes the one before it".
+  const older = rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: [
+    { id: 't-aaaa', name: 'A', price: '1' }, { id: 't-bbbb', name: 'B', price: '2', includesPrevious: true },
+  ] }));
+  assert.deepEqual(older.fields.ticket_tiers.map((tier) => tier.includes), [null, 't-aaaa']);
+
+  const bad = (most) => rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: [{ name: 'A', price: '1', maxPerPerson: most }] }));
+  assert.equal(bad('21').field, 'tierMaxPerPerson');
+  assert.equal(bad('0').field, 'tierMaxPerPerson');
+  assert.equal(bad('2.5').field, 'tierMaxPerPerson');
+  assert.equal(bad('').fields.ticket_tiers[0].max_per_person, 1);
+
+  // A basket: several tiers, more than one only where the tier allows.
+  const basket = (items, discount = false) => rules.basketPrice(event, items, { volunteerDiscount: discount });
+  const both = basket([{ tier: 3, tierName: 'Day pass', quantity: 2 }, { tier: 0, tierName: 'Attendee', quantity: 1 }]);
+  assert.equal(both.ok, true);
+  assert.deepEqual(both.items, [
+    { id: 't-attendee', name: 'Attendee', quantity: 1, price: 60 },
+    { id: 't-daypass1', name: 'Day pass', quantity: 2, price: 25 },
+  ]);
+  assert.equal(both.text, 'Attendee, Day pass × 2');
+  assert.equal(both.amount, 110);
+  assert.equal(basket([{ tier: 3, tierName: 'Day pass', quantity: 4 }]).error, 'tier_quantity');
+  assert.equal(basket([{ tier: 0, tierName: 'Attendee', quantity: 2 }]).error, 'tier_quantity');
+  assert.equal(basket([{ tier: 0, tierName: 'Attendee' }, { tier: 0, tierName: 'Attendee' }]).error, 'bad_request');
+  assert.equal(basket([]).error, 'tier_required');
+  assert.equal(basket([{ tier: 1, tierName: 'Renamed' }]).error, 'tier_changed');
+  // The volunteer benefit comes off the total once.
+  const volunteerEvent = row({ ...event, kind: 'convention', volunteer_discount_enabled: true, volunteer_discount_type: 'amount', volunteer_discount_value: 15, volunteer_discount_from: 'x' });
+  const discounted = rules.basketPrice(volunteerEvent, [{ tier: 3, tierName: 'Day pass', quantity: 2 }], { volunteerDiscount: true });
+  assert.equal(rules.volunteerDiscountActive(volunteerEvent), true);
+  assert.deepEqual([discounted.price, discounted.discount, discounted.amount], [50, 15, 35]);
+});
+
+test('tiers in one basket are paid for in the ways they share, to one link or QR code', () => {
+  const qrA = 'qr/11111111-1111-1111-1111-111111111111/aaaaaaaaaaaaaaaaaa.png';
+  const qrB = 'qr/11111111-1111-1111-1111-111111111111/bbbbbbbbbbbbbbbbbb.png';
+  const event = row({
+    tiers_enabled: true,
+    payment_methods: ['onsite', 'qr', 'link'],
+    payment_link: 'https://pay.example.org/event',
+    payment_qr_path: qrA,
+    ticket_tiers: [
+      { id: 't-attendee', name: 'Attendee', price: 60, benefits: [] },
+      { id: 't-dinner01', name: 'Dinner', price: 40, benefits: [], payment_methods: ['qr', 'link'], payment_qr_path: qrB },
+      { id: 't-merch001', name: 'Merch', price: 20, benefits: [], payment_methods: ['onsite'] },
+    ],
+  });
+  const tiers = rules.storedTiers(event);
+  assert.deepEqual(rules.basketOptions(event, [tiers[0]]), ['onsite', 'link', 'qr']);
+  // Another QR code: only the link they share.
+  assert.deepEqual(rules.basketOptions(event, [tiers[0], tiers[1]]), ['link']);
+  assert.deepEqual(rules.basketOptions(event, [tiers[1], tiers[2]]), []);
+  // What someone holds: by id, or by the one name kept before baskets.
+  assert.deepEqual(rules.heldTiers(event, { payment_items: [{ id: 't-dinner01' }, { id: 't-gone' }] }).map((tier) => tier.name), ['Dinner']);
+  assert.deepEqual(rules.heldTiers(event, { payment_tier: 'Merch' }).map((tier) => tier.name), ['Merch']);
+  assert.deepEqual(rules.ticketOptions(event, { payment_items: [{ id: 't-attendee' }, { id: 't-dinner01' }] }), ['link']);
 });
 
 test('the signed-in view of yourself has no secrets', () => {

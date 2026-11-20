@@ -13,7 +13,7 @@ import { currentSession } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { anyEventBySlug, attendance } from '../_lib/events.js';
 import { qrVersion, readPaymentFile } from '../_lib/payments.js';
-import { storedTiers, tierNamed, tierQrPath } from '../_lib/event-rules.js';
+import { storedTiers, heldTiers, tierQrPath } from '../_lib/event-rules.js';
 
 const COLUMNS = 'id, slug, payment_qr_path, tiers_enabled, ticket_tiers';
 
@@ -49,7 +49,13 @@ async function maySee(session, row, path) {
   if (!mine.payment || mine.payment.payment_method !== 'qr' || mine.payment.payment_status === 'none') {
     return false;
   }
-  return tierQrPath(row, tierNamed(row, mine.payment.payment_tier)) === path;
+  // Every tier in one basket pays to the same QR code (basketOptions).
+  let tier = null;
+  const held = heldTiers(row, mine.payment);
+  if (held.length > 0) {
+    tier = held[0];
+  }
+  return tierQrPath(row, tier) === path;
 }
 
 export default route('events/payment-qr', async (request, response) => {

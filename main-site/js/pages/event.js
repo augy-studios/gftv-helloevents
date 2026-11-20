@@ -36,6 +36,8 @@ let choiceAgain = false;
 // Whether "I would like to volunteer" is ticked before this person says
 // they are going (once going, the server's answer says).
 let volunteerPick = false;
+// "I'm a fursuiter", ticked before going (migrations/023).
+let fursuiterPick = false;
 // The contact details form (migrations/021), and what it was drawn for, so
 // a re-render keeps what is being typed.
 let contactForm = null;
@@ -378,6 +380,9 @@ function checkoutHref() {
   if (volunteerPick && !byId('rsvpVolunteerRow').hidden) {
     href = `${href}&volunteer=1`;
   }
+  if (fursuiterPick && !byId('rsvpFursuiterRow').hidden) {
+    href = `${href}&fursuiter=1`;
+  }
   return href;
 }
 
@@ -453,6 +458,7 @@ function renderRsvp() {
   }
   renderMealChoice();
   renderVolunteer();
+  renderFursuiter();
   renderPayment();
 
   let signInHidden = false;
@@ -473,6 +479,8 @@ function renderRsvp() {
   if (needsCountry) {
     byId('rsvpMeals').hidden = true;
     byId('rsvpVolunteerRow').hidden = true;
+    byId('rsvpFursuiterRow').hidden = true;
+    byId('rsvpFursuiterHint').hidden = true;
   }
 
   const rsvpButton = byId('rsvpBtn');
@@ -609,6 +617,24 @@ function canChangeVolunteer() {
   return true;
 }
 
+// "I'm a fursuiter" in the RSVP box, for someone signed in while the event
+// asks (migrations/023), as long as they could sign up to volunteer: while
+// they can join, or once going, until the event is over.
+function renderFursuiter() {
+  const viewer = event.viewer;
+  let shown = false;
+  if (viewer.signedIn && event.fursuitersAsked && canChangeVolunteer()) {
+    shown = true;
+  }
+  byId('rsvpFursuiterRow').hidden = !shown;
+  byId('rsvpFursuiterHint').hidden = !shown;
+  if (viewer.going) {
+    byId('rsvpFursuiter').checked = viewer.fursuiter;
+  } else {
+    byId('rsvpFursuiter').checked = fursuiterPick;
+  }
+}
+
 // The volunteer tick box in the RSVP box, for someone signed in while the
 // convention takes volunteers, and under it their thanks for volunteering
 // here and the benefit they get from volunteering at an earlier convention.
@@ -641,9 +667,10 @@ function renderVolunteer() {
 
 // The ticket tiers, when the event sells its tickets in tiers: each tier's
 // name and price (none while the price is hidden), then what it gives. A
-// tier that includes the one before it either lists those benefits first
-// (marked as included) or says "Everything in <tier>, plus:", as the editor
-// chose.
+// tier that includes another (any other, migrations/022) either lists those
+// benefits first (marked as included) or says "Everything in <tier>,
+// plus:", as the editor chose; and one that a person can buy more than one
+// of says how many.
 function renderTiers() {
   const tiers = event.tiers;
   byId('ticketsBox').hidden = tiers.length === 0;
@@ -666,6 +693,9 @@ function renderTiers() {
     ];
     if (items.length) {
       body.push(createElement('ul', { class: 'tier-benefits' }, items));
+    }
+    if (tier.maxPerPerson > 1) {
+      body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-max', { count: tier.maxPerPerson }) }));
     }
     // How this tier is paid for, when it differs from the event's.
     if (tier.methods.length > 0 && JSON.stringify(tier.methods) !== JSON.stringify(event.payment.methods)) {
@@ -844,6 +874,9 @@ byId('rsvpBtn').addEventListener('click', () => {
     if (body.going && !byId('rsvpVolunteerRow').hidden) {
       body.volunteer = volunteerPick;
     }
+    if (body.going && !byId('rsvpFursuiterRow').hidden) {
+      body.fursuiter = fursuiterPick;
+    }
     const data = await post('/api/events/rsvp', body);
     event = data.event;
     syncChoice();
@@ -918,6 +951,27 @@ byId('rsvpVolunteer').addEventListener('change', () => {
   }).finally(() => {
     byId('rsvpVolunteer').disabled = false;
     renderVolunteer();
+  });
+});
+
+// The same for "I'm a fursuiter": kept until "I am going" before going,
+// saved at once while going.
+byId('rsvpFursuiter').addEventListener('change', () => {
+  const wanted = byId('rsvpFursuiter').checked;
+  byId('rsvpError').textContent = '';
+  if (!event.viewer.going) {
+    fursuiterPick = wanted;
+    byId('rsvpCheckout').href = checkoutHref();
+    return;
+  }
+  byId('rsvpFursuiter').disabled = true;
+  withBusy(null, byId('rsvpError'), async () => {
+    const data = await post('/api/events/rsvp', { slug: event.slug, going: true, meals: event.viewer.meals, lepak: event.viewer.lepak, fursuiter: wanted });
+    event = data.event;
+    render();
+  }).finally(() => {
+    byId('rsvpFursuiter').disabled = false;
+    renderFursuiter();
   });
 });
 

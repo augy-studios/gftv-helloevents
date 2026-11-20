@@ -215,7 +215,7 @@ test('an editor sees the payment and screenshot, and ticks Paid (or takes it bac
   const event = db.table('gftvevents_events').find((each) => each.slug === 'paid-con');
   const list = (await editor.call(manage, { query: { id: event.id } })).json.attendees;
   assert.deepEqual(list[0].payment, {
-    method: 'link', status: 'submitted', tier: 'Day pass', amount: 40, currency: 'SGD', reference: 'PAY-9', hasProof: true,
+    method: 'link', status: 'submitted', tier: 'Day pass', items: [{ name: 'Day pass', quantity: 1, price: 40 }], amount: 40, currency: 'SGD', reference: 'PAY-9', hasProof: true,
     submittedAt: list[0].payment.submittedAt, paidAt: null,
   });
 

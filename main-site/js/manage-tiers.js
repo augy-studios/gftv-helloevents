@@ -1,8 +1,14 @@
 // The ticket tiers in the edit form's Price section (migrations/008): one
 // card per tier, with its name, price and benefits (one per line), up to
-// MAX_TIERS. From the second tier on, a card can include the benefits of
-// the tier before it, and says how the event page shows them: listed again
-// in full, or as "Everything in <previous tier>, plus:".
+// MAX_TIERS. A card can include the benefits of any other tier (a list of
+// them all, migrations/022: a day pass can include just the attendee pass),
+// and says how the event page shows them: listed again in full, or as
+// "Everything in <tier>, plus:". A tier that would go round in a loop
+// (including one that includes it) cannot be picked.
+//
+// A card also says whether one person can buy more than one of the tier
+// (migrations/022), and then at most how many (blank for MAX_PER_PERSON).
+// Without that, each person buys it once at most.
 //
 // The server checks every field again (api/_lib/event-rules.js readTiers)
 // and drops a card left wholly blank.
@@ -21,6 +27,7 @@ import { post } from './api.js';
 import { qrPicture } from './picture-file.js';
 
 const MAX_TIERS = 10;
+const MAX_PER_PERSON = 20;
 const DISPLAYS = ['reference', 'full'];
 const METHODS = ['onsite', 'link', 'qr'];
 // The open event ({ id }), or null for one not saved yet, and what to do
@@ -59,28 +66,76 @@ function tierName(card, index) {
   return translate('manage.tier-number', { number: index + 1 });
 }
 
-// Numbers the cards, names their Remove buttons, words each "includes" box
-// and display choice after the tier before it, shows those only from the
-// second card on (and the choice only while the box is ticked), and hides
-// Add once the list is full.
+// Whether a card including the tier with id would go round in a loop: that
+// tier, or one it includes in turn, includes this card.
+function makesLoop(cards, card, id) {
+  const ownId = input(card, 'id').value;
+  const seen = new Set();
+  let next = id;
+  while (next && !seen.has(next)) {
+    if (next === ownId) {
+      return true;
+    }
+    seen.add(next);
+    const holder = cards.find((each) => input(each, 'id').value === next);
+    if (!holder) {
+      return false;
+    }
+    next = holder.dataset.includes;
+  }
+  return false;
+}
+
+// A card's "Includes everything in" list: nothing else, or any other tier
+// by name, keeping what is picked (dropped when that tier has gone).
+function fillIncludes(cards, card) {
+  const select = input(card, 'includes');
+  let picked = card.dataset.includes;
+  const others = cards.filter((each) => each !== card);
+  if (!others.some((each) => input(each, 'id').value === picked)) {
+    picked = '';
+  }
+  const options = [createElement('option', { value: '', text: translate('manage.tier-includes-none') })];
+  cards.forEach((other, place) => {
+    if (other === card) {
+      return;
+    }
+    const id = input(other, 'id').value;
+    const option = createElement('option', { value: id, text: tierName(other, place) });
+    // A tier that includes this one (in turn) cannot be included back.
+    option.disabled = makesLoop(cards, card, id);
+    options.push(option);
+  });
+  select.replaceChildren(...options);
+  select.value = picked;
+  card.dataset.includes = picked;
+  return picked;
+}
+
+// Numbers the cards, names their Remove buttons, lists the other tiers in
+// each "includes" list, words each display choice after the tier picked
+// (shown only while one is), shows "at most" only while more than one is
+// allowed, and hides Add once the list is full.
 function renumber() {
   const cards = [...list().children];
   cards.forEach((card, index) => {
     const number = index + 1;
     card.querySelector('.tier-title').textContent = translate('manage.tier-number', { number });
     card.querySelector('.tier-remove').setAttribute('aria-label', translate('manage.tier-remove-named', { number }));
-    const previous = cards[index - 1];
-    card.querySelector('.tier-includes-field').hidden = !previous;
-    if (!previous) {
-      card.querySelector('.tier-display-field').hidden = true;
+    card.querySelector('.tier-includes-field').hidden = cards.length < 2;
+    card.querySelector('.tier-most-field').hidden = !input(card, 'multiple').checked;
+  });
+  cards.forEach((card) => {
+    const picked = fillIncludes(cards, card);
+    card.querySelector('.tier-display-field').hidden = !picked;
+    if (!picked) {
       return;
     }
-    const previousName = tierName(previous, index - 1);
-    card.querySelector('.tier-includes-label').textContent = translate('manage.field.includesPrevious', { tier: previousName });
+    const place = cards.findIndex((each) => input(each, 'id').value === picked);
+    const includedName = tierName(cards[place], place);
     const display = input(card, 'previousDisplay');
-    display.querySelector('[value="reference"]').textContent = translate('manage.tier-display.reference', { tier: previousName });
+    display.querySelector('[value="reference"]').textContent = translate('manage.tier-display.reference', { tier: includedName });
     display.querySelector('[value="full"]').textContent = translate('manage.tier-display.full');
-    card.querySelector('.tier-display-field').hidden = !input(card, 'includesPrevious').checked;
   });
   byId('tierAdd').hidden = cards.length >= MAX_TIERS;
 }
@@ -168,13 +223,22 @@ function tierCard(values) {
         createElement('textarea', { 'data-key': 'benefits', rows: 3, maxlength: 4200 }),
         createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierBenefits' }),
       ]),
-      createElement('label', { class: 'check span-2 tier-includes-field' }, [
-        createElement('input', { type: 'checkbox', 'data-key': 'includesPrevious' }),
-        createElement('span', { class: 'tier-includes-label' }),
+      createElement('label', { class: 'field span-2 tier-includes-field' }, [
+        createElement('span', { i18n: 'manage.field.tierIncludes' }),
+        createElement('select', { 'data-key': 'includes' }),
       ]),
       createElement('label', { class: 'field span-2 tier-display-field' }, [
         createElement('span', { i18n: 'manage.field.previousDisplay' }),
         display,
+      ]),
+      createElement('label', { class: 'check span-2' }, [
+        createElement('input', { type: 'checkbox', 'data-key': 'multiple' }),
+        createElement('span', { i18n: 'manage.field.tierMultiple' }),
+      ]),
+      createElement('label', { class: 'field tier-most-field' }, [
+        createElement('span', { i18n: 'manage.field.tierMaxPerPerson' }),
+        createElement('input', { type: 'number', 'data-key': 'maxPerPerson', min: 2, max: MAX_PER_PERSON, step: 1, inputmode: 'numeric', placeholder: String(MAX_PER_PERSON) }),
+        createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierMaxPerPerson' }),
       ]),
       payPart(),
     ]),
@@ -188,7 +252,21 @@ function tierCard(values) {
     }
     input(card, key).value = value;
   }
-  input(card, 'includesPrevious').checked = values.includesPrevious === true;
+  // Shown in the list once the cards are numbered (renumber).
+  let includes = '';
+  if (typeof values.includes === 'string') {
+    includes = values.includes;
+  }
+  card.dataset.includes = includes;
+  let most = Number(values.maxPerPerson);
+  if (!Number.isInteger(most) || most < 1) {
+    most = 1;
+  }
+  input(card, 'multiple').checked = most > 1;
+  input(card, 'maxPerPerson').value = '';
+  if (most > 1 && most < MAX_PER_PERSON) {
+    input(card, 'maxPerPerson').value = String(most);
+  }
   let shown = values.previousDisplay;
   if (!DISPLAYS.includes(shown)) {
     shown = 'reference';
@@ -239,7 +317,11 @@ function tierCard(values) {
 
   // The next card's wording follows this tier's name as it is typed.
   input(card, 'name').addEventListener('input', renumber);
-  input(card, 'includesPrevious').addEventListener('change', renumber);
+  input(card, 'includes').addEventListener('change', () => {
+    card.dataset.includes = input(card, 'includes').value;
+    renumber();
+  });
+  input(card, 'multiple').addEventListener('change', renumber);
   removeButton.addEventListener('click', () => {
     let next = card.nextElementSibling;
     if (!next) {
@@ -263,21 +345,31 @@ export function setTiers(tiers) {
   renumber();
 }
 
-// The cards' values, in order, as the server takes them. The first tier
-// never includes another.
+// How many of a card's tier one person can buy, as the server takes it: 1
+// unless more than one is allowed, then what was typed (blank for
+// MAX_PER_PERSON).
+function maxPerPerson(card) {
+  if (!input(card, 'multiple').checked) {
+    return 1;
+  }
+  const typed = input(card, 'maxPerPerson').value.trim();
+  if (typed === '') {
+    return MAX_PER_PERSON;
+  }
+  return typed;
+}
+
+// The cards' values, in order, as the server takes them.
 export function readTiers() {
-  return [...list().children].map((card, index) => {
-    let includesPrevious = false;
-    if (index > 0) {
-      includesPrevious = input(card, 'includesPrevious').checked;
-    }
+  return [...list().children].map((card) => {
     return {
       id: input(card, 'id').value,
       name: input(card, 'name').value,
       price: input(card, 'price').value,
       benefits: input(card, 'benefits').value,
-      includesPrevious,
+      includes: card.dataset.includes,
       previousDisplay: input(card, 'previousDisplay').value,
+      maxPerPerson: maxPerPerson(card),
       paymentMethods: METHODS.filter((method) => input(card, `pay-${method}`).checked),
       paymentLink: input(card, 'paymentLink').value,
     };
@@ -285,10 +377,11 @@ export function readTiers() {
 }
 
 // A new, empty card, ready to type in. It lists only its own benefits until
-// the editor ticks "Includes everything in ..." (then naming that tier,
-// unless they pick listing them in full).
+// the editor picks a tier under "Includes everything in" (then naming that
+// tier, unless they pick listing them in full), and is bought once per
+// person.
 export function addTier() {
-  const card = tierCard({ includesPrevious: false, previousDisplay: 'reference' });
+  const card = tierCard({ includes: '', previousDisplay: 'reference', maxPerPerson: 1 });
   list().append(card);
   renumber();
   input(card, 'name').focus();

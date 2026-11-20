@@ -26,10 +26,15 @@ export const MAX_CUSTOM_MEALS = 5;
 export const MEAL_LOCATION_LABELS = ['meal', 'meeting', 'custom'];
 export const MAX_MEAL_LOCATIONS = 3;
 // Ticket tiers on a paid event (migrations/008): at most MAX_TIERS, each with
-// at most MAX_TIER_BENEFITS benefits. A tier that includes the one before it
-// shows those benefits again in full, or names the tier ("reference").
+// at most MAX_TIER_BENEFITS benefits. A tier can include everything in any
+// other tier (a weekend pass the attendee pass, a day pass just the
+// attendee pass too), and shows those benefits again in full, or names the
+// tier ("reference"). One person can buy several tiers at once, each once,
+// or up to MAX_PER_PERSON of a tier the editor lets them buy more than once
+// of (migrations/022).
 export const MAX_TIERS = 10;
 export const MAX_TIER_BENEFITS = 20;
+export const MAX_PER_PERSON = 20;
 export const PREVIOUS_DISPLAYS = ['full', 'reference'];
 // Volunteers (migrations/012): only a convention takes them, and a later
 // convention can give the people who volunteered at an earlier one a
@@ -823,7 +828,21 @@ function readCapacity(body, fields) {
     fields.capacity = capacity;
   }
   fields.rsvp_open = body.rsvpOpen !== false;
+  // Whether people going are asked if they are fursuiters (migrations/023),
+  // on any kind of event. Without the field, the stored setting is kept.
+  if (body.fursuitersAsked !== undefined) {
+    fields.fursuiters_asked = body.fursuitersAsked === true;
+  }
   return null;
+}
+
+// Whether an event asks the people going if they are fursuiters
+// (migrations/023).
+export function asksFursuiters(row) {
+  if (!row) {
+    return false;
+  }
+  return row.fursuiters_asked === true;
 }
 
 // Whether a meal id is one an event can offer: breakfast, lunch, dinner, or
@@ -1000,7 +1019,9 @@ function readMeals(body, fields) {
 }
 
 // One ticket tier from the form: { name, price, benefits (one per line),
-// includesPrevious, previousDisplay }, as { ok: true, tier } (tier null when
+// includes (another tier's id, or blank for none), previousDisplay,
+// maxPerPerson (blank or 1 for once per person, up to MAX_PER_PERSON) },
+// as { ok: true, tier } (tier null when
 // it is left wholly blank, so an untouched card is dropped) or
 // { ok: false, field }. A tier needs a name and a price (0 for a free tier).
 function readTier(entry) {
@@ -1041,6 +1062,19 @@ function readTier(entry) {
   if (price.value === null) {
     return { ok: false, field: 'tierPrice' };
   }
+  const most = readMaxPerPerson(entry.maxPerPerson);
+  if (!most.ok) {
+    return { ok: false, field: 'tierMaxPerPerson' };
+  }
+  let includes = null;
+  if (typeof entry.includes === 'string' && TIER_ID.test(entry.includes)) {
+    includes = entry.includes;
+  }
+  // A form from before tiers could include any tier sends includesPrevious.
+  let includesPrevious = false;
+  if (entry.includes === undefined && entry.includesPrevious === true) {
+    includesPrevious = true;
+  }
   let previousDisplay = allowedOrNull(PREVIOUS_DISPLAYS, entry.previousDisplay);
   if (!previousDisplay) {
     previousDisplay = 'reference';
@@ -1071,13 +1105,81 @@ function readTier(entry) {
       name,
       price: price.value,
       benefits,
-      includes_previous: entry.includesPrevious === true,
+      includes,
+      includes_previous: includesPrevious,
       previous_display: previousDisplay,
+      max_per_person: most.value,
       payment_methods: PAYMENT_METHODS.filter((method) => methods.includes(method)),
       payment_link: link.url,
       payment_qr_path: null,
     },
   };
+}
+
+// How many of a tier one person can buy: blank (or 1) for once, else 2 to
+// MAX_PER_PERSON.
+function readMaxPerPerson(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { ok: true, value: 1 };
+  }
+  const most = Number(value);
+  if (!Number.isInteger(most) || most < 1 || most > MAX_PER_PERSON) {
+    return { ok: false };
+  }
+  return { ok: true, value: most };
+}
+
+// Each tier's includes made safe, in place: a tier from before tiers could
+// include any tier (includes_previous) includes the one before it; one
+// naming a tier that is not in the list, or itself, includes none; and a
+// tier whose includes would go round in a loop back to itself includes
+// none. includes_previous is then written to match, for a release from
+// before.
+function settleIncludes(tiers) {
+  const ids = new Set(tiers.map((tier) => tier.id));
+  tiers.forEach((tier, index) => {
+    if (tier.includes === null && tier.includes_previous === true && index > 0) {
+      tier.includes = tiers[index - 1].id;
+    }
+    if (!ids.has(tier.includes) || tier.includes === tier.id) {
+      tier.includes = null;
+    }
+  });
+  const byId = new Map(tiers.map((tier) => [tier.id, tier]));
+  for (const tier of tiers) {
+    const seen = new Set([tier.id]);
+    let next = byId.get(tier.includes);
+    while (next) {
+      if (seen.has(next.id)) {
+        tier.includes = null;
+        break;
+      }
+      seen.add(next.id);
+      next = byId.get(next.includes);
+    }
+  }
+  tiers.forEach((tier, index) => {
+    tier.includes_previous = false;
+    if (index > 0 && tier.includes === tiers[index - 1].id) {
+      tier.includes_previous = true;
+    }
+  });
+  return tiers;
+}
+
+// The tiers a tier includes, nearest first (the one it names, then the one
+// that names, and so on). tiers: storedTiers(row).
+export function includedTiers(tiers, tier) {
+  const byId = new Map(tiers.map((each) => [each.id, each]));
+  const chain = [];
+  const seen = new Set([tier.id]);
+  let next = byId.get(tier.includes);
+  while (next && !seen.has(next.id)) {
+    chain.push(next);
+    seen.add(next.id);
+    next = byId.get(next.includes);
+  }
+  return chain;
 }
 
 // A tier's id: "t-" and 4 to 16 lowercase letters or digits. The edit form
@@ -1092,7 +1194,8 @@ function newTierId() {
 // Ticket tiers (migrations/008): the list, each checked, and whether they are
 // on. They are on only for a paid event, and then there must be at least
 // and the cheapest and dearest prices become the price range the feed cards
-// show. The first tier has no tier before it to include. With no
+// show. A tier includes another one in the list or none (settleIncludes).
+// With no
 // ticketTiers field at all the stored tiers are kept, so a page from before
 // tiers cannot wipe them.
 //
@@ -1120,10 +1223,15 @@ function readTiers(body, fields) {
       tiers.push(check.tier);
     }
   }
-  if (tiers.length) {
-    tiers[0].includes_previous = false;
+  // Two tiers with one id (a copied form): the second gets a new one.
+  const ids = new Set();
+  for (const tier of tiers) {
+    if (ids.has(tier.id)) {
+      tier.id = newTierId();
+    }
+    ids.add(tier.id);
   }
-  fields.ticket_tiers = tiers;
+  fields.ticket_tiers = settleIncludes(tiers);
   fields.tiers_enabled = false;
   if (body.tiersEnabled === true && fields.price_type === 'paid') {
     fields.tiers_enabled = true;
@@ -1186,23 +1294,29 @@ export function storedTiers(row) {
     if (typeof tier.payment_qr_path === 'string' && tier.payment_qr_path.startsWith('qr/')) {
       qrPath = tier.payment_qr_path;
     }
+    let includes = null;
+    if (typeof tier.includes === 'string' && TIER_ID.test(tier.includes)) {
+      includes = tier.includes;
+    }
+    let most = Number(tier.max_per_person);
+    if (!Number.isInteger(most) || most < 1) {
+      most = 1;
+    }
     tiers.push({
       id,
       name: tier.name,
       price,
       benefits,
+      includes,
       includes_previous: tier.includes_previous === true,
       previous_display: previousDisplay,
+      max_per_person: Math.min(most, MAX_PER_PERSON),
       payment_methods: methods,
       payment_link: link,
       payment_qr_path: qrPath,
     });
   }
-  // The first tier has no tier before it to include.
-  if (tiers.length) {
-    tiers[0].includes_previous = false;
-  }
-  return tiers;
+  return settleIncludes(tiers);
 }
 
 // Volunteers (migrations/012), for a convention only: whether it takes
@@ -1492,12 +1606,62 @@ export function paymentOptions(row) {
   });
 }
 
-// The ways someone holding a ticket can pay for it: their tier's (by the
-// name kept at checkout), or the event's.
-export function ticketOptions(row, tierName) {
-  const tier = tierNamed(row, tierName);
-  if (tier) {
-    return tierOptions(row, tier);
+// The ways a basket of tiers can be paid for together, in order: those
+// every tier in it takes, a link only when they all pay through the same
+// one, and a QR code only when they all use the same one (one payment pays
+// for the lot). Empty when they have no way in common.
+export function basketOptions(row, tiers) {
+  if (tiers.length === 0) {
+    return [];
+  }
+  return tierOptions(row, tiers[0]).filter((method) => {
+    if (!tiers.every((tier) => tierOptions(row, tier).includes(method))) {
+      return false;
+    }
+    if (method === 'link') {
+      return new Set(tiers.map((tier) => tierLink(row, tier))).size === 1;
+    }
+    if (method === 'qr') {
+      return new Set(tiers.map((tier) => tierQrPath(row, tier))).size === 1;
+    }
+    return true;
+  });
+}
+
+// The tiers someone's ticket is for: by id from what checkout kept
+// (payment_items, migrations/022), or by the one tier name kept before
+// that. Tiers since removed are left out. stored: their attendee row.
+export function heldTiers(row, stored) {
+  if (!sellsTiers(row) || !stored) {
+    return [];
+  }
+  const tiers = storedTiers(row);
+  if (Array.isArray(stored.payment_items) && stored.payment_items.length > 0) {
+    return stored.payment_items
+      .filter(isObject)
+      .map((item) => tiers.find((tier) => tier.id === item.id))
+      .filter(Boolean);
+  }
+  const named = tierNamed(row, stored.payment_tier);
+  if (named) {
+    return [named];
+  }
+  return [];
+}
+
+function isObject(value) {
+  if (value === null) {
+    return false;
+  }
+  return typeof value === 'object';
+}
+
+// The ways someone holding a ticket can pay for it: their tiers' (as one
+// basket), or the event's.
+export function ticketOptions(row, stored) {
+  const tiers = heldTiers(row, stored);
+  if (tiers.length > 0) {
+    return basketOptions(row, tiers);
   }
   return paymentOptions(row);
 }
@@ -1534,6 +1698,13 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
   } else {
     return { ok: false, error: 'payment_unavailable' };
   }
+  const discount = volunteerOff(row, price, volunteerDiscount);
+  const amount = Math.round((price - discount) * 100) / 100;
+  return { ok: true, tier, price, amount, discount };
+}
+
+// The volunteer benefit on an amount: what it takes off, rounded to cents.
+function volunteerOff(row, price, volunteerDiscount) {
   let discount = 0;
   if (volunteerDiscount && volunteerDiscountActive(row)) {
     const value = Number(row.volunteer_discount_value);
@@ -1543,9 +1714,74 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
       discount = (price * Math.min(value, 100)) / 100;
     }
   }
-  discount = Math.round(discount * 100) / 100;
+  return Math.round(discount * 100) / 100;
+}
+
+// What a basket of tiers costs this person (migrations/022): items, from
+// the checkout page, a list of { tier (its place in the list), tierName
+// (so a list that changed meanwhile is caught), quantity }. Each tier at
+// most once in the list, and more than one of it only up to its
+// max_per_person. The volunteer benefit comes off the total once.
+//
+// -> { ok: true, tiers, items: [{ id, name, quantity, price }], text,
+// price, amount, discount } (text: the tiers in words, "Day pass × 2,
+// Dinner", as kept in payment_tier), or { ok: false, error }.
+export function basketPrice(row, items, { volunteerDiscount = false } = {}) {
+  const tiers = storedTiers(row);
+  if (!sellsTiers(row)) {
+    return { ok: false, error: 'payment_unavailable' };
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return { ok: false, error: 'tier_required' };
+  }
+  if (items.length > tiers.length) {
+    return { ok: false, error: 'bad_request' };
+  }
+  const picked = [];
+  const chosen = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      return { ok: false, error: 'bad_request' };
+    }
+    const index = item.tier;
+    if (!Number.isInteger(index) || index < 0 || index >= tiers.length) {
+      return { ok: false, error: 'tier_required' };
+    }
+    const tier = tiers[index];
+    if (tier.name !== item.tierName) {
+      return { ok: false, error: 'tier_changed' };
+    }
+    if (chosen.includes(tier)) {
+      return { ok: false, error: 'bad_request' };
+    }
+    let quantity = 1;
+    if (item.quantity !== undefined) {
+      quantity = item.quantity;
+    }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > tier.max_per_person) {
+      return { ok: false, error: 'tier_quantity' };
+    }
+    chosen.push(tier);
+    picked.push({ id: tier.id, name: tier.name, quantity, price: tier.price });
+  }
+  // In the event's own order, whatever order they came in.
+  const place = (id) => tiers.findIndex((tier) => tier.id === id);
+  picked.sort((first, second) => place(first.id) - place(second.id));
+  chosen.sort((first, second) => place(first.id) - place(second.id));
+  const price = Math.round(picked.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
+  const discount = volunteerOff(row, price, volunteerDiscount);
   const amount = Math.round((price - discount) * 100) / 100;
-  return { ok: true, tier, price, amount, discount };
+  return { ok: true, tiers: chosen, items: picked, text: basketText(picked), price, amount, discount };
+}
+
+// A basket's tiers in words: "Day pass × 2, Dinner".
+export function basketText(items) {
+  return items.map((item) => {
+    if (item.quantity > 1) {
+      return `${item.name} × ${item.quantity}`;
+    }
+    return item.name;
+  }).join(', ');
 }
 
 // ---------------------------------------------------------------------------

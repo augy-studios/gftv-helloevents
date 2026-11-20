@@ -77,7 +77,7 @@ async function report(request, response, event, user, stored, body) {
 
 // "method": another way to pay.
 async function switchMethod(request, response, event, user, stored, body) {
-  if (!ticketOptions(event, stored.payment_tier).includes(body.method)) {
+  if (!ticketOptions(event, stored).includes(body.method)) {
     return fail(response, 400, 'payment_method_required');
   }
   if (!stored.payment_method) {

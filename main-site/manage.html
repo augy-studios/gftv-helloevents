@@ -182,6 +182,11 @@
                             <p class="field-hint span-2" id="crossBorderHint" data-i18n="manage.hint.crossBorder">People must give their country of origin on their account to RSVP or open the link, and the attendee list shows where everyone is from. Ticked for a convention to start with.</p>
                             <label class="field">
                                 <span data-i18n="manage.field.organiserName">Organiser</span>
+                                <select id="organiserPick" aria-describedby="organiserHint"></select>
+                                <span class="field-hint" id="organiserHint" data-i18n="manage.hint.organiserName">The GFTV team running it, or Other for anyone else.</span>
+                            </label>
+                            <label class="field" id="organiserOtherField" hidden>
+                                <span data-i18n="manage.field.organiserOther">Organiser's name</span>
                                 <input id="f-organiserName" name="organiserName" type="text" maxlength="120">
                             </label>
                             <label class="field span-2">
@@ -202,17 +207,17 @@
                                     <button class="rich-btn" type="button" data-command="redo" aria-label="Redo (Ctrl+Y)" title="Redo (Ctrl+Y)" data-i18n-attr="aria-label:editor.redo,title:editor.redo"><span data-rich-icon="redo"></span></button>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Style" data-i18n-attr="aria-label:editor.group-style">
-                                    <select class="rich-select" id="richBlock" aria-label="Paragraph style" title="Paragraph style" data-i18n-attr="aria-label:editor.style,title:editor.style"><option value="p" data-i18n="editor.style-normal">Normal text</option><option value="h2" data-i18n="editor.style-h1">Heading 1</option><option value="h3" data-i18n="editor.style-h2">Heading 2</option><option value="h4" data-i18n="editor.style-h3">Heading 3</option><option value="blockquote" data-i18n="editor.style-quote">Quote</option></select>
+                                    <select class="rich-select" id="richBlock" aria-label="Paragraph style (Ctrl+Alt+1, 2, 3 for headings, Ctrl+Alt+0 for normal text)" title="Paragraph style (Ctrl+Alt+1, 2, 3 for headings, Ctrl+Alt+0 for normal text)" data-i18n-attr="aria-label:editor.style,title:editor.style"><option value="p" data-i18n="editor.style-normal">Normal text</option><option value="h2" data-i18n="editor.style-h1">Heading 1</option><option value="h3" data-i18n="editor.style-h2">Heading 2</option><option value="h4" data-i18n="editor.style-h3">Heading 3</option><option value="blockquote" data-i18n="editor.style-quote">Quote</option></select>
                                     <select class="rich-select rich-font" id="richFont" aria-label="Font" title="Font" data-i18n-attr="aria-label:editor.font,title:editor.font"><option value="" data-i18n="editor.font-default">Default font</option><option value="Arial">Arial</option><option value="Helvetica">Helvetica</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Trebuchet MS">Trebuchet MS</option><option value="Segoe UI">Segoe UI</option><option value="Calibri">Calibri</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Garamond">Garamond</option><option value="Cambria">Cambria</option><option value="Courier New">Courier New</option><option value="Consolas">Consolas</option><option value="Comic Sans MS">Comic Sans MS</option><option value="Impact">Impact</option></select>
-                                    <select class="rich-select rich-size" id="richSize" aria-label="Font size (points)" title="Font size (points)" data-i18n-attr="aria-label:editor.size,title:editor.size"><option value="" data-i18n="editor.size-default">Size</option><option value="11">8</option><option value="12">9</option><option value="13">10</option><option value="15">11</option><option value="16">12</option><option value="19">14</option><option value="21">16</option><option value="24">18</option><option value="27">20</option><option value="32">24</option><option value="37">28</option><option value="43">32</option><option value="48">36</option><option value="64">48</option><option value="96">72</option></select>
+                                    <select class="rich-select rich-size" id="richSize" aria-label="Font size in points (Ctrl+Shift+&gt; bigger, Ctrl+Shift+&lt; smaller)" title="Font size in points (Ctrl+Shift+&gt; bigger, Ctrl+Shift+&lt; smaller)" data-i18n-attr="aria-label:editor.size,title:editor.size"><option value="" data-i18n="editor.size-default">Size</option><option value="11">8</option><option value="12">9</option><option value="13">10</option><option value="15">11</option><option value="16">12</option><option value="19">14</option><option value="21">16</option><option value="24">18</option><option value="27">20</option><option value="32">24</option><option value="37">28</option><option value="43">32</option><option value="48">36</option><option value="64">48</option><option value="96">72</option></select>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Text" data-i18n-attr="aria-label:editor.group-text">
                                     <button class="rich-btn" type="button" data-command="bold" aria-pressed="false" aria-label="Bold (Ctrl+B)" title="Bold (Ctrl+B)" data-i18n-attr="aria-label:editor.bold,title:editor.bold"><span data-rich-icon="bold"></span></button>
                                     <button class="rich-btn" type="button" data-command="italic" aria-pressed="false" aria-label="Italic (Ctrl+I)" title="Italic (Ctrl+I)" data-i18n-attr="aria-label:editor.italic,title:editor.italic"><span data-rich-icon="italic"></span></button>
                                     <button class="rich-btn" type="button" data-command="underline" aria-pressed="false" aria-label="Underline (Ctrl+U)" title="Underline (Ctrl+U)" data-i18n-attr="aria-label:editor.underline,title:editor.underline"><span data-rich-icon="underline"></span></button>
-                                    <button class="rich-btn" type="button" data-command="strikeThrough" aria-pressed="false" aria-label="Strikethrough" title="Strikethrough" data-i18n-attr="aria-label:editor.strike,title:editor.strike"><span data-rich-icon="strike"></span></button>
-                                    <button class="rich-btn" type="button" data-command="subscript" aria-pressed="false" aria-label="Subscript" title="Subscript" data-i18n-attr="aria-label:editor.subscript,title:editor.subscript"><span data-rich-icon="subscript"></span></button>
-                                    <button class="rich-btn" type="button" data-command="superscript" aria-pressed="false" aria-label="Superscript" title="Superscript" data-i18n-attr="aria-label:editor.superscript,title:editor.superscript"><span data-rich-icon="superscript"></span></button>
+                                    <button class="rich-btn" type="button" data-command="strikeThrough" aria-pressed="false" aria-label="Strikethrough (Ctrl+Shift+X)" title="Strikethrough (Ctrl+Shift+X)" data-i18n-attr="aria-label:editor.strike,title:editor.strike"><span data-rich-icon="strike"></span></button>
+                                    <button class="rich-btn" type="button" data-command="subscript" aria-pressed="false" aria-label="Subscript (Ctrl+,)" title="Subscript (Ctrl+,)" data-i18n-attr="aria-label:editor.subscript,title:editor.subscript"><span data-rich-icon="subscript"></span></button>
+                                    <button class="rich-btn" type="button" data-command="superscript" aria-pressed="false" aria-label="Superscript (Ctrl+.)" title="Superscript (Ctrl+.)" data-i18n-attr="aria-label:editor.superscript,title:editor.superscript"><span data-rich-icon="superscript"></span></button>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Colour" data-i18n-attr="aria-label:editor.group-colour">
                                     <span class="rich-colour">
@@ -231,19 +236,19 @@
                                         <label class="rich-custom"><span data-i18n="editor.colour-more">More colours</span><input type="color" value="#c8285a"></label>
                                       </div>
                                     </span>
-                                    <button class="rich-btn" type="button" data-command="removeFormat" aria-label="Clear formatting" title="Clear formatting" data-i18n-attr="aria-label:editor.clear,title:editor.clear"><span data-rich-icon="clear"></span></button>
+                                    <button class="rich-btn" type="button" data-command="removeFormat" aria-label="Clear formatting (Ctrl+\)" title="Clear formatting (Ctrl+\)" data-i18n-attr="aria-label:editor.clear,title:editor.clear"><span data-rich-icon="clear"></span></button>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Alignment" data-i18n-attr="aria-label:editor.group-align">
-                                    <button class="rich-btn" type="button" data-command="justifyLeft" aria-pressed="false" aria-label="Align left" title="Align left" data-i18n-attr="aria-label:editor.align-left,title:editor.align-left"><span data-rich-icon="align-left"></span></button>
-                                    <button class="rich-btn" type="button" data-command="justifyCenter" aria-pressed="false" aria-label="Centre" title="Centre" data-i18n-attr="aria-label:editor.align-center,title:editor.align-center"><span data-rich-icon="align-center"></span></button>
-                                    <button class="rich-btn" type="button" data-command="justifyRight" aria-pressed="false" aria-label="Align right" title="Align right" data-i18n-attr="aria-label:editor.align-right,title:editor.align-right"><span data-rich-icon="align-right"></span></button>
-                                    <button class="rich-btn" type="button" data-command="justifyFull" aria-pressed="false" aria-label="Justify" title="Justify" data-i18n-attr="aria-label:editor.align-justify,title:editor.align-justify"><span data-rich-icon="align-justify"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyLeft" aria-pressed="false" aria-label="Align left (Ctrl+L)" title="Align left (Ctrl+L)" data-i18n-attr="aria-label:editor.align-left,title:editor.align-left"><span data-rich-icon="align-left"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyCenter" aria-pressed="false" aria-label="Centre (Ctrl+E)" title="Centre (Ctrl+E)" data-i18n-attr="aria-label:editor.align-center,title:editor.align-center"><span data-rich-icon="align-center"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyRight" aria-pressed="false" aria-label="Align right (Ctrl+R)" title="Align right (Ctrl+R)" data-i18n-attr="aria-label:editor.align-right,title:editor.align-right"><span data-rich-icon="align-right"></span></button>
+                                    <button class="rich-btn" type="button" data-command="justifyFull" aria-pressed="false" aria-label="Justify (Ctrl+J)" title="Justify (Ctrl+J)" data-i18n-attr="aria-label:editor.align-justify,title:editor.align-justify"><span data-rich-icon="align-justify"></span></button>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Paragraph" data-i18n-attr="aria-label:editor.group-paragraph">
-                                    <button class="rich-btn" type="button" data-command="insertUnorderedList" aria-pressed="false" aria-label="Bullets" title="Bullets" data-i18n-attr="aria-label:editor.bullets,title:editor.bullets"><span data-rich-icon="bullets"></span></button>
-                                    <button class="rich-btn" type="button" data-command="insertOrderedList" aria-pressed="false" aria-label="Numbering" title="Numbering" data-i18n-attr="aria-label:editor.numbers,title:editor.numbers"><span data-rich-icon="numbers"></span></button>
-                                    <button class="rich-btn" type="button" data-command="outdent" aria-label="Decrease indent" title="Decrease indent" data-i18n-attr="aria-label:editor.outdent,title:editor.outdent"><span data-rich-icon="outdent"></span></button>
-                                    <button class="rich-btn" type="button" data-command="indent" aria-label="Increase indent" title="Increase indent" data-i18n-attr="aria-label:editor.indent,title:editor.indent"><span data-rich-icon="indent"></span></button>
+                                    <button class="rich-btn" type="button" data-command="insertUnorderedList" aria-pressed="false" aria-label="Bullets (Ctrl+Shift+8)" title="Bullets (Ctrl+Shift+8)" data-i18n-attr="aria-label:editor.bullets,title:editor.bullets"><span data-rich-icon="bullets"></span></button>
+                                    <button class="rich-btn" type="button" data-command="insertOrderedList" aria-pressed="false" aria-label="Numbering (Ctrl+Shift+7)" title="Numbering (Ctrl+Shift+7)" data-i18n-attr="aria-label:editor.numbers,title:editor.numbers"><span data-rich-icon="numbers"></span></button>
+                                    <button class="rich-btn" type="button" data-command="outdent" aria-label="Decrease indent (Ctrl+[)" title="Decrease indent (Ctrl+[)" data-i18n-attr="aria-label:editor.outdent,title:editor.outdent"><span data-rich-icon="outdent"></span></button>
+                                    <button class="rich-btn" type="button" data-command="indent" aria-label="Increase indent (Ctrl+])" title="Increase indent (Ctrl+])" data-i18n-attr="aria-label:editor.indent,title:editor.indent"><span data-rich-icon="indent"></span></button>
                                   </div>
                                   <div class="rich-group" role="group" aria-label="Insert" data-i18n-attr="aria-label:editor.group-insert">
                                     <button class="rich-btn" type="button" data-command="link" aria-label="Link (Ctrl+K)" title="Link (Ctrl+K)" data-i18n-attr="aria-label:editor.link,title:editor.link"><span data-rich-icon="link"></span></button>
@@ -276,6 +281,14 @@
                                 </div>
                                 <div class="rich-editor rich-text" id="f-description" contenteditable="true" role="textbox" aria-multiline="true" lang="en" spellcheck="true" aria-labelledby="descriptionEnName" aria-describedby="descriptionHint" data-placeholder="Write the description…" data-i18n-attr="data-placeholder:editor.placeholder"></div>
                                 <div class="rich-editor rich-text" id="f-descriptionZh" contenteditable="true" role="textbox" aria-multiline="true" lang="zh" spellcheck="true" aria-labelledby="descriptionZhName" aria-describedby="descriptionHint" data-placeholder="Write the description…" data-i18n-attr="data-placeholder:editor.placeholder" hidden></div>
+                                <!-- After a paste with lines in it: keep them together, or a
+                                     paragraph each (js/rich-editor.js). -->
+                                <div class="paste-lines" id="pasteLines" role="group" aria-labelledby="pasteLinesLabel" hidden>
+                                    <span class="small" id="pasteLinesLabel" data-i18n="editor.paste-lines">The pasted text has lines in it:</span>
+                                    <button class="btn btn-small" type="button" data-paste-lines="lines" aria-pressed="true" data-i18n="editor.paste-lines-keep">Keep lines together</button>
+                                    <button class="btn btn-small" type="button" data-paste-lines="paragraphs" aria-pressed="false" data-i18n="editor.paste-lines-paragraphs">Make each line a paragraph</button>
+                                    <button class="icon-btn small" type="button" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+                                </div>
                                 <span class="visually-hidden" id="descriptionEnName" data-i18n="manage.field.description">Description (English)</span>
                                 <span class="visually-hidden" id="descriptionZhName" data-i18n="manage.field.descriptionZh">Description (Chinese)</span>
                                 <span class="field-hint" id="descriptionHint" data-i18n="manage.hint.description">Write it in both English and Chinese; switch between them above. Format it as in Word. Pasted text keeps its formatting, and pasted pictures are copied into the gallery. Click a picture in the description to size or crop it.</span>
@@ -498,6 +511,11 @@
                                 <input type="checkbox" id="f-rsvpOpen" name="rsvpOpen">
                                 <span data-i18n="manage.field.rsvpOpen">Taking RSVPs</span>
                             </label>
+                            <label class="check span-2">
+                                <input type="checkbox" id="f-fursuitersAsked" name="fursuitersAsked" aria-describedby="fursuitersAskedHint">
+                                <span data-i18n="manage.field.fursuitersAsked">Ask people going whether they are fursuiters</span>
+                            </label>
+                            <p class="field-hint span-2" id="fursuitersAskedHint" data-i18n="manage.hint.fursuitersAsked">They can tick "I'm a fursuiter" when they RSVP, and change it until the event. The attendee list shows who did, with a count.</p>
                         </div>
                     </fieldset>
 
@@ -653,6 +671,7 @@
                         <h3 id="attendeesTitle" class="section-label"></h3>
                         <p class="muted small" id="attendeesMeals" hidden></p>
                         <p class="muted small" id="attendeesVolunteers" hidden></p>
+                        <p class="muted small" id="attendeesFursuiters" hidden></p>
                         <p class="muted small" id="attendeesPayments" hidden></p>
                         <p class="muted small" id="attendeesLepak" hidden></p>
                         <p class="muted small" id="attendeesCountries" hidden></p>

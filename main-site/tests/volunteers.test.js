@@ -294,3 +294,54 @@ test('an editor removing someone takes back their confirmation; leaving after th
   await helper.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: false } });
   assert.equal(db.table('gftvevents_volunteers').length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Fursuiters (migrations/023)
+// ---------------------------------------------------------------------------
+
+test('an event can ask whether people going are fursuiters; they say so, change it, and editors see it', async () => {
+  // The edit form's setting, on any kind of event, kept when not sent.
+  const asked = rules.validateEvent(conventionForm({ kind: 'furmeet', fursuitersAsked: true }));
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  assert.equal(asked.fields.fursuiters_asked, true);
+  assert.equal(rules.validateEvent(conventionForm({ fursuitersAsked: false })).fields.fursuiters_asked, false);
+  assert.equal('fursuiters_asked' in rules.validateEvent(conventionForm()).fields, false);
+
+  const meet = addEvent({ slug: 'suit-walk', kind: 'furmeet', fursuiters_asked: true });
+  addEvent({ slug: 'quiet-meet', kind: 'furmeet' });
+  const { b: editor } = await signedIn('boss', { is_editor: true });
+  const { b } = await signedIn('suiter');
+
+  const refused = await b.call(rsvp, { method: 'POST', body: { slug: 'quiet-meet', going: true, fursuiter: true } });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.json.error, 'fursuiters_not_asked');
+  assert.equal((await b.call(rsvp, { method: 'POST', body: { slug: 'suit-walk', going: true, fursuiter: 'yes' } })).status, 400);
+  assert.equal(db.table('gftvevents_attendees').length, 0);
+
+  const page = await b.call(detail, { query: { slug: 'suit-walk' } });
+  assert.equal(page.json.event.fursuitersAsked, true);
+  const going = await b.call(rsvp, { method: 'POST', body: { slug: 'suit-walk', going: true, fursuiter: true } });
+  assert.equal(going.status, 200, JSON.stringify(going.json));
+  assert.equal(going.json.event.viewer.fursuiter, true);
+  assert.equal(db.table('gftvevents_audit_logs').find((row) => row.action === 'rsvp.going').details.fursuiter, true);
+  // Left out, it stays; false takes it back.
+  assert.equal((await b.call(rsvp, { method: 'POST', body: { slug: 'suit-walk', going: true } })).json.event.viewer.fursuiter, true);
+
+  let list = await editor.call(manage, { query: { id: meet.id } });
+  assert.equal(attendeeNamed(list.json.attendees, 'suiter').fursuiter, true);
+  assert.equal(list.json.event.fursuitersAsked, true);
+
+  const off = await b.call(rsvp, { method: 'POST', body: { slug: 'suit-walk', going: true, fursuiter: false } });
+  assert.equal(off.json.event.viewer.fursuiter, false);
+  assert.ok(db.table('gftvevents_audit_logs').some((row) => row.action === 'rsvp.fursuiter_changed'));
+
+  // While the event stops asking, the attendee list shows nobody as one.
+  await b.call(rsvp, { method: 'POST', body: { slug: 'suit-walk', going: true, fursuiter: true } });
+  db.table('gftvevents_events').find((row) => row.id === meet.id).fursuiters_asked = false;
+  list = await editor.call(manage, { query: { id: meet.id } });
+  assert.equal(attendeeNamed(list.json.attendees, 'suiter').fursuiter, false);
+
+  // Nobody else sees it on the public page.
+  const outsider = await browser().call(detail, { query: { slug: 'suit-walk' } });
+  assert.equal(outsider.json.event.viewer.fursuiter, false);
+});

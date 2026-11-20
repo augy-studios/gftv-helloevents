@@ -35,6 +35,7 @@ export async function checkoutAnswer(row, user) {
     lepak: mine.lepak,
     rsvpNumber: mine.rsvpNumber,
     volunteer: mine.volunteer,
+    fursuiter: mine.fursuiter,
     discount: standing.discount,
     country: user.country,
     payment: mine.payment,

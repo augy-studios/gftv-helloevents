@@ -1,7 +1,9 @@
 // The checkout page, /checkout?slug=<slug> (migrations/016): one ticket for
 // the whole event, for the person signed in.
 //
-// Before they hold one: pick a tier (when the event sells tiers), tick "I
+// Before they hold one: pick the tiers (when the event sells tiers: any
+// number of them, each once, or up to its limit where one person can buy
+// more than one of it, migrations/022; they must share a way to pay), tick "I
 // would like to volunteer" (a convention taking volunteers; carried over
 // from the event page as &volunteer=1), pick how to pay, see the order, and
 // Reserve. Paying on the day is a plain RSVP. Paying by link or QR code
@@ -29,9 +31,10 @@ if (params.get('slug')) {
   slug = params.get('slug').toLowerCase();
 }
 let checkout = null;
-// What is picked before reserving: the ticket's place in the list, and the
-// method.
-let pickedTicket = 0;
+// What is picked before reserving: how many of each ticket, by its place in
+// the list (null until the page first draws, which picks the first one on
+// sale), and the method.
+let picked = null;
 let pickedMethod = null;
 // The contact details form (migrations/021), and what it was drawn for, so
 // a re-render keeps what is being typed.
@@ -64,9 +67,10 @@ function renderHeader() {
   }
 }
 
-// One radio card: a name, a line or two under it, and a price on the right.
-function choiceCard({ name, value, checked, title, lines = [], aside = null }) {
-  const input = createElement('input', { type: 'radio', name, value });
+// One radio (or tick box) card: a name, a line or two under it, and a price
+// on the right.
+function choiceCard({ name, value, checked, title, lines = [], aside = null, type = 'radio' }) {
+  const input = createElement('input', { type, name, value });
   input.checked = checked;
   const body = [createElement('span', { class: 'choice-title', text: title })];
   for (const line of lines) {
@@ -90,38 +94,159 @@ function priceAside(ticket) {
   return box;
 }
 
+// Whether the event sells tiers, so more than one can be picked.
+function sellsTiers() {
+  if (checkout.tickets.length === 0) {
+    return false;
+  }
+  return checkout.tickets[0].index !== null;
+}
+
+// The picks still possible: tickets on sale only, each at most its limit;
+// the first one on sale when nothing is picked yet. Without tiers, the one
+// ticket.
+function settlePicks() {
+  const tickets = checkout.tickets;
+  const kept = new Map();
+  if (picked) {
+    for (const [place, quantity] of picked) {
+      const ticket = tickets[place];
+      if (ticket && ticket.methods.length > 0) {
+        kept.set(place, Math.min(Math.max(1, quantity), ticket.maxPerPerson));
+      }
+    }
+  }
+  if ((picked === null || !sellsTiers()) && kept.size === 0) {
+    const first = tickets.findIndex((ticket) => ticket.methods.length > 0);
+    if (first >= 0) {
+      kept.set(first, 1);
+    }
+  }
+  picked = kept;
+}
+
+// The "How many" box under a picked ticket that one person can buy more
+// than one of.
+function quantityField(ticket, place) {
+  const field = createElement('input', {
+    type: 'number',
+    min: 1,
+    max: ticket.maxPerPerson,
+    step: 1,
+    inputmode: 'numeric',
+    value: String(picked.get(place)),
+    'data-quantity': String(place),
+  });
+  return createElement('label', { class: 'field ticket-quantity' }, [
+    createElement('span', { text: translate('checkout.quantity', { count: ticket.maxPerPerson }) }),
+    field,
+  ]);
+}
+
 function renderTickets() {
   const tickets = checkout.tickets;
-  if (pickedTicket >= tickets.length || tickets[pickedTicket].methods.length === 0) {
-    pickedTicket = Math.max(0, tickets.findIndex((ticket) => ticket.methods.length > 0));
+  settlePicks();
+  const tiered = sellsTiers();
+  let role = 'radiogroup';
+  if (tiered) {
+    role = 'group';
   }
+  byId('ticketList').setAttribute('role', role);
+  let hintHidden = true;
+  if (tiered && tickets.length > 1) {
+    hintHidden = false;
+  }
+  byId('ticketHint').hidden = hintHidden;
   byId('ticketList').replaceChildren(...tickets.map((ticket, place) => {
     let title = ticket.name;
     if (!title) {
       title = translate('checkout.ticket-single');
     }
     const lines = [...ticket.benefits];
+    if (ticket.maxPerPerson > 1) {
+      lines.push(translate('event.tier-max', { count: ticket.maxPerPerson }));
+    }
     // A ticket no way to pay is set up for yet cannot be picked.
     if (ticket.methods.length === 0) {
       lines.push(translate('checkout.ticket-unavailable'));
     }
-    const card = choiceCard({ name: 'ticket', value: String(place), checked: place === pickedTicket, title, lines, aside: priceAside(ticket) });
+    let type = 'radio';
+    let aside = priceAside(ticket);
+    if (tiered) {
+      type = 'checkbox';
+      // The volunteer benefit comes off the order's total, below.
+      aside = createElement('span', { class: 'choice-price' }, [createElement('strong', { text: tierPriceText(ticket.price, checkout.currency) })]);
+    }
+    const card = choiceCard({ name: 'ticket', value: String(place), checked: picked.has(place), title, lines, aside, type });
     if (ticket.methods.length === 0) {
       card.classList.add('unavailable');
       card.querySelector('input').disabled = true;
     }
-    return card;
+    if (!tiered || ticket.maxPerPerson < 2 || !picked.has(place)) {
+      return card;
+    }
+    return createElement('div', { class: 'ticket-pick' }, [card, quantityField(ticket, place)]);
   }));
   byId('discountNote').hidden = !checkout.volunteerDiscount;
 }
 
-// The ways to pay the picked ticket (its tier's own, or the event's).
+// The tickets picked, with how many of each, in the list's order.
+function pickedTickets() {
+  return [...picked.entries()]
+    .sort((first, second) => first[0] - second[0])
+    .map(([place, quantity]) => ({ ticket: checkout.tickets[place], quantity }));
+}
+
+// The ways to pay the tickets picked, together: the ways they all take, a
+// link or QR code only when they all pay to the same one (as the server
+// decides, api/_lib/event-rules.js basketOptions).
 function ticketMethods() {
-  const ticket = checkout.tickets[pickedTicket];
-  if (!ticket) {
+  const chosen = pickedTickets().map((each) => each.ticket);
+  if (chosen.length === 0) {
     return [];
   }
-  return ticket.methods;
+  return chosen[0].methods.filter((method) => {
+    if (!chosen.every((ticket) => ticket.methods.includes(method))) {
+      return false;
+    }
+    if (method === 'link' || method === 'qr') {
+      return new Set(chosen.map((ticket) => ticket.payTo[method])).size === 1;
+    }
+    return true;
+  });
+}
+
+// What the tickets picked cost, and the volunteer benefit off the total
+// once: { price, discount, amount }.
+function orderAmounts() {
+  const chosen = pickedTickets();
+  if (!sellsTiers()) {
+    const ticket = chosen[0].ticket;
+    return { price: ticket.price, discount: Math.round((ticket.price - ticket.amount) * 100) / 100, amount: ticket.amount };
+  }
+  const price = Math.round(chosen.reduce((sum, each) => sum + each.ticket.price * each.quantity, 0) * 100) / 100;
+  let discount = 0;
+  const benefit = checkout.volunteerBenefit;
+  if (benefit) {
+    if (benefit.type === 'amount') {
+      discount = Math.min(price, benefit.value);
+    } else {
+      discount = (price * Math.min(benefit.value, 100)) / 100;
+    }
+  }
+  discount = Math.round(discount * 100) / 100;
+  return { price, discount, amount: Math.round((price - discount) * 100) / 100 };
+}
+
+// Why the tickets picked cannot be reserved, or '' when they can.
+function pickProblem() {
+  if (picked.size === 0) {
+    return translate('error.tier_required');
+  }
+  if (ticketMethods().length === 0) {
+    return translate('error.tiers_not_together');
+  }
+  return '';
 }
 
 function renderMethods() {
@@ -129,6 +254,7 @@ function renderMethods() {
   if (!methods.includes(pickedMethod)) {
     pickedMethod = methods[0];
   }
+  byId('methodStep').hidden = methods.length === 0;
   byId('methodList').replaceChildren(...methods.map((method) => choiceCard({
     name: 'method',
     value: method,
@@ -147,16 +273,34 @@ function fillLines(listId, pairs) {
 }
 
 function renderOrder() {
-  const ticket = checkout.tickets[pickedTicket];
+  const problem = pickProblem();
+  byId('pickProblem').hidden = problem === '';
+  setText('pickProblem', problem);
+  byId('orderSummary').hidden = problem !== '';
+  const button = byId('reserveBtn');
+  if (problem) {
+    button.disabled = true;
+    return;
+  }
   const pairs = [];
-  if (ticket.name) {
-    pairs.push([translate('checkout.order-ticket'), ticket.name]);
+  for (const { ticket, quantity } of pickedTickets()) {
+    if (!ticket.name) {
+      continue;
+    }
+    let label = ticket.name;
+    if (quantity > 1) {
+      label = translate('checkout.order-quantity', { name: ticket.name, count: quantity });
+    }
+    pairs.push([label, tierPriceText(ticket.price * quantity, checkout.currency)]);
   }
-  pairs.push([translate('checkout.order-price'), tierPriceText(ticket.price, checkout.currency)]);
-  if (ticket.amount < ticket.price) {
-    pairs.push([translate('checkout.order-discount'), `-${money(ticket.price - ticket.amount)}`]);
+  const amounts = orderAmounts();
+  if (!sellsTiers() || amounts.discount > 0) {
+    pairs.push([translate('checkout.order-price'), tierPriceText(amounts.price, checkout.currency)]);
   }
-  pairs.push([translate('checkout.order-total'), tierPriceText(ticket.amount, checkout.currency)]);
+  if (amounts.discount > 0) {
+    pairs.push([translate('checkout.order-discount'), `-${money(amounts.discount)}`]);
+  }
+  pairs.push([translate('checkout.order-total'), tierPriceText(amounts.amount, checkout.currency)]);
   pairs.push([translate('checkout.order-method'), translate(`payment.method.${pickedMethod}`)]);
   fillLines('orderLines', pairs);
 
@@ -166,7 +310,6 @@ function renderOrder() {
     buttonKey = 'checkout.reserve-onsite';
     noteKey = 'checkout.reserve-note-onsite';
   }
-  const button = byId('reserveBtn');
   button.replaceChildren(iconNode('ticket'), createElement('span', { text: translate(buttonKey) }));
   setText('reserveNote', translate(noteKey));
   const needsCountry = checkout.needsCountry === true;
@@ -195,6 +338,7 @@ function renderOrderBox() {
   }
   renderTickets();
   byId('volunteerRow').hidden = !checkout.takesVolunteers;
+  byId('fursuiterRow').hidden = !checkout.asksFursuiters;
   renderContact();
   renderMethods();
   renderOrder();
@@ -274,15 +418,10 @@ function renderPayHow(payment) {
   setText('payProofName', proofText);
 }
 
-// The other ways to pay, while the payment is not confirmed.
+// The other ways to pay, while the payment is not confirmed: those the
+// ticket's tiers take together (or the event's, without tiers).
 function renderSwitch(payment) {
-  // The ways to pay this ticket's tier (or the event's, without tiers).
-  let methods = checkout.methods;
-  const ticket = checkout.tickets.find((each) => each.name === payment.tier);
-  if (payment.tier && ticket) {
-    methods = ticket.methods;
-  }
-  const others = methods.filter((method) => method !== payment.method);
+  const others = checkout.heldMethods.filter((method) => method !== payment.method);
   byId('switchBox').hidden = true;
   if (payment.status === 'paid' || others.length === 0) {
     return;
@@ -347,10 +486,16 @@ function render() {
 }
 
 async function reserve() {
-  const ticket = checkout.tickets[pickedTicket];
-  const body = { slug, going: true, meals: [], payment: { method: pickedMethod, tier: ticket.index, tierName: ticket.name } };
+  const payment = { method: pickedMethod };
+  if (sellsTiers()) {
+    payment.items = pickedTickets().map(({ ticket, quantity }) => ({ tier: ticket.index, tierName: ticket.name, quantity }));
+  }
+  const body = { slug, going: true, meals: [], payment };
   if (checkout.takesVolunteers) {
     body.volunteer = byId('volunteerPick').checked;
+  }
+  if (checkout.asksFursuiters) {
+    body.fursuiter = byId('fursuiterPick').checked;
   }
   if (contactForm) {
     body.contact = contactForm.read();
@@ -369,9 +514,34 @@ async function switchMethod(button, method) {
   });
 }
 
-// Another ticket can be paid for in other ways: the methods follow it.
+// Other tickets can be paid for in other ways: the methods follow them.
+// With tiers, a tick adds or takes off a ticket, and "How many" sets how
+// many of it.
 byId('ticketList').addEventListener('change', (changed) => {
-  pickedTicket = Number(changed.target.value);
+  const target = changed.target;
+  if (target.dataset.quantity !== undefined) {
+    const place = Number(target.dataset.quantity);
+    let quantity = Number(target.value);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      quantity = 1;
+    }
+    picked.set(place, Math.min(quantity, checkout.tickets[place].maxPerPerson));
+    target.value = String(picked.get(place));
+  } else {
+    const place = Number(target.value);
+    if (!sellsTiers()) {
+      picked = new Map([[place, 1]]);
+    } else if (target.checked) {
+      picked.set(place, 1);
+    } else {
+      picked.delete(place);
+    }
+    renderTickets();
+    const again = byId('ticketList').querySelector(`input[name="ticket"][value="${place}"]`);
+    if (again) {
+      again.focus();
+    }
+  }
   renderMethods();
   renderOrder();
 });
@@ -440,6 +610,9 @@ async function start() {
   }
   if (params.get('volunteer') === '1') {
     byId('volunteerPick').checked = true;
+  }
+  if (params.get('fursuiter') === '1') {
+    byId('fursuiterPick').checked = true;
   }
   try {
     await load();

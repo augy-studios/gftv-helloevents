@@ -44,6 +44,117 @@ async function saveByLeaving(page) {
   await expect(status(page)).toHaveText(SAVED);
 }
 
+test('Word and Google Docs keyboard shortcuts format text, and the browser does not get the keys', async ({ page }) => {
+  await openEvent(page);
+  await editor(page).fill('');
+  await editor(page).click();
+  // Keys the editor uses never reach the page (Firefox would open the
+  // bookmarks on Ctrl+B and Page Info on Ctrl+I).
+  await editor(page).evaluate((element) => {
+    window.leakedKeys = [];
+    element.addEventListener('keydown', (event) => {
+      const modifierOnly = ['Control', 'Meta', 'Shift', 'Alt'].includes(event.key);
+      if (!modifierOnly && !event.defaultPrevented && (event.ctrlKey || event.metaKey)) {
+        window.leakedKeys.push(event.key);
+      }
+    });
+  });
+  await page.keyboard.type('Bold');
+  await page.keyboard.press('Shift+Home');
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(editor(page).locator('b, strong')).toHaveText('Bold');
+  await expect(page.locator('#richToolbar [data-command="bold"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('ControlOrMeta+i');
+  await expect(editor(page).locator('i, em')).toHaveText('Bold');
+  await page.keyboard.press('ControlOrMeta+u');
+  await expect(editor(page).locator('u')).toHaveText('Bold');
+  await page.keyboard.press('ControlOrMeta+Shift+x');
+  await expect(editor(page).locator('strike, s')).toHaveText('Bold');
+  await page.keyboard.press('ControlOrMeta+e');
+  await expect(editor(page).locator('p').first()).toHaveCSS('text-align', 'center');
+  await page.keyboard.press('ControlOrMeta+Alt+1');
+  await expect(editor(page).locator('h2')).toHaveText('Bold');
+  await expect(page.locator('#richBlock')).toHaveValue('h2');
+  await page.keyboard.press('ControlOrMeta+Alt+0');
+  await expect(editor(page).locator('h2')).toHaveCount(0);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Item');
+  await page.keyboard.press('ControlOrMeta+Shift+8');
+  await expect(editor(page).locator('ul li')).toHaveText('Item');
+  await page.keyboard.press('ControlOrMeta+Shift+7');
+  await expect(editor(page).locator('ol li')).toHaveText('Item');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editor(page).locator('ol')).toHaveCount(0);
+  await expect(editor(page).locator('ul li')).toHaveText('Item');
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect(editor(page).locator('ol li')).toHaveText('Item');
+  expect(await page.evaluate(() => window.leakedKeys)).toEqual([]);
+});
+
+test('a "<br>" written out in pasted text, as Telegram can copy it, becomes a line break', async ({ page }) => {
+  await openEvent(page);
+  await editor(page).fill('');
+  await editor(page).click();
+  // Plain text only, as Telegram Desktop copies a message: one line, no link.
+  await editor(page).evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', '📍 Location:<br>GV VivoCity<br><br>💰 S$8 per person');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect(editor(page)).not.toContainText('<br>');
+  await expect(editor(page).locator('p')).toHaveText(['📍 Location:GV VivoCity', '💰 S$8 per person']);
+  await expect(editor(page).locator('p').first().locator('br')).toHaveCount(1);
+});
+
+test('pasted lines (Shift+Enter in Telegram) are kept together, or made a paragraph each, as the editor picks', async ({ page }) => {
+  await openEvent(page);
+  await editor(page).fill('');
+  await editor(page).click();
+  await page.keyboard.type('Before ');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.type('bold');
+  await page.keyboard.press('ControlOrMeta+b');
+  await page.keyboard.press('Enter');
+  // A Telegram message: lines, and a blank line between two groups.
+  await editor(page).evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'Location:\nGV VivoCity\n\nPrice:\nS$8');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const bar = page.locator('#pasteLines');
+  const paragraphs = editor(page).locator('p');
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole('button', { name: 'Keep lines together' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(paragraphs).toHaveText(['Before bold', 'Location:GV VivoCity', 'Price:S$8']);
+
+  await bar.getByRole('button', { name: 'Make each line a paragraph' }).click();
+  await expect(bar.getByRole('button', { name: 'Make each line a paragraph' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(paragraphs).toHaveText(['Before bold', 'Location:', 'GV VivoCity', 'Price:', 'S$8']);
+  await expect(editor(page).locator('p br')).toHaveCount(0);
+  await expect(editor(page).locator('b, strong')).toHaveText('bold');
+
+  // Back again, and nothing doubled.
+  await bar.getByRole('button', { name: 'Keep lines together' }).click();
+  await expect(paragraphs).toHaveText(['Before bold', 'Location:GV VivoCity', 'Price:S$8']);
+  await bar.getByRole('button', { name: 'Make each line a paragraph' }).click();
+  await expect(paragraphs).toHaveText(['Before bold', 'Location:', 'GV VivoCity', 'Price:', 'S$8']);
+
+  // Typing on keeps it, and the bar goes.
+  await page.keyboard.type('!');
+  await expect(bar).toBeHidden();
+  await expect(paragraphs.last()).toHaveText('S$8!');
+  await saveByLeaving(page);
+
+  // A paste without lines asks nothing.
+  await editor(page).evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'just words');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await expect(bar).toBeHidden();
+});
+
 test('the toolbar formats text as Word does, and the event page shows it', async ({ page }) => {
   await openEvent(page);
   await editor(page).fill('');

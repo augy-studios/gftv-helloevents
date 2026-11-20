@@ -162,6 +162,12 @@
                             <span data-i18n="event.volunteer-check">I would like to volunteer at this convention</span>
                         </label>
                         <p class="callout ok small rsvp-volunteer-note" id="rsvpVolunteerNote" hidden></p>
+                        <!-- Whether they are a fursuiter, when the event asks (migrations/023). -->
+                        <label class="check rsvp-volunteer" id="rsvpFursuiterRow" hidden>
+                            <input type="checkbox" id="rsvpFursuiter" aria-describedby="rsvpFursuiterHint">
+                            <span data-i18n="event.fursuiter-check">I'm a fursuiter</span>
+                        </label>
+                        <p class="small muted rsvp-fursuiter-hint" id="rsvpFursuiterHint" hidden data-i18n="event.fursuiter-hint">Lets the organisers plan for suiters: changing space, handlers and water.</p>
                         <div class="callout warn small rsvp-country" id="rsvpCountry" hidden>
                             <p data-i18n="event.country-needed">This is a cross-border event. Add your country of origin to your account to RSVP.</p>
                             <a class="btn btn-small u-mt-1" id="rsvpCountryLink" href="/account#profile"><span data-icon="globe"></span><span data-i18n="event.country-set">Set my country</span></a>

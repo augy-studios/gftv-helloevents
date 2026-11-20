@@ -161,6 +161,29 @@ export function plainToHtml(text) {
     .join('');
 }
 
+// A plain-text description (one from before descriptions were rich, or sent
+// by something other than the editor) as rich text: its markdown read as
+// formatting (markdownToHtml: headings, lists, quotes, **bold**, *italic*,
+// [links](https://...) and bare web addresses as links), and a "<br>"
+// typed into it as the line break it was meant to be. Markdown's # heading
+// is the editor's Heading 1 (h2), ## Heading 2, ### Heading 3.
+const TYPED_BREAK = /<br\s*\/?>/gi;
+
+// Plain text with each "<br>" typed into it (as a message copied from
+// Telegram can have) made the line break it was meant to be.
+export function typedBreaksToLines(text) {
+  return String(text).replace(TYPED_BREAK, '\n');
+}
+
+export function plainDescriptionToHtml(text) {
+  const source = typedBreaksToLines(text);
+  const marked = markdownToHtml(source);
+  if (!marked) {
+    return plainToHtml(source);
+  }
+  return marked.replace(/<(\/?)h([1-3])>/g, (whole, slash, level) => `<${slash}h${Number(level) + 1}>`);
+}
+
 // Whether a description is rich text (HTML) rather than plain text: it
 // starts with an element a description or the editor writes. Plain text
 // that merely contains a "<" is read as text.
@@ -1256,7 +1279,9 @@ export function cleanRichTree(root, adapter, options = {}) {
       }
       text = text.replace(/[\t\n\r\f ]+/g, ' ');
       stats.textLength += text.trim().length;
-      return escapeText(text);
+      // A "<br>" typed as text (a plain description once kept it so, and
+      // an editor that loaded one saved it so) is the line break meant.
+      return text.split(TYPED_BREAK).map(escapeText).join('<br>');
     }
     if (type !== 'element' || depth > MAX_DEPTH) {
       return '';

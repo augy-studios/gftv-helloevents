@@ -78,7 +78,7 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, lepak, volunteer, contact, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, lepak, volunteer, fursuiter, contact, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })

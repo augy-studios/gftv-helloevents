@@ -9,7 +9,7 @@
 // clear formatting; alignment; bulleted and numbered lists; decrease and
 // increase indent; link; picture (the picture dialog, picture-picker.js);
 // table, with row and column tools while the cursor is in one; horizontal
-// line. Word's shortcuts work: Ctrl+B, I, U, Z, Y, K (link), Tab and
+// line. Word's and Google Docs' shortcuts work (SHORTCUTS, below), Tab and
 // Shift+Tab in lists and tables.
 //
 // Pasting keeps the formatting it comes with (js/rich-text.js maps Word's,
@@ -25,7 +25,7 @@
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { cleanHtml, cleanElement, richFragment, playStickers, applyInlineStyles } from './rich-dom.js';
-import { plainToHtml, markdownToHtml, pasteSource, readableOn, parseCrop, cropText, croppedAddress } from './rich-text.js';
+import { plainToHtml, markdownToHtml, typedBreaksToLines, pasteSource, readableOn, parseCrop, cropText, croppedAddress } from './rich-text.js';
 import { cropPicture } from './picture-crop.js';
 import { openModal, closeModal, toast } from './ui.js';
 
@@ -801,17 +801,229 @@ function insertCleaned(editor, cleaned) {
   if (cleaned.html.replace(/<p><br><\/p>/g, '') === '') {
     return false;
   }
-  // A single paragraph goes in as inline content, so it joins the
-  // paragraph the cursor is in, as pasting a few words does in Word.
-  let inserted = cleaned.html;
-  const single = /^<p>((?:(?!<\/?p[ >]).)*)<\/p>$/s.exec(inserted);
-  if (single) {
-    inserted = single[1];
-  }
-  insertHtml(inserted);
-  changed();
+  insertPasted(editor, cleaned.html);
   copyPendingPictures(editor);
   return true;
+}
+
+// A single paragraph goes in as inline content, so it joins the paragraph
+// the cursor is in, as pasting a few words does in Word.
+function asInserted(html) {
+  const single = /^<p>((?:(?!<\/?p[ >]).)*)<\/p>$/s.exec(html);
+  if (single) {
+    return single[1];
+  }
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+// Pasted lines: kept together, or a paragraph each
+//
+// A message copied from Telegram (or Discord, WhatsApp, an email) puts a
+// new line (Shift+Enter) between its lines, which comes in as a line
+// break inside one paragraph, with no space between the lines. After a
+// paste with any of those, a bar under the editor asks how they should
+// go in: kept together as they are (the default), or each line its own
+// paragraph, spaced like paragraphs. Picking one puts the paste back in that
+// way at once (the paste is undone and put in again), and either can be
+// picked until the editor carries on typing or pastes again.
+// ---------------------------------------------------------------------------
+
+// The paste the bar is for: { editor, before (the editor's HTML before
+// it), path (where the cursor was, from pathOf), lines and paragraphs (the
+// paste's HTML each way), shown ('lines' or 'paragraphs') }, or null.
+let pasteChoice = null;
+let switchingPaste = false;
+
+// Whether paste HTML has a line break inside a paragraph with text.
+function hasLineBreaks(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return [...template.content.querySelectorAll('p')].some((paragraph) => {
+    if (!paragraph.querySelector(':scope > br')) {
+      return false;
+    }
+    return paragraph.textContent.trim() !== '';
+  });
+}
+
+// The same paste with each line of a paragraph its own paragraph (with the
+// paragraph's alignment and indent), and the empty ones left out.
+function linesAsParagraphs(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  for (const paragraph of [...template.content.querySelectorAll('p')]) {
+    if (!paragraph.querySelector(':scope > br')) {
+      continue;
+    }
+    const parts = [];
+    let part = paragraph.cloneNode(false);
+    for (const child of [...paragraph.childNodes]) {
+      if (child.nodeName === 'BR') {
+        parts.push(part);
+        part = paragraph.cloneNode(false);
+      } else {
+        part.append(child);
+      }
+    }
+    parts.push(part);
+    const kept = parts.filter((each) => {
+      if (each.textContent.trim() !== '') {
+        return true;
+      }
+      return each.querySelector('img, video') !== null;
+    });
+    paragraph.replaceWith(...kept);
+  }
+  return template.innerHTML;
+}
+
+// Where the cursor is in the editor, as the child indexes down to it and
+// the offset, so it can be found again in the editor's HTML put back.
+function pathOf(editor, node, offset) {
+  const steps = [];
+  let at = node;
+  while (at && at !== editor) {
+    steps.unshift([...at.parentNode.childNodes].indexOf(at));
+    at = at.parentNode;
+  }
+  return { steps, offset };
+}
+
+function nodeAt(editor, path) {
+  let at = editor;
+  for (const step of path.steps) {
+    if (!at.childNodes[step]) {
+      return null;
+    }
+    at = at.childNodes[step];
+  }
+  return at;
+}
+
+// Puts paste HTML (whole paragraphs) in at the cursor, and offers the bar
+// when it has lines to put in either way. A paste with pictures still
+// being copied is put in as it is.
+function insertPasted(editor, html) {
+  hidePasteChoice();
+  let offer = false;
+  if (hasLineBreaks(html) && !html.includes('data-pending-src')) {
+    offer = true;
+  }
+  if (offer) {
+    editor.normalize();
+    restoreSelection();
+    const range = selectionInside(editor);
+    let path = null;
+    if (range) {
+      path = pathOf(editor, range.startContainer, range.startOffset);
+    }
+    pasteChoice = { editor, before: editor.innerHTML, path, lines: html, paragraphs: linesAsParagraphs(html), shown: 'lines' };
+  }
+  switchingPaste = true;
+  try {
+    insertHtml(asInserted(html));
+  } finally {
+    switchingPaste = false;
+  }
+  changed();
+  if (offer) {
+    showPasteChoice();
+  }
+}
+
+function showPasteChoice() {
+  const bar = byId('pasteLines');
+  if (!bar) {
+    return;
+  }
+  bar.hidden = false;
+  for (const button of bar.querySelectorAll('[data-paste-lines]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.pasteLines === pasteChoice.shown));
+  }
+}
+
+function hidePasteChoice() {
+  pasteChoice = null;
+  const bar = byId('pasteLines');
+  if (bar) {
+    bar.hidden = true;
+  }
+}
+
+// Puts the paste back in the other way: undone, then put in again. If the
+// browser's undo does not take the editor back to just before the paste,
+// the HTML from then is put back, with the cursor where it was.
+function switchPaste(way) {
+  if (!pasteChoice || pasteChoice.shown === way) {
+    return;
+  }
+  const choice = pasteChoice;
+  const editor = choice.editor;
+  switchingPaste = true;
+  try {
+    editor.focus({ preventScroll: true });
+    exec('undo');
+    editor.normalize();
+    if (editor.innerHTML !== choice.before) {
+      editor.innerHTML = choice.before;
+      playStickers(editor);
+      const selection = window.getSelection();
+      const range = document.createRange();
+      let node = null;
+      if (choice.path) {
+        node = nodeAt(editor, choice.path);
+      }
+      if (node) {
+        let most = node.childNodes.length;
+        if (node.nodeType === Node.TEXT_NODE) {
+          most = node.length;
+        }
+        range.setStart(node, Math.min(choice.path.offset, most));
+      } else {
+        range.selectNodeContents(editor);
+        range.collapse(false);
+      }
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    saveSelection();
+    insertHtml(asInserted(choice[way]));
+  } finally {
+    switchingPaste = false;
+  }
+  choice.shown = way;
+  pasteChoice = choice;
+  changed();
+  showPasteChoice();
+}
+
+function startPasteChoice() {
+  const bar = byId('pasteLines');
+  if (!bar) {
+    return;
+  }
+  // A click on the bar keeps the editor's focus and selection.
+  bar.addEventListener('mousedown', (event) => {
+    if (event.target.closest('button')) {
+      event.preventDefault();
+    }
+  });
+  bar.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) {
+      return;
+    }
+    if (button.dataset.pasteLines) {
+      switchPaste(button.dataset.pasteLines);
+    } else {
+      hidePasteChoice();
+      if (current) {
+        current.focus({ preventScroll: true });
+      }
+    }
+  });
 }
 
 function onPaste(event) {
@@ -835,7 +1047,9 @@ function onPaste(event) {
     pasteFiles(files);
     return;
   }
-  const text = data.getData('text/plain');
+  // A "<br>" in the text (a message copied from Telegram can carry them
+  // written out) is a line break.
+  const text = typedBreaksToLines(data.getData('text/plain'));
   if (!text) {
     return;
   }
@@ -846,10 +1060,11 @@ function onPaste(event) {
     return;
   }
   if (text.includes('\n')) {
-    insertHtml(plainToHtml(text));
-  } else {
-    exec('insertText', text);
+    insertPasted(editor, plainToHtml(text));
+    return;
   }
+  hidePasteChoice();
+  exec('insertText', text);
   changed();
 }
 
@@ -1190,6 +1405,121 @@ function changed() {
   hooks.onChange();
 }
 
+// A formatting command as a toolbar button runs it.
+function runCommand(command) {
+  exec('styleWithCSS', false);
+  exec(command);
+}
+
+// One step up or down the size list from the size where the cursor is.
+function stepSize(step) {
+  const range = selectionInside(current);
+  if (!range) {
+    return;
+  }
+  let element = range.startContainer;
+  if (element.nodeType !== Node.ELEMENT_NODE) {
+    element = element.parentElement;
+  }
+  const now = parseFloat(getComputedStyle(element).fontSize);
+  const sizes = [...byId('richSize').options].map((option) => Number(option.value)).filter(Boolean);
+  let next = null;
+  if (step > 0) {
+    next = sizes.find((size) => size > now + 0.5);
+  } else {
+    next = sizes.reverse().find((size) => size < now - 0.5);
+  }
+  if (next) {
+    applySize(next);
+  }
+}
+
+// The keyboard shortcuts, as Word and Google Docs have them. Each is run
+// here and the browser's own use of the keys is stopped, since browsers
+// differ: Firefox opens Page Info on Ctrl+I and the bookmarks on Ctrl+B
+// instead of formatting. Keyed by the letter or sign, after "shift+" and
+// "alt+" when those are held with Ctrl (Cmd on a Mac).
+const SHORTCUTS = {
+  b: () => runCommand('bold'),
+  i: () => runCommand('italic'),
+  u: () => runCommand('underline'),
+  'shift+x': () => runCommand('strikeThrough'),
+  ',': () => runCommand('subscript'),
+  '.': () => runCommand('superscript'),
+  '\\': () => BUTTON_COMMANDS.removeFormat(),
+  l: () => runCommand('justifyLeft'),
+  e: () => runCommand('justifyCenter'),
+  r: () => runCommand('justifyRight'),
+  j: () => runCommand('justifyFull'),
+  'shift+7': () => runCommand('insertOrderedList'),
+  'shift+8': () => runCommand('insertUnorderedList'),
+  ']': () => indent(1),
+  '[': () => indent(-1),
+  'shift+.': () => stepSize(1),
+  'shift+,': () => stepSize(-1),
+  'alt+0': () => applyBlock('p'),
+  'alt+1': () => applyBlock('h2'),
+  'alt+2': () => applyBlock('h3'),
+  'alt+3': () => applyBlock('h4'),
+  z: () => exec('undo'),
+  y: () => exec('redo'),
+  'shift+z': () => exec('redo'),
+  k: () => openLinkDialog(),
+};
+
+const SIGN_KEYS = { Comma: ',', Period: '.', BracketLeft: '[', BracketRight: ']', Backslash: '\\', IntlBackslash: '\\' };
+
+// The key pressed, as SHORTCUTS names it: the letter typed (so Ctrl+B is B
+// on any Latin layout), else the key's place on the keyboard (so digits and
+// signs held with Shift, and letters on other scripts' layouts, still match).
+function shortcutKey(event) {
+  if (/^[a-z]$/i.test(event.key)) {
+    return event.key.toLowerCase();
+  }
+  if (/^Key[A-Z]$/.test(event.code)) {
+    return event.code.slice(3).toLowerCase();
+  }
+  if (/^(Digit|Numpad)\d$/.test(event.code)) {
+    return event.code.slice(-1);
+  }
+  if (Object.hasOwn(SIGN_KEYS, event.code)) {
+    return SIGN_KEYS[event.code];
+  }
+  return '';
+}
+
+function shortcutFor(event) {
+  if (event.isComposing || event.keyCode === 229) {
+    return null;
+  }
+  // AltGr (Ctrl+Alt on Windows) types characters on many layouts.
+  if (event.getModifierState && event.getModifierState('AltGraph')) {
+    return null;
+  }
+  const key = shortcutKey(event);
+  if (!key) {
+    return null;
+  }
+  // Google Docs' strikethrough: Alt+Shift+5.
+  if (!event.ctrlKey && !event.metaKey && event.altKey && event.shiftKey && key === '5') {
+    return SHORTCUTS['shift+x'];
+  }
+  if (!(event.ctrlKey || event.metaKey) || (event.ctrlKey && event.metaKey)) {
+    return null;
+  }
+  let name = key;
+  if (event.altKey) {
+    name = `alt+${name}`;
+  }
+  if (event.shiftKey) {
+    name = `shift+${name}`;
+  }
+  if (Object.hasOwn(SHORTCUTS, name)) {
+    return SHORTCUTS[name];
+  }
+  return null;
+}
+
 function onKeydown(event) {
   let accel = false;
   if (event.ctrlKey || event.metaKey) {
@@ -1200,9 +1530,14 @@ function onKeydown(event) {
     adjustCrop(selectedPicture());
     return;
   }
-  if (accel && event.key.toLowerCase() === 'k') {
+  const shortcut = shortcutFor(event);
+  if (shortcut) {
     event.preventDefault();
-    openLinkDialog();
+    event.stopPropagation();
+    closePalettes();
+    shortcut();
+    changed();
+    updateToolbar();
     return;
   }
   if (event.key === 'Tab' && !accel && !event.altKey) {
@@ -1228,7 +1563,13 @@ function startEditor(editor) {
     current = editor;
     ensureParagraph(editor);
   });
-  editor.addEventListener('input', changed);
+  editor.addEventListener('input', () => {
+    // Typing on after a paste: its lines stay as they are.
+    if (!switchingPaste) {
+      hidePasteChoice();
+    }
+    changed();
+  });
   editor.addEventListener('paste', onPaste);
   editor.addEventListener('copy', onCopy);
   editor.addEventListener('cut', onCopy);
@@ -1256,6 +1597,7 @@ export function startRichEditors(editorsByLang, options) {
     // An older browser makes <div>s; the server makes them paragraphs.
   }
   startToolbar();
+  startPasteChoice();
   byId('richTableTools').hidden = true;
 }
 
@@ -1266,6 +1608,7 @@ export function showEditor(lang) {
   }
   current = editors.get(lang);
   savedRange = null;
+  hidePasteChoice();
 }
 
 // A saved description (as the server sends it) into an editor.

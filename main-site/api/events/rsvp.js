@@ -1,5 +1,6 @@
 // POST /api/events/rsvp  { slug, going?: true | false, meals?: [id], volunteer?: true | false,
-//                          lepak?: true | false, payment?: { method, tier?, tierName? },
+//                          lepak?: true | false, fursuiter?: true | false,
+//                          payment?: { method, items? },
 //                          contact?: { field id: value } }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
@@ -11,6 +12,9 @@
 // volunteer: for a convention taking volunteers, whether this person signs
 // up to volunteer (migrations/012); left out, it stays as it was. Someone
 // going can change it until the event is over, even after RSVPs close.
+// fursuiter: for an event asking whether people are fursuiters
+// (migrations/023), whether this person is one; left out, it stays as it
+// was. Like volunteer, someone going can change it until the event is over.
 // lepak: "Just Lepak Only" (migrations/017), coming to a paid event without
 // a ticket, with meals if they like (meals then names them). It takes none
 // of the event's spaces, only one of its lepak places when it caps them.
@@ -18,7 +22,11 @@
 // payment: for an event that takes payment online (migrations/016,
 // event-rules.js needsCheckout), what the checkout page sends to get a
 // ticket for the whole event: the method picked (one the event offers) and,
-// for an event with ticket tiers, the tier's place in the list and its name.
+// for an event with ticket tiers, the tiers bought (migrations/022): items,
+// each { tier: its place in the list, tierName, quantity }, every tier at
+// most once, more than one of it only as far as the tier allows
+// (event-rules.js basketPrice). The method must suit them all together
+// (basketOptions). A page from before sends { tier, tierName } for one.
 // A ticket paid by link or QR code takes a space at once and waits for
 // payment ("awaiting"); one paid on the day is a plain RSVP. The amount is
 // worked out here, with any volunteer benefit, never taken from the page.
@@ -47,7 +55,7 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
-import { chooseMeals, takesVolunteers, needsCheckout, paymentOptions, tierOptions, storedTiers, ticketPrice, lepakOffered, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { chooseMeals, takesVolunteers, asksFursuiters, needsCheckout, paymentOptions, sellsTiers, basketPrice, basketOptions, ticketPrice, lepakOffered, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
@@ -69,16 +77,17 @@ const RESULTS = {
   event_over: [409, 'event_over'],
 };
 
-// Signs someone going up to volunteer, or takes them off (volunteer true or
-// false), once their RSVP has gone through. Returns whether it changed.
-async function setVolunteer(eventId, userId, volunteer) {
+// Sets one of someone's yes-or-no answers once their RSVP has gone through:
+// volunteer (signed up to volunteer) or fursuiter. Returns whether it
+// changed.
+async function setAnswer(eventId, userId, column, value) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .update({ volunteer })
+    .update({ [column]: value })
     .eq('event_id', eventId)
     .eq('user_id', userId)
-    .neq('volunteer', volunteer)
-    .select('volunteer');
+    .neq(column, value)
+    .select(column);
   if (error) {
     throw error;
   }
@@ -93,6 +102,7 @@ const NO_PAYMENT = {
   payment_method: null,
   payment_status: 'none',
   payment_tier: null,
+  payment_items: null,
   payment_amount: null,
   payment_currency: null,
   payment_reference: null,
@@ -109,23 +119,32 @@ async function checkoutTicket(event, userId, payment) {
   if (!payment || typeof payment !== 'object' || !paymentOptions(event).includes(payment.method)) {
     return { ok: false, error: 'payment_method_required' };
   }
-  let tierIndex = null;
-  if (Number.isInteger(payment.tier)) {
-    tierIndex = payment.tier;
-  }
-  let tierName = null;
-  if (typeof payment.tierName === 'string') {
-    tierName = payment.tierName;
-  }
   const standing = await volunteerStanding(event, userId);
-  const priced = ticketPrice(event, { tierIndex, tierName, volunteerDiscount: standing.discount });
-  if (!priced.ok) {
-    return priced;
-  }
-  // A tier can take its own ways to pay (event-rules.js tierOptions).
+  let priced;
   let options = paymentOptions(event);
-  if (priced.tier !== null) {
-    options = tierOptions(event, storedTiers(event)[tierIndex]);
+  let tierText = null;
+  let items = null;
+  if (sellsTiers(event)) {
+    let wanted = payment.items;
+    if (wanted === undefined && Number.isInteger(payment.tier)) {
+      wanted = [{ tier: payment.tier, tierName: payment.tierName, quantity: 1 }];
+    }
+    priced = basketPrice(event, wanted, { volunteerDiscount: standing.discount });
+    if (!priced.ok) {
+      return priced;
+    }
+    // Tiers can take their own ways to pay; together, the ways they share.
+    options = basketOptions(event, priced.tiers);
+    if (options.length === 0) {
+      return { ok: false, error: 'tiers_not_together' };
+    }
+    tierText = priced.text;
+    items = priced.items;
+  } else {
+    priced = ticketPrice(event, { volunteerDiscount: standing.discount });
+    if (!priced.ok) {
+      return priced;
+    }
   }
   if (!options.includes(payment.method)) {
     return { ok: false, error: 'payment_method_required' };
@@ -140,7 +159,8 @@ async function checkoutTicket(event, userId, payment) {
       ...NO_PAYMENT,
       payment_method: payment.method,
       payment_status: status,
-      payment_tier: priced.tier,
+      payment_tier: tierText,
+      payment_items: items,
       payment_amount: priced.amount,
       payment_currency: event.currency,
     },
@@ -213,6 +233,9 @@ export default route('events/rsvp', async (request, response) => {
   if (body.volunteer !== undefined && typeof body.volunteer !== 'boolean') {
     return fail(response, 400, 'bad_request');
   }
+  if (body.fursuiter !== undefined && typeof body.fursuiter !== 'boolean') {
+    return fail(response, 400, 'bad_request');
+  }
   if (body.contact !== undefined && (body.contact === null || typeof body.contact !== 'object' || Array.isArray(body.contact))) {
     return fail(response, 400, 'bad_request');
   }
@@ -235,6 +258,9 @@ export default route('events/rsvp', async (request, response) => {
     }
     if (body.volunteer === true && !takesVolunteers(event)) {
       return fail(response, 400, 'volunteers_not_wanted');
+    }
+    if (body.fursuiter === true && !asksFursuiters(event)) {
+      return fail(response, 400, 'fursuiters_not_asked');
     }
     meals = choice.meals;
     if (body.lepak !== undefined && typeof body.lepak !== 'boolean') {
@@ -300,12 +326,16 @@ export default route('events/rsvp', async (request, response) => {
     }
     let volunteerChanged = false;
     if (typeof body.volunteer === 'boolean') {
-      volunteerChanged = await setVolunteer(event.id, session.user.id, body.volunteer);
+      volunteerChanged = await setAnswer(event.id, session.user.id, 'volunteer', body.volunteer);
+    }
+    let fursuiterChanged = false;
+    if (typeof body.fursuiter === 'boolean') {
+      fursuiterChanged = await setAnswer(event.id, session.user.id, 'fursuiter', body.fursuiter);
     }
     if (result === 'ok') {
-      const details = { meals, lepak, volunteer: body.volunteer === true };
+      const details = { meals, lepak, volunteer: body.volunteer === true, fursuiter: body.fursuiter === true };
       if (ticket) {
-        details.payment = { method: ticket.columns.payment_method, tier: ticket.columns.payment_tier, amount: ticket.columns.payment_amount };
+        details.payment = { method: ticket.columns.payment_method, tier: ticket.columns.payment_tier, items: ticket.columns.payment_items, amount: ticket.columns.payment_amount };
       }
       await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details });
     }
@@ -314,6 +344,9 @@ export default route('events/rsvp', async (request, response) => {
     }
     if (volunteerChanged && result !== 'ok') {
       await audit(request, { action: 'rsvp.volunteer_changed', actorId: session.user.id, eventId: event.id, details: { volunteer: body.volunteer } });
+    }
+    if (fursuiterChanged && result !== 'ok') {
+      await audit(request, { action: 'rsvp.fursuiter_changed', actorId: session.user.id, eventId: event.id, details: { fursuiter: body.fursuiter } });
     }
   } else if (body.going === false) {
     const before = await attendance(event.id, session.user.id);
@@ -367,6 +400,7 @@ export default route('events/rsvp', async (request, response) => {
       rsvpNumber: mine.rsvpNumber,
       canManage: await canEditEvent(session.user, shown.id),
       volunteer: mine.volunteer,
+      fursuiter: mine.fursuiter,
       volunteered: standing.volunteered,
       discount: standing.discount,
       country: session.user.country,

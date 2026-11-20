@@ -57,7 +57,7 @@ test('a custom link is tidied and saved; a taken one says so and can get a rando
   await expect(page.locator('#eventTitle')).toHaveText(event.title);
 });
 
-test('ticket tiers, each including the one before, show on the event page', async ({ page }) => {
+test('ticket tiers, each including any other tier, show on the event page', async ({ page }) => {
   await openEvent(page);
   await openSection(page, 'Price and RSVP');
   await expect(page.locator('#tierSection')).toBeHidden();
@@ -76,44 +76,64 @@ test('ticket tiers, each including the one before, show on the event page', asyn
   await field(1, 'name').fill('Weekend');
   await field(1, 'price').fill('80');
   await field(1, 'benefits').fill('All three days');
-  await expect(cards.nth(1).locator('.tier-includes-label')).toHaveText('Includes everything in Day pass');
-  // Not included until ticked; then it names the tier before it.
-  await expect(field(1, 'includesPrevious')).not.toBeChecked();
+  // Not included until a tier is picked; then it names that tier.
+  await expect(field(1, 'includes')).toHaveValue('');
+  await expect(field(1, 'includes').locator('option')).toHaveText(['No other tier (just its own benefits)', 'Day pass']);
   await expect(field(1, 'previousDisplay')).toBeHidden();
-  await field(1, 'includesPrevious').check();
+  await field(1, 'includes').selectOption({ label: 'Day pass' });
   await expect(field(1, 'previousDisplay')).toHaveValue('reference');
+  // The Day pass cannot include the Weekend back: that would go round.
+  await expect(field(0, 'includes').locator('option', { hasText: 'Weekend' })).toBeDisabled();
 
   await page.locator('#tierAdd').click();
   await field(2, 'name').fill('Sponsor');
   await field(2, 'price').fill('120');
   await field(2, 'benefits').fill('Sponsor badge');
-  await field(2, 'includesPrevious').check();
+  await field(2, 'includes').selectOption({ label: 'Weekend' });
   await field(2, 'previousDisplay').selectOption('full');
+  // Any tier, not just the one before: a dinner that includes the Day pass,
+  // which one person can buy up to 3 of.
+  await page.locator('#tierAdd').click();
+  await field(3, 'name').fill('Dinner');
+  await field(3, 'price').fill('30');
+  await field(3, 'benefits').fill('Three-course dinner');
+  await expect(field(3, 'includes').locator('option')).toHaveText(['No other tier (just its own benefits)', 'Day pass', 'Weekend', 'Sponsor']);
+  await field(3, 'includes').selectOption({ label: 'Day pass' });
+  await expect(field(3, 'maxPerPerson')).toBeHidden();
+  await field(3, 'multiple').check();
+  await field(3, 'maxPerPerson').fill('3');
+  // A tier card saves once it is left.
+  await page.locator('body').click({ position: { x: 2, y: 2 } });
   await expect(status(page)).toHaveText(SAVED);
-  await expect(page.locator('#f-priceMin')).toHaveValue('45');
+  await expect(page.locator('#f-priceMin')).toHaveValue('30');
   await expect(page.locator('#f-priceMax')).toHaveValue('120');
 
   await page.reload();
   await openSection(page, 'Price and RSVP');
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(4);
   await expect(field(2, 'previousDisplay')).toHaveValue('full');
+  await expect(field(3, 'includes').locator('option:checked')).toHaveText('Day pass');
+  await expect(field(3, 'multiple')).toBeChecked();
+  await expect(field(3, 'maxPerPerson')).toHaveValue('3');
 
   await page.goto(`/e/${event.slug}`);
-  await expect(page.locator('#factPrice')).toHaveText('SGD 45.00 to SGD 120.00');
+  await expect(page.locator('#factPrice')).toHaveText('SGD 30.00 to SGD 120.00');
   const tiers = page.locator('#ticketTiers .tier-card');
-  await expect(tiers.locator('.tier-name')).toHaveText(['Day pass', 'Weekend', 'Sponsor']);
-  await expect(tiers.locator('.tier-price')).toHaveText(['SGD 45.00', 'SGD 80.00', 'SGD 120.00']);
+  await expect(tiers.locator('.tier-name')).toHaveText(['Day pass', 'Weekend', 'Sponsor', 'Dinner']);
+  await expect(tiers.locator('.tier-price')).toHaveText(['SGD 45.00', 'SGD 80.00', 'SGD 120.00', 'SGD 30.00']);
   await expect(tiers.nth(0).locator('.tier-benefits li')).toHaveText(['Entry on one day', 'Lanyard']);
   await expect(tiers.nth(1).locator('.tier-includes')).toHaveText('Everything in Day pass, plus:');
   await expect(tiers.nth(1).locator('.tier-benefits li')).toHaveText(['All three days']);
   // In full: everything the Weekend tier gives, then its own.
   await expect(tiers.nth(2).locator('.tier-includes')).toHaveCount(0);
   await expect(tiers.nth(2).locator('.tier-benefits li')).toHaveText([
-    'Entry on one day(included from an earlier tier)',
-    'Lanyard(included from an earlier tier)',
-    'All three days(included from an earlier tier)',
+    'Entry on one day(included from another tier)',
+    'Lanyard(included from another tier)',
+    'All three days(included from another tier)',
     'Sponsor badge',
   ]);
+  await expect(tiers.nth(3).locator('.tier-includes')).toHaveText('Everything in Day pass, plus:');
+  await expect(tiers.nth(3).locator('.tier-methods')).toHaveText('One person can buy up to 3 of these.');
 });
 
 // A portrait picture in three bands, red over green over blue.

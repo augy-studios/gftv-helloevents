@@ -1295,6 +1295,7 @@ main.wide > .page-card { margin-inline: auto; }
 .contact-custom-row .contact-custom-type { flex: 1 1 9rem; min-width: 0; }
 .attendee-contact { overflow-wrap: anywhere; }
 .rsvp .rsvp-volunteer-note { margin-top: 0; }
+.rsvp-fursuiter-hint { margin: -0.25rem 0 0; padding-inline-start: 1.85rem; }
 #rsvpMealChecks { display: grid; gap: 0.35rem; }
 .event-aside .actions { margin-top: 0; }
 
@@ -1688,6 +1689,10 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .choice-title { font-weight: 600; overflow-wrap: anywhere; }
 .choice-price { display: grid; justify-items: end; gap: 0.1rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .checkout-volunteer { margin-bottom: 1.25rem; }
+/* a picked ticket one person can buy more than one of: "How many" under it */
+.ticket-pick { display: grid; gap: 0.4rem; }
+.ticket-quantity { margin: 0 0 0.25rem; padding-inline-start: 2.75rem; }
+.ticket-quantity input { max-width: 7rem; }
 .order-summary { margin: 0 0 1rem; padding: 1rem; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
 .order-lines { display: grid; gap: 0.4rem; }
 .order-lines > div { display: flex; justify-content: space-between; gap: 1rem; }
@@ -1825,6 +1830,10 @@ html.touring { overflow: hidden; }
 }
 
 /* manage: the description editor (js/rich-editor.js) */
+/* after a paste with lines in it: keep them together, or a paragraph each */
+.paste-lines { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.paste-lines .btn[aria-pressed="true"] { border-color: var(--brand-dark); background: var(--surface-active); font-weight: 600; }
+.paste-lines .icon-btn { margin-inline-start: auto; }
 .description-field .field-label { font-weight: 600; font-size: 0.9375rem; cursor: text; }
 .rich-toolbar {
   position: sticky;
