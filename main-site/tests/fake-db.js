@@ -13,6 +13,7 @@ const DEFAULTS = {
     staff_user_id: null, username: null, display_name: null, email: null, password_hash: null, terms_accepted_at: null,
     email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true, reminder_hours: [24],
     notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null, country: null,
+    legal_name: null, date_of_birth: null, emergency_name: null, emergency_phone: null,
   }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
   gftvevents_sessions: () => ({ last_seen_at: now(), ip_hash: null }),
@@ -34,10 +35,11 @@ const DEFAULTS = {
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
     payment_methods: [], payment_link: null, payment_qr_path: null, payment_instructions: null,
     lepak_enabled: false, lepak_limit: null, lepak_label: null, contact_fields: [], contact_rule: 'any',
+    registration_enabled: false, registration_fields: null,
     cover_source_image_id: null, cover_crop: null,
   }),
   gftvevents_attendees: () => ({
-    meals: [], reminders_sent: [], volunteer: false, fursuiter: false, lepak: false, contact: {},
+    meals: [], reminders_sent: [], volunteer: false, fursuiter: false, lepak: false, contact: {}, registration: {}, payment_credit: null,
     payment_method: null, payment_status: 'none', payment_tier: null, payment_items: null, payment_amount: null, payment_currency: null,
     payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null,
   }),
@@ -428,6 +430,12 @@ export function createFakeDb() {
         const object = objects.get(`${bucket}/${path}`);
         if (!object) return { data: null, error: { message: 'Object not found' } };
         return { data: new Blob([object.body]), error: null };
+      },
+      async list(prefix, opts = {}) {
+        const start = `${bucket}/${prefix}/`;
+        const names = [...objects.keys()].filter((key) => key.startsWith(start)).map((key) => key.slice(start.length)).filter((name) => !name.includes('/'));
+        const found = names.filter((name) => !opts.search || name.includes(opts.search));
+        return { data: found.map((name) => ({ name })), error: null };
       },
       async remove(paths) {
         paths.forEach((p) => objects.delete(`${bucket}/${p}`));

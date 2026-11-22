@@ -1,7 +1,8 @@
 // POST /api/events/rsvp  { slug, going?: true | false, meals?: [id], volunteer?: true | false,
 //                          lepak?: true | false, fursuiter?: true | false,
 //                          payment?: { method, items? },
-//                          contact?: { field id: value } }
+//                          contact?: { field id: value },
+//                          registration?: { question id: answer } }
 //
 // RSVP for a signed-in person (a session that passed the second factor).
 // meals: when the event offers meals people can come to on their own, the
@@ -39,6 +40,18 @@
 // or change them. Left out, they stay as they were. Refused with
 // contact_required or contact_invalid, and the field's id when one is to
 // blame.
+// registration: answers to the event's registration form (migrations/024,
+// js/registration-fields.js), by question id. Joining needs every required
+// one, and the account details the form requires (refused with
+// account_details_required and the missing ones in fields). Someone going
+// can send just the answers they change (with going left out), merged over
+// what they gave, while registration is open for them: RSVPs open, the
+// event not over, and none of their tiers closed (refused with
+// registration_closed). A donation is added to a checkout ticket's total,
+// and is fixed once the order holds it. A photo answer is the name
+// api/events/registration-photo.js gave back. "Are you fursuiting?" sets
+// the fursuiter flag too. Refused with registration_required or
+// registration_invalid, and the question's id.
 // Joining goes through the gftvevents_rsvp database function, which locks the
 // event row, so two people cannot both take the last space. Only released,
 // open, not-yet-over events can be joined; anything else answers the same
@@ -55,11 +68,12 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
-import { chooseMeals, takesVolunteers, asksFursuiters, needsCheckout, paymentOptions, sellsTiers, basketPrice, basketOptions, ticketPrice, lepakOffered, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { chooseMeals, takesVolunteers, asksFursuiters, needsCheckout, paymentOptions, sellsTiers, basketPrice, basketOptions, ticketPrice, lepakOffered, registrationOpenFor, donationOf, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
-import { deletePaymentFiles } from '../_lib/payments.js';
+import { deletePaymentFiles, registrationPhotoExists, registrationPhotoPath } from '../_lib/payments.js';
+import { storedRegistrationFields, readRegistrationAnswers, missingAccountDetails, registrationAsksFursuiting, photoNames } from '../../js/registration-fields.js';
 import { storedContactFields, storedContactRule, readContactAnswers } from '../../js/contact-fields.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
@@ -99,6 +113,7 @@ async function setAnswer(eventId, userId, column, value) {
 
 // The payment columns that say there is none.
 const NO_PAYMENT = {
+  payment_credit: null,
   payment_method: null,
   payment_status: 'none',
   payment_tier: null,
@@ -115,7 +130,7 @@ const NO_PAYMENT = {
 // The ticket a checkout asks for: { ok: true, columns } with the attendee
 // payment columns to write, or { ok: false, error }. event: after
 // withVolunteerSource, for the benefit.
-async function checkoutTicket(event, userId, payment) {
+async function checkoutTicket(event, userId, payment, donation = 0) {
   if (!payment || typeof payment !== 'object' || !paymentOptions(event).includes(payment.method)) {
     return { ok: false, error: 'payment_method_required' };
   }
@@ -153,6 +168,8 @@ async function checkoutTicket(event, userId, payment) {
   if (ONLINE_METHODS.includes(payment.method)) {
     status = 'awaiting';
   }
+  // The donation from the registration form comes on top (migrations/024).
+  const amount = Math.round((priced.amount + donation) * 100) / 100;
   return {
     ok: true,
     columns: {
@@ -161,7 +178,7 @@ async function checkoutTicket(event, userId, payment) {
       payment_status: status,
       payment_tier: tierText,
       payment_items: items,
-      payment_amount: priced.amount,
+      payment_amount: amount,
       payment_currency: event.currency,
     },
   };
@@ -190,6 +207,67 @@ async function writeContact(eventId, userId, contact) {
   if (error) {
     throw error;
   }
+}
+
+// The registration answers sent, checked against the event's form and
+// merged over the ones given before (previous): { ok: true, answers } (null
+// when the event has no form) or { ok: false, error, field }. stored: the
+// person's attendee row while going; once it holds an order, its donation
+// stays as it is.
+async function checkRegistration(event, userId, given, previous, stored) {
+  const fields = storedRegistrationFields(event);
+  if (fields.length === 0) {
+    return { ok: true, answers: null };
+  }
+  let input = {};
+  if (given && typeof given === 'object' && !Array.isArray(given)) {
+    input = { ...given };
+  }
+  if (stored && stored.payment_method) {
+    delete input.donation;
+  }
+  const read = readRegistrationAnswers(fields, input, previous);
+  if (!read.ok) {
+    return read;
+  }
+  // A new photo has to be one this person stored for this event.
+  for (const field of fields) {
+    const name = read.answers[field.id];
+    if (field.type === 'photo' && name && name !== previous[field.id]) {
+      if (!(await registrationPhotoExists(event.id, userId, name))) {
+        return { ok: false, error: 'registration_invalid', field: field.id };
+      }
+    }
+  }
+  return read;
+}
+
+function registrationRefusal(response, check) {
+  const extra = {};
+  if (check.field) {
+    extra.field = check.field;
+  }
+  return fail(response, 400, check.error, extra);
+}
+
+// Saves the answers, with "Are you fursuiting?" in the fursuiter flag too,
+// and deletes any photo they replaced.
+async function writeRegistration(event, userId, answers, previous) {
+  const columns = { registration: answers };
+  if (registrationAsksFursuiting(event) && answers.fursuiting) {
+    columns.fursuiter = answers.fursuiting === 'yes';
+  }
+  const { error } = await database()
+    .from(TABLES.attendees)
+    .update(columns)
+    .eq('event_id', event.id)
+    .eq('user_id', userId);
+  if (error) {
+    throw error;
+  }
+  const kept = new Set(photoNames(answers));
+  const gone = photoNames(previous).filter((name) => !kept.has(name));
+  await deletePaymentFiles(gone.map((name) => registrationPhotoPath(event.id, userId, name)));
 }
 
 async function writePayment(eventId, userId, columns) {
@@ -240,6 +318,10 @@ export default route('events/rsvp', async (request, response) => {
     return fail(response, 400, 'bad_request');
   }
   let contactSent = null;
+  let registrationSent = null;
+  if (body.registration !== undefined && (body.registration === null || typeof body.registration !== 'object' || Array.isArray(body.registration))) {
+    return fail(response, 400, 'bad_request');
+  }
   let meals = [];
   let lepak = false;
   // A cross-border event (migrations/015) takes a new RSVP only from someone
@@ -281,6 +363,28 @@ export default route('events/rsvp', async (request, response) => {
       }
       contactSent = check.contact;
     }
+    // The registration form (migrations/024): needed to join, with the
+    // account details it requires; a change only while it is open.
+    if (!before.going) {
+      const missing = missingAccountDetails(storedRegistrationFields(event), session.user.personal);
+      if (missing.length > 0) {
+        return fail(response, 400, 'account_details_required', { fields: missing });
+      }
+    }
+    if (before.going && body.registration !== undefined && !registrationOpenFor(event, before.payment)) {
+      return fail(response, 409, 'registration_closed');
+    }
+    if (!before.going || body.registration !== undefined) {
+      let previous = {};
+      if (before.going) {
+        previous = before.registration;
+      }
+      const check = await checkRegistration(event, session.user.id, body.registration, previous, before.payment);
+      if (!check.ok) {
+        return registrationRefusal(response, check);
+      }
+      registrationSent = check.answers;
+    }
     let ticket = null;
     let heldWholeEvent = false;
     if (before.going && before.meals.length === 0 && !before.lepak) {
@@ -288,7 +392,11 @@ export default route('events/rsvp', async (request, response) => {
     }
     if (meals.length === 0 && !lepak && !heldWholeEvent && needsCheckout(event)) {
       await withVolunteerSource(event);
-      ticket = await checkoutTicket(event, session.user.id, body.payment);
+      let answers = before.registration;
+      if (registrationSent !== null) {
+        answers = registrationSent;
+      }
+      ticket = await checkoutTicket(event, session.user.id, body.payment, donationOf(event, answers));
       if (!ticket.ok) {
         return fail(response, 400, ticket.error);
       }
@@ -312,6 +420,9 @@ export default route('events/rsvp', async (request, response) => {
     }
     if (contactSent !== null) {
       await writeContact(event.id, session.user.id, contactSent);
+    }
+    if (registrationSent !== null) {
+      await writeRegistration(event, session.user.id, registrationSent, before.registration);
     }
     // From the whole event to just meals or lepak: a payment not yet
     // confirmed is dropped, screenshot and all. A confirmed one is kept for
@@ -359,21 +470,43 @@ export default route('events/rsvp', async (request, response) => {
       throw error;
     }
     if (before.payment) {
-      await deletePaymentFiles([before.payment.payment_proof_path]);
+      const photos = photoNames(before.registration).map((name) => registrationPhotoPath(event.id, session.user.id, name));
+      await deletePaymentFiles([before.payment.payment_proof_path, ...photos]);
     }
     await audit(request, { action: 'rsvp.cancelled', actorId: session.user.id, eventId: event.id });
-  } else if (body.going === undefined && body.contact !== undefined) {
-    // Just the contact details, from someone going.
+  } else if (body.going === undefined && (body.contact !== undefined || body.registration !== undefined)) {
+    // Just the contact details or registration answers, from someone going.
     const before = await attendance(event.id, session.user.id);
     if (!before.going) {
       return fail(response, 409, 'not_going');
     }
-    const check = checkContact(event, body.contact);
-    if (!check.ok) {
-      return contactRefusal(response, check);
+    let contact = null;
+    if (body.contact !== undefined) {
+      const check = checkContact(event, body.contact);
+      if (!check.ok) {
+        return contactRefusal(response, check);
+      }
+      contact = check.contact;
     }
-    await writeContact(event.id, session.user.id, check.contact);
-    await audit(request, { action: 'rsvp.contact_changed', actorId: session.user.id, eventId: event.id, details: { fields: Object.keys(check.contact) } });
+    let answers = null;
+    if (body.registration !== undefined) {
+      if (!registrationOpenFor(event, before.payment)) {
+        return fail(response, 409, 'registration_closed');
+      }
+      const check = await checkRegistration(event, session.user.id, body.registration, before.registration, before.payment);
+      if (!check.ok) {
+        return registrationRefusal(response, check);
+      }
+      answers = check.answers;
+    }
+    if (contact !== null) {
+      await writeContact(event.id, session.user.id, contact);
+      await audit(request, { action: 'rsvp.contact_changed', actorId: session.user.id, eventId: event.id, details: { fields: Object.keys(contact) } });
+    }
+    if (answers !== null) {
+      await writeRegistration(event, session.user.id, answers, before.registration);
+      await audit(request, { action: 'rsvp.registration_changed', actorId: session.user.id, eventId: event.id, details: { questions: Object.keys(body.registration) } });
+    }
   } else {
     return fail(response, 400, 'bad_request');
   }
@@ -406,6 +539,8 @@ export default route('events/rsvp', async (request, response) => {
       country: session.user.country,
       payment: mine.payment,
       contact: mine.contact,
+      registration: mine.registration,
+      personal: session.user.personal,
     }),
   });
 });

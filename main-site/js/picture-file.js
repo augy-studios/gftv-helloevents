@@ -6,6 +6,8 @@
 //                 PNG keeps it lossless, so it still scans.
 //   proofPicture  a payment screenshot, as a WebP, its longest side at most
 //                 1600 px, the quality stepped down until it fits.
+//   registrationPicture  a registration form photo such as a con badge
+//                 photo (migrations/024), the same at 1200 px.
 //
 // Both are kept small on purpose, so the bucket stays small. Each gives a
 // data: URL, or throws an Error whose code is an error.* key.
@@ -85,4 +87,22 @@ export async function proofPicture(file) {
     }
   }
   throw fail('proof_too_large');
+}
+
+// A registration form photo, such as a con badge photo (migrations/024): a
+// WebP, its longest side at most 1200 px, stepped down until it fits.
+const PHOTO_SIDE = 1200;
+
+export async function registrationPicture(file) {
+  const canvas = await draw(file, PHOTO_SIDE, 'photo');
+  for (const quality of QUALITIES) {
+    const blob = await toBlob(canvas, 'image/webp', quality);
+    if (!blob || blob.type !== 'image/webp') {
+      throw fail('photo_webp_unsupported');
+    }
+    if (blob.size <= PROOF_MAX_BYTES) {
+      return toDataUrl(blob, 'photo_invalid');
+    }
+  }
+  throw fail('photo_too_large');
 }

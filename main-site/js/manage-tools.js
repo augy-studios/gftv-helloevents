@@ -7,6 +7,7 @@ import { t as translate, onChange } from '../assets/i18n/i18n.js';
 import { api, post } from './api.js';
 import { createElement, withBusy, formatDate, copyText } from './ui.js';
 import { iconNode } from './icons.js';
+import { fillCountrySelect } from './choices.js';
 
 const byId = (id) => document.getElementById(id);
 let state = null;
@@ -161,6 +162,36 @@ export async function startTools(currentUser) {
       byId('resetExpiry').textContent = translate('admin.reset-expires', { until: formatDate(expiresAt) });
       byId('resetCopy').onclick = () => copyText(code);
       byId('resetResult').hidden = false;
+    });
+  });
+
+  // Correcting a locked personal detail (migrations/024): the input for the
+  // detail picked; blank clears it.
+  fillCountrySelect(byId('personalFixCountry'), '');
+  const syncPersonalFix = () => {
+    const which = byId('personalFixWhich').value;
+    byId('personalFixTextField').hidden = which !== 'legalName';
+    byId('personalFixDateField').hidden = which !== 'dateOfBirth';
+    byId('personalFixCountryField').hidden = which !== 'country';
+  };
+  byId('personalFixWhich').addEventListener('change', syncPersonalFix);
+  syncPersonalFix();
+  byId('personalFixForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    byId('personalFixDone').hidden = true;
+    withBusy(byId('personalFixSubmit'), byId('personalFixError'), async () => {
+      const which = byId('personalFixWhich').value;
+      const body = { action: 'personal-fix', username: byId('personalFixUsername').value };
+      if (which === 'legalName') {
+        body.legalName = byId('personalFixText').value;
+      } else if (which === 'dateOfBirth') {
+        body.dateOfBirth = byId('personalFixDate').value;
+      } else {
+        body.country = byId('personalFixCountry').value;
+      }
+      await post('/api/manage/admin', body);
+      byId('personalFixDone').textContent = translate('admin.personal-done', { username: body.username.trim() });
+      byId('personalFixDone').hidden = false;
     });
   });
 

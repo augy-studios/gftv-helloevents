@@ -3,15 +3,17 @@
 import { session } from '../app.js';
 import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
-import { createElement, errorText, withBusy, copyText } from '../ui.js';
+import { createElement, errorText, withBusy, copyText, formatDate } from '../ui.js';
 import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
 import { renderTimetable } from '../timetable.js';
 import { renderEventGallery } from '../event-gallery.js';
 import { renderRichText } from '../rich-dom.js';
-import { startTours } from '../tour.js';
+import { startTours, checkTours } from '../tour.js';
 import { drawContactForm } from '../contact-form.js';
+import { drawRegistrationForm, registrationErrorText } from '../registration-form.js';
+import { renderRegistrationCard } from '../registration-card.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -42,6 +44,10 @@ let fursuiterPick = false;
 // a re-render keeps what is being typed.
 let contactForm = null;
 let contactDrawn = '';
+// The registration form (migrations/024) for someone joining here, and what
+// it was drawn for.
+let registrationForm = null;
+let registrationDrawn = '';
 
 function renderCover() {
   const box = byId('eventCover');
@@ -530,6 +536,58 @@ function renderRsvp() {
     }
   }
   renderContact(contactShown);
+  // The registration form: with "I am going" for someone joining here (a
+  // ticket's goes with it on the checkout page). Someone going changes their
+  // answers on the Registration details card instead.
+  let registrationShown = false;
+  if (event.registration.fields.length > 0 && signedIn && !going && !rsvpButtonHidden && !ticketNeeded()) {
+    registrationShown = true;
+  }
+  renderRegistrationForm(registrationShown);
+  // The checkout link carries nothing of the form: checkout asks it itself.
+  renderRegistrationCard(byId('registrationBox'), event, (fresh) => {
+    event = fresh;
+    render();
+  });
+}
+
+// The registration form in the RSVP box: drawn again only when what it
+// shows changed, so what is being typed is kept.
+function renderRegistrationForm(shown) {
+  const box = byId('rsvpRegistration');
+  box.hidden = !shown;
+  if (!shown) {
+    return;
+  }
+  const mine = event.viewer.registration;
+  const drawFor = JSON.stringify([event.registration, mine.accountMissing, mine.personal, getLocale()]);
+  if (drawFor === registrationDrawn && registrationForm) {
+    return;
+  }
+  // Keep what was typed or picked when the form is drawn again.
+  let typed = {};
+  if (registrationForm) {
+    typed = registrationForm.read();
+  }
+  registrationDrawn = drawFor;
+  registrationForm = drawRegistrationForm(byId('rsvpRegistrationFields'), {
+    fields: event.registration.fields,
+    values: typed,
+    personal: mine.personal,
+    accountMissing: mine.accountMissing,
+    currency: event.registration.currency,
+    idPrefix: 'rsvpReg',
+    slug: event.slug,
+    errorBox: byId('rsvpError'),
+  });
+}
+
+// Whether the registration answers go with "I am going": the form is shown.
+function registrationAsked() {
+  if (registrationForm === null) {
+    return false;
+  }
+  return !byId('rsvpRegistration').hidden;
 }
 
 // The contact details box: drawn again only when what it shows changed.
@@ -697,6 +755,12 @@ function renderTiers() {
     if (tier.maxPerPerson > 1) {
       body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-max', { count: tier.maxPerPerson }) }));
     }
+    // When it stops being sold (migrations/024).
+    if (tier.closed) {
+      body.push(createElement('p', { class: 'tier-methods tier-closed', text: translate('event.tier-closed') }));
+    } else if (tier.closesAt) {
+      body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-closes', { date: formatDate(tier.closesAt) }) }));
+    }
     // How this tier is paid for, when it differs from the event's.
     if (tier.methods.length > 0 && JSON.stringify(tier.methods) !== JSON.stringify(event.payment.methods)) {
       body.push(createElement('p', { class: 'tier-methods', text: paymentMethodsText(tier.methods) }));
@@ -862,6 +926,14 @@ byId('rsvpBtn').addEventListener('click', () => {
       return;
     }
   }
+  // And the registration form's answers.
+  if (!event.viewer.going && registrationAsked()) {
+    const problem = registrationForm.check();
+    if (problem) {
+      byId('rsvpError').textContent = problem;
+      return;
+    }
+  }
   withBusy(byId('rsvpBtn'), byId('rsvpError'), async () => {
     const body = { slug: event.slug, going: !event.viewer.going };
     if (body.going) {
@@ -870,6 +942,9 @@ byId('rsvpBtn').addEventListener('click', () => {
       if (contactAsked()) {
         body.contact = contactForm.read();
       }
+      if (registrationAsked()) {
+        body.registration = registrationForm.read();
+      }
     }
     if (body.going && !byId('rsvpVolunteerRow').hidden) {
       body.volunteer = volunteerPick;
@@ -877,11 +952,23 @@ byId('rsvpBtn').addEventListener('click', () => {
     if (body.going && !byId('rsvpFursuiterRow').hidden) {
       body.fursuiter = fursuiterPick;
     }
-    const data = await post('/api/events/rsvp', body);
+    let data;
+    try {
+      data = await post('/api/events/rsvp', body);
+    } catch (error) {
+      // A refused answer names its question.
+      if (String(error.code).startsWith('registration_')) {
+        byId('rsvpError').textContent = registrationErrorText(error, event.registration.fields);
+        return;
+      }
+      throw error;
+    }
     event = data.event;
     syncChoice();
     render();
     byId('rsvpBtn').focus();
+    // Going now: the Registration details card may have a tour to show.
+    checkTours();
   });
 });
 

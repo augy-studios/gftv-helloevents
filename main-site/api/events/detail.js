@@ -26,6 +26,14 @@ function countryOfSession(session) {
 
 // Finds the event (any status for an editor, released ones for everyone
 // else) and answers with what this viewer may see of it.
+// The signed-in person's personal details (migrations/024), or none.
+function personalOfSession(session) {
+  if (!session) {
+    return null;
+  }
+  return session.user.personal;
+}
+
 export default route('events/detail', async (request, response) => {
   if (guard(request, response, ['GET'])) {
     return;
@@ -54,7 +62,7 @@ export default route('events/detail', async (request, response) => {
   await withVolunteerSource(row);
   await withGallery(row);
   await withDescriptionPictures(row);
-  let mine = { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
+  let mine = { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {} };
   let standing = { volunteered: false, discount: false };
   let contactSuggest = {};
   if (session) {
@@ -79,6 +87,8 @@ export default route('events/detail', async (request, response) => {
     payment: mine.payment,
     contact: mine.contact,
     contactSuggest,
+    registration: mine.registration,
+    personal: personalOfSession(session),
   });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.

@@ -1294,6 +1294,81 @@ main.wide > .page-card { margin-inline: auto; }
 .contact-custom-row .contact-custom-label { flex: 2 1 12rem; min-width: 0; }
 .contact-custom-row .contact-custom-type { flex: 1 1 9rem; min-width: 0; }
 .attendee-contact { overflow-wrap: anywhere; }
+/* Registration forms (migrations/024): the form (js/registration-form.js),
+   the "Registration details" card (js/registration-card.js), and the edit
+   form's section (js/manage-registration.js). */
+.rsvp-registration .field, #registrationFields .field { margin-bottom: 0.6rem; }
+.rsvp-registration p, #registrationFields p { margin: 0 0 0.4rem; }
+.reg-field { margin: 0 0 0.8rem; }
+.reg-yesno { border: 0; padding: 0; min-width: 0; }
+.reg-yesno legend { padding: 0; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.9375rem; }
+.reg-check > .field-hint { margin: 0 0 0.35rem; font-weight: 600; font-size: 0.9375rem; color: var(--text); }
+.reg-field[data-invalid="true"] legend, .reg-field[data-invalid="true"] .check > span { color: var(--danger); }
+.reg-choices { display: flex; flex-wrap: wrap; gap: 0.25rem 2rem; }
+.field[data-invalid="true"] input, .field[data-invalid="true"] select, .field[data-invalid="true"] textarea { border-color: var(--danger); }
+.field[data-invalid="true"] > span:first-child, .field[data-invalid="true"] legend { color: var(--danger); }
+.reg-amount { display: flex; align-items: center; gap: 0.5rem; }
+.reg-amount input { flex: 1 1 auto; min-width: 0; }
+.reg-currency { color: var(--text-muted); font-weight: 600; }
+.reg-photo-preview, .reg-photo-shown {
+  display: block;
+  width: 100%;
+  max-width: 18rem;
+  aspect-ratio: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin: 0.35rem 0;
+}
+.reg-photo .file-btn.is-busy { opacity: 0.6; pointer-events: none; }
+.reg-account { display: grid; gap: 0.35rem; margin-bottom: 0.6rem; }
+.reg-card {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+.reg-title { margin: 0; }
+.reg-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.reg-badge-name { font-size: clamp(1.6rem, 6vw, 2.2rem); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+.reg-badge-number { font-size: 1.15rem; margin: 0; }
+.reg-tier { font-size: 0.95rem; }
+.reg-row { display: grid; gap: 0.15rem; min-width: 0; }
+.reg-row-head { display: flex; align-items: center; gap: 0.4rem; }
+.reg-label { color: var(--text-muted); font-size: 0.92rem; }
+.reg-value { overflow-wrap: anywhere; white-space: pre-line; }
+.reg-missing .reg-value { color: var(--warn); }
+.reg-subtitle { margin: 0; font-size: 1.05rem; }
+.reg-divider { border: 0; border-top: 1px solid var(--border-strong); width: 100%; margin: 0.25rem 0; }
+.reg-edit {
+  border: 0;
+  background: none;
+  color: var(--link);
+  padding: 0.25rem;
+  min-width: 2rem;
+  min-height: 2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.reg-edit:hover { background: var(--surface-hover); }
+.reg-edit:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.reg-editing { padding: 0.6rem; border-radius: var(--radius-sm); background: var(--surface-hover); }
+.reg-upgrade { margin-top: 0.9rem; }
+.registration-section .reg-card { margin: 0; }
+.tier-closed { color: var(--warn); font-weight: 600; }
+.upgrade-box { border-top: 1px solid var(--border); padding-top: 0.9rem; }
+.reg-presets { display: grid; gap: 0.5rem; margin: 0.4rem 0 0.9rem; }
+.reg-preset { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.5rem 0.7rem; }
+.reg-preset-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem; }
+.reg-preset-extras { display: grid; gap: 0.4rem; margin-top: 0.4rem; padding-inline-start: 1.85rem; }
+.reg-preset-extras .field-hint { margin: 0; }
+.attendee-registration { margin-top: 0.3rem; }
+.attendee-registration summary { cursor: pointer; color: var(--link); }
+.attendee-registration .order-lines { margin-top: 0.35rem; }
+#registrationFieldsBox[hidden] { display: none; }
 .rsvp .rsvp-volunteer-note { margin-top: 0; }
 .rsvp-fursuiter-hint { margin: -0.25rem 0 0; padding-inline-start: 1.85rem; }
 #rsvpMealChecks { display: grid; gap: 0.35rem; }

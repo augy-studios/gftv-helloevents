@@ -23,7 +23,7 @@ export const DETAIL_COLUMNS =
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
   'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
   'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label, contact_fields, contact_rule, ' +
-  'fursuiters_asked';
+  'fursuiters_asked, registration_enabled, registration_fields';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -132,19 +132,20 @@ export async function withMealCounts(row) {
 // The attendee columns that say where someone's payment stands
 // (migrations/016), read by attendance and the attendee list.
 export const PAYMENT_COLUMNS =
-  'payment_method, payment_status, payment_tier, payment_items, payment_amount, payment_currency, payment_reference, payment_proof_path, payment_submitted_at, paid_at';
+  'payment_method, payment_status, payment_tier, payment_items, payment_amount, payment_currency, payment_reference, payment_proof_path, payment_submitted_at, paid_at, payment_credit';
 
 // Whether someone is going, the meals they are coming for (empty for the
 // whole event, migrations/007), whether they signed up to volunteer
 // (migrations/012), their RSVP ID for this event (migrations/013) and their
 // payment (migrations/016, the stored row's payment columns, or null when
 // not going) and the contact details they gave (migrations/021, as stored:
-// { field id: value }): { going, meals, volunteer, rsvpNumber, payment,
-// lepak, contact }.
+// { field id: value }) and their registration answers (migrations/024, as
+// stored): { going, meals, volunteer, rsvpNumber, payment, lepak, contact,
+// registration }. payment is the whole row, so it carries registration too.
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`meals, volunteer, fursuiter, rsvp_number, lepak, contact, ${PAYMENT_COLUMNS}`)
+    .select(`meals, volunteer, fursuiter, rsvp_number, lepak, contact, registration, ${PAYMENT_COLUMNS}`)
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -152,7 +153,7 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {} };
+    return { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {} };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
@@ -166,7 +167,11 @@ export async function attendance(eventId, userId) {
   if (data.contact && typeof data.contact === 'object') {
     contact = data.contact;
   }
-  return { going: true, meals, volunteer: data.volunteer === true, fursuiter: data.fursuiter === true, rsvpNumber, payment: data, lepak: data.lepak === true, contact };
+  let registration = {};
+  if (data.registration && typeof data.registration === 'object' && !Array.isArray(data.registration)) {
+    registration = data.registration;
+  }
+  return { going: true, meals, volunteer: data.volunteer === true, fursuiter: data.fursuiter === true, rsvpNumber, payment: data, lepak: data.lepak === true, contact, registration };
 }
 
 // Whether an event asks the people going for contact details.

@@ -120,7 +120,7 @@ test('cross-border is saved as ticked, and kept when a form sends nothing about 
 // The country of origin
 // ---------------------------------------------------------------------------
 
-test('a country of origin is picked at sign-up and changed on the account page, by anyone', async () => {
+test('a country of origin is picked at sign-up, then locked: only an admin changes it', async () => {
   const refused = await browser().call(signup, {
     method: 'POST',
     body: { username: 'nocountry', displayName: 'No Country', email: 'n@example.com', password: PASSWORD, agree: true },
@@ -130,9 +130,11 @@ test('a country of origin is picked at sign-up and changed on the account page, 
 
   const otter = await member('otter', 'sg');
   assert.equal((await otter.call(sessionRoute)).json.user.country, 'SG');
+  // Set once (migrations/024): the same one again is fine, another is not.
+  assert.equal((await otter.call(profile, { method: 'POST', body: { country: 'sg' } })).status, 200);
   const moved = await otter.call(profile, { method: 'POST', body: { country: 'id' } });
-  assert.equal(moved.status, 200, JSON.stringify(moved.json));
-  assert.equal(moved.json.user.country, 'ID');
+  assert.equal(moved.status, 409);
+  assert.equal(moved.json.error, 'personal_locked');
   assert.equal((await otter.call(profile, { method: 'POST', body: { country: 'XX' } })).json.error, 'country_required');
   assert.equal((await otter.call(profile, { method: 'POST', body: { country: '' } })).json.error, 'country_required', 'never emptied');
   assert.equal((await otter.call(profile, { method: 'POST', body: {} })).status, 400);

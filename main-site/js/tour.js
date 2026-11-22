@@ -502,6 +502,16 @@ function replay() {
   }
 }
 
+// Called by a page when something with a tour of its own may have just
+// appeared (the Registration details card after an RSVP, the upgrade
+// section at checkout): looks for an unseen tour to show, as on load.
+export function checkTours() {
+  if (!pageName || run) {
+    return;
+  }
+  look();
+}
+
 // Called once by a page's module when its content has drawn (the feed, the
 // event, the account, the event list). Shows the header's ? button and
 // starts watching for tours to show.

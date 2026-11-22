@@ -240,12 +240,19 @@ function tierCard(values) {
         createElement('input', { type: 'number', 'data-key': 'maxPerPerson', min: 2, max: MAX_PER_PERSON, step: 1, inputmode: 'numeric', placeholder: String(MAX_PER_PERSON) }),
         createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierMaxPerPerson' }),
       ]),
+      // When it stops being sold (migrations/024): its holders can then no
+      // longer change their registration answers or upgrade from it.
+      createElement('label', { class: 'field span-2' }, [
+        createElement('span', { i18n: 'manage.field.tierClosesLocal' }),
+        createElement('input', { type: 'datetime-local', 'data-key': 'closesLocal' }),
+        createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierClosesLocal' }),
+      ]),
       payPart(),
     ]),
     createElement('input', { type: 'hidden', 'data-key': 'id' }),
   ]);
 
-  for (const key of ['name', 'price', 'benefits']) {
+  for (const key of ['name', 'price', 'benefits', 'closesLocal']) {
     let value = values[key];
     if (value === null || value === undefined) {
       value = '';
@@ -372,6 +379,7 @@ export function readTiers() {
       maxPerPerson: maxPerPerson(card),
       paymentMethods: METHODS.filter((method) => input(card, `pay-${method}`).checked),
       paymentLink: input(card, 'paymentLink').value,
+      closesLocal: input(card, 'closesLocal').value,
     };
   });
 }

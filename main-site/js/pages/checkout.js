@@ -21,8 +21,10 @@ import { createElement, withBusy, errorText } from '../ui.js';
 import { iconNode } from '../icons.js';
 import { whenText, formatMoney, tierPriceText } from '../format.js';
 import { proofPicture } from '../picture-file.js';
-import { startTours } from '../tour.js';
+import { startTours, checkTours } from '../tour.js';
 import { drawContactForm } from '../contact-form.js';
+import { drawRegistrationForm, registrationErrorText } from '../registration-form.js';
+import { answerValue } from '../registration-fields.js';
 
 const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -40,6 +42,12 @@ let pickedMethod = null;
 // a re-render keeps what is being typed.
 let contactForm = null;
 let contactDrawn = '';
+// The registration form (migrations/024), and what it was drawn for.
+let registrationForm = null;
+let registrationDrawn = '';
+// The tier picked to upgrade to (its index), and how to pay the difference.
+let upgradePick = null;
+let upgradeMethod = null;
 // The screenshot chosen for the report, as a data: URL, or null.
 let proof = null;
 
@@ -102,6 +110,15 @@ function sellsTiers() {
   return checkout.tickets[0].index !== null;
 }
 
+// Whether a ticket can be picked: a way to pay it is set up, and it has not
+// closed (migrations/024).
+function onSale(ticket) {
+  if (ticket.closed) {
+    return false;
+  }
+  return ticket.methods.length > 0;
+}
+
 // The picks still possible: tickets on sale only, each at most its limit;
 // the first one on sale when nothing is picked yet. Without tiers, the one
 // ticket.
@@ -111,13 +128,13 @@ function settlePicks() {
   if (picked) {
     for (const [place, quantity] of picked) {
       const ticket = tickets[place];
-      if (ticket && ticket.methods.length > 0) {
+      if (ticket && onSale(ticket)) {
         kept.set(place, Math.min(Math.max(1, quantity), ticket.maxPerPerson));
       }
     }
   }
   if ((picked === null || !sellsTiers()) && kept.size === 0) {
-    const first = tickets.findIndex((ticket) => ticket.methods.length > 0);
+    const first = tickets.findIndex(onSale);
     if (first >= 0) {
       kept.set(first, 1);
     }
@@ -166,8 +183,11 @@ function renderTickets() {
     if (ticket.maxPerPerson > 1) {
       lines.push(translate('event.tier-max', { count: ticket.maxPerPerson }));
     }
-    // A ticket no way to pay is set up for yet cannot be picked.
-    if (ticket.methods.length === 0) {
+    // A ticket no way to pay is set up for yet, or that has closed, cannot
+    // be picked.
+    if (ticket.closed) {
+      lines.push(translate('event.tier-closed'));
+    } else if (ticket.methods.length === 0) {
       lines.push(translate('checkout.ticket-unavailable'));
     }
     let type = 'radio';
@@ -178,7 +198,7 @@ function renderTickets() {
       aside = createElement('span', { class: 'choice-price' }, [createElement('strong', { text: tierPriceText(ticket.price, checkout.currency) })]);
     }
     const card = choiceCard({ name: 'ticket', value: String(place), checked: picked.has(place), title, lines, aside, type });
-    if (ticket.methods.length === 0) {
+    if (!onSale(ticket)) {
       card.classList.add('unavailable');
       card.querySelector('input').disabled = true;
     }
@@ -216,9 +236,29 @@ function ticketMethods() {
   });
 }
 
+// The donation typed in the registration form (migrations/024), 0 for none
+// or one not yet a valid amount.
+function typedDonation() {
+  const field = checkout.registration.fields.find((each) => each.id === 'donation');
+  if (!field || !registrationForm) {
+    return 0;
+  }
+  const read = answerValue(field, registrationForm.read().donation);
+  if (!read.ok || read.value === '') {
+    return 0;
+  }
+  return read.value;
+}
+
 // What the tickets picked cost, and the volunteer benefit off the total
-// once: { price, discount, amount }.
+// once, with the donation on top: { price, discount, donation, amount }.
 function orderAmounts() {
+  const amounts = ticketAmounts();
+  const donation = typedDonation();
+  return { ...amounts, donation, amount: Math.round((amounts.amount + donation) * 100) / 100 };
+}
+
+function ticketAmounts() {
   const chosen = pickedTickets();
   if (!sellsTiers()) {
     const ticket = chosen[0].ticket;
@@ -300,6 +340,9 @@ function renderOrder() {
   if (amounts.discount > 0) {
     pairs.push([translate('checkout.order-discount'), `-${money(amounts.discount)}`]);
   }
+  if (amounts.donation > 0) {
+    pairs.push([translate('checkout.order-donation'), money(amounts.donation)]);
+  }
   pairs.push([translate('checkout.order-total'), tierPriceText(amounts.amount, checkout.currency)]);
   pairs.push([translate('checkout.order-method'), translate(`payment.method.${pickedMethod}`)]);
   fillLines('orderLines', pairs);
@@ -315,6 +358,37 @@ function renderOrder() {
   const needsCountry = checkout.needsCountry === true;
   byId('countryNeeded').hidden = !needsCountry;
   button.disabled = needsCountry;
+}
+
+// The registration form the event asks, sent with the ticket.
+function renderRegistration() {
+  const fields = checkout.registration.fields;
+  byId('registrationStep').hidden = fields.length === 0;
+  if (fields.length === 0) {
+    registrationForm = null;
+    return;
+  }
+  const mine = checkout.viewer.registration;
+  const drawFor = JSON.stringify([checkout.registration, mine.accountMissing, mine.personal, getLocale()]);
+  if (drawFor === registrationDrawn && registrationForm) {
+    return;
+  }
+  let typed = mine.answers;
+  if (registrationForm) {
+    typed = registrationForm.read();
+  }
+  registrationDrawn = drawFor;
+  registrationForm = drawRegistrationForm(byId('registrationFields'), {
+    fields,
+    values: typed,
+    photos: mine.photos,
+    personal: mine.personal,
+    accountMissing: mine.accountMissing,
+    currency: checkout.registration.currency,
+    idPrefix: 'checkoutReg',
+    slug,
+    errorBox: byId('reserveError'),
+  });
 }
 
 // Why there is nothing to buy here, or '' when there is.
@@ -340,6 +414,7 @@ function renderOrderBox() {
   byId('volunteerRow').hidden = !checkout.takesVolunteers;
   byId('fursuiterRow').hidden = !checkout.asksFursuiters;
   renderContact();
+  renderRegistration();
   renderMethods();
   renderOrder();
 }
@@ -450,13 +525,68 @@ function renderPayBox() {
   if (payment.tier) {
     pairs.push([translate('checkout.order-ticket'), payment.tier]);
   }
+  if (checkout.viewer.donation > 0) {
+    pairs.push([translate('checkout.order-donation'), formatMoney(checkout.viewer.donation, payment.currency)]);
+  }
   if (payment.amount !== null) {
     pairs.push([translate('checkout.order-total'), tierPriceText(payment.amount, payment.currency)]);
+  }
+  // After an upgrade: what was paid before, and what is left to pay.
+  if (payment.credit > 0 && payment.status !== 'paid') {
+    pairs.push([translate('checkout.order-paid-before'), `-${formatMoney(payment.credit, payment.currency)}`]);
+    pairs.push([translate('checkout.order-due'), tierPriceText(payment.due, payment.currency)]);
   }
   pairs.push([translate('checkout.order-method'), translate(`payment.method.${payment.method}`)]);
   fillLines('payLines', pairs);
   renderPayHow(payment);
   renderSwitch(payment);
+  renderUpgrade(payment);
+}
+
+// The tiers they can upgrade to, each with what is left to pay, the way to
+// pay the difference, and the button.
+function renderUpgrade(payment) {
+  const upgrade = checkout.viewer.upgrade;
+  byId('upgradeBox').hidden = !upgrade;
+  if (!upgrade) {
+    return;
+  }
+  if (!upgrade.options.some((option) => option.index === upgradePick)) {
+    upgradePick = upgrade.options[0].index;
+  }
+  setText('upgradeLede', translate('registration.upgrade-lede', { tier: upgrade.from.name }));
+  byId('upgradeList').replaceChildren(...upgrade.options.map((option) => choiceCard({
+    name: 'upgrade',
+    value: String(option.index),
+    checked: option.index === upgradePick,
+    title: option.name,
+    lines: [translate('registration.upgrade-total', { total: tierPriceText(option.total, checkout.currency) })],
+    aside: createElement('span', { class: 'choice-price' }, [createElement('strong', { text: translate('registration.upgrade-due', { due: tierPriceText(option.due, checkout.currency) }) })]),
+  })));
+  // The ways to pay: the ticket's own ways (the server checks the new tiers
+  // share them).
+  let methods = checkout.heldMethods;
+  if (methods.length === 0) {
+    methods = [payment.method];
+  }
+  if (!methods.includes(upgradeMethod)) {
+    upgradeMethod = payment.method;
+    if (!methods.includes(upgradeMethod)) {
+      upgradeMethod = methods[0];
+    }
+  }
+  byId('upgradeMethodList').replaceChildren(...methods.map((method) => choiceCard({
+    name: 'upgradeMethod',
+    value: method,
+    checked: method === upgradeMethod,
+    title: translate(`payment.method.${method}`),
+    lines: [translate(`checkout.method-hint.${method}`)],
+  })));
+  const option = upgrade.options.find((each) => each.index === upgradePick);
+  fillLines('upgradeLines', [
+    [translate('checkout.order-total'), tierPriceText(option.total, checkout.currency)],
+    [translate('checkout.order-due'), tierPriceText(option.due, checkout.currency)],
+  ]);
 }
 
 // Holding a ticket (going to the whole event with a payment method) shows
@@ -500,9 +630,23 @@ async function reserve() {
   if (contactForm) {
     body.contact = contactForm.read();
   }
-  await post('/api/events/rsvp', body);
+  if (registrationForm) {
+    body.registration = registrationForm.read();
+  }
+  try {
+    await post('/api/events/rsvp', body);
+  } catch (error) {
+    if (String(error.code).startsWith('registration_')) {
+      byId('reserveError').textContent = registrationErrorText(error, checkout.registration.fields);
+      return;
+    }
+    throw error;
+  }
   await load();
   window.scrollTo({ top: 0 });
+  // Holding a ticket now: its sections (the upgrade among them) may have a
+  // tour to show.
+  checkTours();
 }
 
 async function switchMethod(button, method) {
@@ -560,7 +704,41 @@ byId('reserveBtn').addEventListener('click', () => {
       return;
     }
   }
+  if (registrationForm) {
+    const problem = registrationForm.check();
+    if (problem) {
+      byId('reserveError').textContent = problem;
+      return;
+    }
+  }
   withBusy(byId('reserveBtn'), byId('reserveError'), reserve);
+});
+
+// A donation typed changes the order's total as it is typed.
+byId('registrationFields').addEventListener('input', () => {
+  if (!byId('orderBox').hidden) {
+    renderOrder();
+  }
+});
+
+byId('upgradeList').addEventListener('change', (changed) => {
+  upgradePick = Number(changed.target.value);
+  renderUpgrade(checkout.viewer.payment);
+});
+
+byId('upgradeMethodList').addEventListener('change', (changed) => {
+  upgradeMethod = changed.target.value;
+});
+
+byId('upgradeBtn').addEventListener('click', () => {
+  const option = checkout.viewer.upgrade.options.find((each) => each.index === upgradePick);
+  withBusy(byId('upgradeBtn'), byId('upgradeError'), async () => {
+    const data = await post('/api/events/payment', { slug, action: 'upgrade', tier: option.index, tierName: option.name, method: upgradeMethod });
+    checkout = data.checkout;
+    proof = null;
+    render();
+    window.scrollTo({ top: 0 });
+  });
 });
 
 byId('payProof').addEventListener('change', async () => {
@@ -624,6 +802,10 @@ async function start() {
       byId('checkoutError').textContent = errorText(error);
     }
     return;
+  }
+  // Come to upgrade (from the event page's Registration details card).
+  if (params.get('upgrade') === '1' && !byId('upgradeBox').hidden) {
+    byId('upgradeBox').scrollIntoView({ block: 'start' });
   }
   startTours('checkout');
 }

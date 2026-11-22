@@ -145,3 +145,24 @@ test('an admin is also shown the Name filter and Password resets tabs', async ({
   await page.getByRole('tab', { name: 'Password resets' }).click();
   await expect(text(page)).toHaveText('Check it is really them before making a code: whoever has it can set a new password.');
 });
+
+test('someone who has seen every older tour is still shown the new personal details tour once', async ({ page }) => {
+  // Every tour from before registration forms (migrations/024) already seen.
+  await page.addInitScript(() => {
+    const older = ['home', 'event', 'checkout', 'checkout.pay', 'account', 'account.going', 'account.notifications', 'account.security', 'account.profile', 'hint'];
+    if (!localStorage.getItem('tour.seen')) {
+      localStorage.setItem('tour.seen', JSON.stringify(older));
+    }
+  });
+  await page.goto('/login?next=/account');
+  await signInWithBackupCode(page, PASSKEY_MEMBER.username, BACKUP_CODES[0]);
+  await page.waitForURL(`${serverOrigin()}/account`);
+  await page.getByRole('tab', { name: /^Profile/ }).click();
+  await expect(text(page)).toHaveText('Your legal name and date of birth, for events whose registration form asks. You fill them in once, here.');
+  await expect(dots(page)).toHaveCount(3);
+  await finish(page);
+  expect(await seen(page)).toContain('account.personal');
+  await page.reload();
+  await page.waitForTimeout(1500);
+  await expect(tour(page)).toHaveCount(0);
+});

@@ -543,6 +543,26 @@
                         </label>
                     </fieldset>
 
+                    <!-- The registration form asked of the people going
+                         (migrations/024, js/manage-registration.js). -->
+                    <fieldset id="registrationSection">
+                        <legend data-i18n="manage.section.registration">Registration form</legend>
+                        <p class="muted small" data-i18n="manage.registration-lede">Questions people answer when they RSVP or get a ticket, such as a badge name and T-shirt size. They can change their answers until RSVPs close or their tier closes. Only this event's editors see them, on the attendee list.</p>
+                        <label class="check">
+                            <input type="checkbox" id="f-registrationEnabled" name="registrationEnabled">
+                            <span data-i18n="manage.field.registrationEnabled">Ask a registration form</span>
+                        </label>
+                        <div id="registrationFieldsBox">
+                            <h3 class="section-label" data-i18n="manage.registration-presets">Ready-made questions</h3>
+                            <div class="reg-presets" id="registrationPresets"></div>
+                            <h3 class="section-label" data-i18n="manage.registration-own">Your own questions</h3>
+                            <div class="location-list" id="registrationCustomList"></div>
+                            <div class="actions inline">
+                                <button class="btn" type="button" id="registrationAdd"><span data-icon="plus"></span><span data-i18n="manage.registration-add">Add a question</span></button>
+                            </div>
+                        </div>
+                    </fieldset>
+
                     <fieldset id="volunteerSection">
                         <legend data-i18n="manage.section.volunteers">Volunteers</legend>
                         <p class="muted small" id="volunteersConventionOnly" data-i18n="manage.volunteers-convention-only">Only conventions take volunteers. Set Kind to Convention under Basics to use this.</p>
@@ -785,6 +805,40 @@
                     <div class="actions inline"><button class="btn" type="button" id="resetCopy"><span data-icon="copy"></span><span data-i18n="codes.copy">Copy</span></button></div>
                 </div>
                 <div class="callout danger" id="resetError" role="alert"></div>
+            </section>
+            <!-- Correcting a locked personal detail (migrations/024). -->
+            <section class="glass-card page-card admin-tools" id="personalFixBox" aria-labelledby="personalFixTitle">
+                <h2 id="personalFixTitle" data-i18n="admin.personal-title">Correct a personal detail</h2>
+                <p class="muted small" data-i18n="admin.personal-lede">A legal name, date of birth or country of origin is locked once someone sets it. Check it is really them first, then correct it here, or leave the new value blank to clear it so they can fill it in again. It is in the audit log.</p>
+                <form id="personalFixForm" class="form-grid" novalidate>
+                    <label class="field">
+                        <span data-i18n="field.username">Username</span>
+                        <input id="personalFixUsername" type="text" maxlength="64" autocapitalize="none" spellcheck="false">
+                    </label>
+                    <label class="field">
+                        <span data-i18n="admin.personal-which">Detail</span>
+                        <select id="personalFixWhich">
+                            <option value="legalName" data-i18n="field.legal-name">Legal name</option>
+                            <option value="dateOfBirth" data-i18n="field.date-of-birth">Date of birth</option>
+                            <option value="country" data-i18n="field.country">Country of origin</option>
+                        </select>
+                    </label>
+                    <label class="field span-2" id="personalFixTextField">
+                        <span data-i18n="admin.personal-value">New value (blank to clear)</span>
+                        <input id="personalFixText" type="text" maxlength="100">
+                    </label>
+                    <label class="field span-2" id="personalFixDateField" hidden>
+                        <span data-i18n="admin.personal-value">New value (blank to clear)</span>
+                        <input id="personalFixDate" type="date" min="1900-01-01">
+                    </label>
+                    <label class="field span-2" id="personalFixCountryField" hidden>
+                        <span data-i18n="admin.personal-value">New value (blank to clear)</span>
+                        <select id="personalFixCountry"></select>
+                    </label>
+                    <div class="actions inline span-2"><button class="btn" type="submit" id="personalFixSubmit"><span data-icon="user"></span><span data-i18n="admin.personal-save">Save the correction</span></button></div>
+                </form>
+                <p class="callout ok small" id="personalFixDone" role="status" hidden></p>
+                <div class="callout danger" id="personalFixError" role="alert"></div>
             </section>
         </div>
     </main>

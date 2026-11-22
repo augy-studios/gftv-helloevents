@@ -49,6 +49,8 @@ import { mealLabel } from '../format.js';
 import { setContact, readContact, startContact, relabelContact, CONTACT_CHANGED } from '../manage-contact.js';
 import { contactText, contactHref } from '../contact-fields.js';
 import { contactLabel } from '../contact-form.js';
+import { setRegistration, readRegistration, startRegistration, relabelRegistration, syncRegistration, REGISTRATION_CHANGED } from '../manage-registration.js';
+import { questionLabel, answerText } from '../registration-form.js';
 import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, setPaymentProblems, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
 
 const byId = (id) => document.getElementById(id);
@@ -92,6 +94,8 @@ const BLANK = {
   timetableItems: [],
   contactFields: [],
   contactRule: 'any',
+  registrationEnabled: false,
+  registrationFields: null,
 };
 
 let currentUser = null;
@@ -304,6 +308,7 @@ function setForm(values) {
   setTimetable(rooms, items);
   setPayment(values);
   setContact(values);
+  setRegistration(values);
   fillVolunteerSources(values.volunteerDiscountFrom);
   setCover(values);
   syncDependent();
@@ -493,6 +498,7 @@ function readForm() {
   Object.assign(values, readTimetable());
   Object.assign(values, readPayment());
   Object.assign(values, readContact());
+  Object.assign(values, readRegistration());
   return values;
 }
 
@@ -678,6 +684,10 @@ form.addEventListener('change', (event) => {
   // ticks "Cross-border event" (the editor can untick it). Saved with it.
   if (event.target.id === 'f-kind' && event.target.value === 'convention') {
     byId('f-crossBorder').checked = true;
+    // And a convention registers its people (migrations/024), with the
+    // ready-made questions to start from (the editor can untick it).
+    byId('f-registrationEnabled').checked = true;
+    syncRegistration();
   }
   // Tiers switched on with none yet: a first card to fill in.
   if (event.target.id === 'f-tiersEnabled' && event.target.checked && readTiers().length === 0) {
@@ -731,6 +741,7 @@ form.addEventListener('focusout', (event) => {
 form.addEventListener(LOCATIONS_CHANGED, () => autosave());
 form.addEventListener(MEALS_CHANGED, () => autosave());
 form.addEventListener(CONTACT_CHANGED, () => autosave());
+form.addEventListener(REGISTRATION_CHANGED, () => autosave());
 form.addEventListener(TIERS_CHANGED, () => autosave({ force: true }));
 form.addEventListener(TIMETABLE_CHANGED, () => autosave({ force: true }));
 
@@ -839,6 +850,8 @@ const FIELD_TABS = {
   ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price', tierMaxPerPerson: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
   contactFields: 'price', contactLabel: 'price',
+  registrationFields: 'price', registrationLabel: 'price', registrationHint: 'price', registrationOptions: 'price', registrationLink: 'price',
+  tierClosesLocal: 'price',
   timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
   timetableItems: 'timetable', itemTitle: 'timetable', itemDate: 'timetable', itemStart: 'timetable', itemEnd: 'timetable', itemNote: 'timetable',
 };
@@ -1185,6 +1198,62 @@ function attendeeContact(attendee) {
   return createElement('span', { class: 'small attendee-contact' }, parts);
 }
 
+// The registration answers someone gave and the account details the form
+// asks for (migrations/024), folded away under "Registration details";
+// null for none. A photo opens in a new tab.
+function attendeeRegistration(attendee) {
+  const rows = [];
+  const personal = attendee.personal;
+  if (personal) {
+    if ('legalName' in personal) {
+      rows.push([translate('registration.preset.legalName'), personal.legalName]);
+    }
+    if ('age' in personal) {
+      let ageText = null;
+      if (personal.age !== null) {
+        ageText = translate('manage.attendee-age', { age: personal.age });
+        if (personal.under18) {
+          ageText = translate('manage.attendee-under18', { age: personal.age });
+        }
+      }
+      if (personal.dateOfBirth) {
+        ageText = `${personal.dateOfBirth} (${ageText})`;
+      }
+      rows.push([translate('registration.preset.dateOfBirth'), ageText]);
+    }
+    if ('emergencyName' in personal) {
+      let emergency = null;
+      if (personal.emergencyName || personal.emergencyPhone) {
+        emergency = [personal.emergencyName, personal.emergencyPhone].filter(Boolean).join(', ');
+      }
+      rows.push([translate('registration.preset.emergencyContact'), emergency]);
+    }
+  }
+  if (!Array.isArray(attendee.registration)) {
+    return null;
+  }
+  for (const entry of attendee.registration) {
+    if (entry.type === 'photo') {
+      rows.push([questionLabel(entry), createElement('a', { class: 'text-link', href: entry.photoUrl, target: '_blank', rel: 'noopener', text: translate('manage.attendee-photo') })]);
+    } else {
+      rows.push([questionLabel(entry), answerText(entry, entry.value, currencyCodeFrom(byId('f-currency').value))]);
+    }
+  }
+  if (rows.length === 0) {
+    return null;
+  }
+  return createElement('details', { class: 'attendee-registration small' }, [
+    createElement('summary', { text: translate('registration.card-title') }),
+    createElement('dl', { class: 'order-lines' }, rows.map(([label, value]) => {
+      let shown = value;
+      if (shown === null || shown === undefined || shown === '') {
+        shown = translate('manage.attendee-not-given');
+      }
+      return createElement('div', {}, [createElement('dt', { text: label }), createElement('dd', {}, [shown])]);
+    })),
+  ]);
+}
+
 function attendeeRow(attendee) {
   let name = attendee.displayName;
   if (!name) {
@@ -1243,6 +1312,7 @@ function attendeeRow(attendee) {
       createElement('span', { text: name }),
       createElement('span', { class: 'muted small', text: details.join(' · ') }),
       attendeeContact(attendee),
+      attendeeRegistration(attendee),
     ]),
     ...controls,
     createElement('button', {
@@ -1528,6 +1598,7 @@ startOrganiser();
 startTimetable();
 startPayment({ getEvent: () => editing });
 startContact();
+startRegistration();
 startEditors({ getEvent: () => editing });
 
 // The edit form's section tabs, kept out of the address (it already says
@@ -1633,6 +1704,7 @@ onChange(() => {
     relabelLocations();
     relabelMeals();
     relabelContact();
+    relabelRegistration();
     relabelTiers();
     relabelOrganiser();
     relabelTimetable();

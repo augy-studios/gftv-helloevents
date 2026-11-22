@@ -2,6 +2,9 @@
 // Storage bucket:
 //   qr/<event id>/<random>.png               an event's payment QR code
 //   proof/<event id>/<account id>/<random>.webp  someone's payment screenshot
+//   reg/<event id>/<account id>/<random>.webp    a registration form photo,
+//                                                such as a con badge photo
+//                                                (migrations/024)
 //
 // The browser draws the picture onto a canvas and sends it (js/picture-file.js):
 // a QR code as PNG, at its own shape (no crop, no fixed aspect ratio), kept
@@ -18,6 +21,7 @@ import sharp from 'sharp';
 import { database, TABLES } from './supabase.js';
 import { randomToken } from './crypto.js';
 import { errorDetail } from './http.js';
+import { photoNames } from '../../js/registration-fields.js';
 
 export const MAX_QR_BYTES = 2_000_000;
 export const MAX_PROOF_BYTES = 1_500_000;
@@ -27,14 +31,18 @@ const MIN_SIDE = 64;
 // screenshot reads fine at 1600 px.
 const QR_STORE_SIDE = 1200;
 const PROOF_STORE_SIDE = 1600;
+// A con badge photo prints at a few centimetres across.
+const PHOTO_STORE_SIDE = 1200;
 const MAX_INPUT_PIXELS = MAX_SIDE * MAX_SIDE;
 
 const QR_PATH = /^qr\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.png$/;
 const PROOF_PATH = /^proof\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
+const PHOTO_PATH = /^reg\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
 
 const KINDS = {
   qr: { format: 'png', mime: 'image/png', maxBytes: MAX_QR_BYTES, side: QR_STORE_SIDE, error: 'qr' },
   proof: { format: 'webp', mime: 'image/webp', maxBytes: MAX_PROOF_BYTES, side: PROOF_STORE_SIDE, error: 'proof' },
+  photo: { format: 'webp', mime: 'image/webp', maxBytes: MAX_PROOF_BYTES, side: PHOTO_STORE_SIDE, error: 'photo' },
 };
 
 // A PNG starts with its 8-byte signature; a WebP with "RIFF", four bytes of
@@ -86,7 +94,7 @@ function decode(input, kind) {
 }
 
 // The picture checked and re-encoded: { ok: true, buffer } or { ok: false,
-// error }. kind: 'qr' or 'proof'. A QR code stays PNG (lossless) and is
+// error }. kind: 'qr', 'proof' or 'photo'. A QR code stays PNG (lossless) and is
 // never enlarged; any shape is fine, as long as neither side is under
 // MIN_SIDE or over MAX_SIDE.
 export async function preparePicture(input, kind) {
@@ -150,10 +158,53 @@ function isPaymentPath(path) {
   if (typeof path !== 'string') {
     return false;
   }
-  if (QR_PATH.test(path)) {
+  if (QR_PATH.test(path) || PHOTO_PATH.test(path)) {
     return true;
   }
   return PROOF_PATH.test(path);
+}
+
+// A registration photo (migrations/024): stored under the event and the
+// account, so an answer (the file's name alone) can only ever point at the
+// person's own photo for that event. Returns the name.
+export async function storeRegistrationPhoto(eventId, accountId, buffer) {
+  const name = randomToken(18);
+  await upload(registrationPhotoPath(eventId, accountId, name), buffer, 'image/webp');
+  return name;
+}
+
+export function registrationPhotoPath(eventId, accountId, name) {
+  return `reg/${eventId}/${accountId}/${name}.webp`;
+}
+
+// Whether a registration photo of this name was stored for this person and
+// event (so an answer cannot name a file that is not there).
+export async function registrationPhotoExists(eventId, accountId, name) {
+  const { data, error } = await database().storage.from(TABLES.paymentsBucket).list(`reg/${eventId}/${accountId}`, { search: name });
+  if (error || !Array.isArray(data)) {
+    return false;
+  }
+  return data.some((file) => file.name === `${name}.webp`);
+}
+
+// The registration photo files of an event's attendees (all of them, or one
+// account's), for deleting along with what they belong to.
+export async function registrationPhotoPaths(eventId, accountId = null) {
+  let request = database().from(TABLES.attendees).select('event_id, user_id, registration');
+  if (eventId) {
+    request = request.eq('event_id', eventId);
+  }
+  if (accountId) {
+    request = request.eq('user_id', accountId);
+  }
+  const { data, error } = await request;
+  if (error) {
+    throw error;
+  }
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  return data.flatMap((row) => photoNames(row.registration).map((name) => registrationPhotoPath(row.event_id, row.user_id, name)));
 }
 
 // Best effort, as for covers: a file left behind costs little; a thrown

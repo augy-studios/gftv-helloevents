@@ -105,6 +105,13 @@
                     <div id="contactFields"></div>
                 </fieldset>
 
+                <!-- The registration form the event asks (migrations/024,
+                     js/registration-form.js). -->
+                <fieldset class="checkout-step" id="registrationStep" hidden>
+                    <legend data-i18n="registration.legend">Registration details</legend>
+                    <div id="registrationFields"></div>
+                </fieldset>
+
                 <fieldset class="checkout-step" id="methodStep">
                     <legend data-i18n="checkout.method-title">How you will pay</legend>
                     <div class="choice-list" id="methodList" role="radiogroup" aria-label="How you will pay" data-i18n-attr="aria-label:checkout.method-title"></div>
@@ -163,6 +170,21 @@
                         <div class="actions inline"><button class="btn btn-primary" type="submit" id="reportSubmit"><span data-icon="check"></span><span id="reportSubmitText"></span></button></div>
                     </form>
                 </div>
+
+                <!-- Upgrading to a dearer tier, paying only the difference
+                     (migrations/024). -->
+                <section class="u-mt-1 upgrade-box" id="upgradeBox" hidden aria-labelledby="upgradeTitle">
+                    <h2 class="section-label" id="upgradeTitle" data-i18n="registration.upgrade">Upgrade registration tier</h2>
+                    <p class="small muted" id="upgradeLede"></p>
+                    <div class="choice-list" id="upgradeList" role="radiogroup" aria-labelledby="upgradeTitle"></div>
+                    <fieldset class="checkout-step" id="upgradeMethodStep">
+                        <legend data-i18n="checkout.method-title">How you will pay</legend>
+                        <div class="choice-list" id="upgradeMethodList" role="radiogroup" aria-label="How you will pay" data-i18n-attr="aria-label:checkout.method-title"></div>
+                    </fieldset>
+                    <dl class="order-lines" id="upgradeLines"></dl>
+                    <button class="btn btn-primary btn-block" type="button" id="upgradeBtn"><span data-icon="ticket"></span><span data-i18n="registration.upgrade-confirm">Upgrade and pay the difference</span></button>
+                    <div class="callout danger" id="upgradeError" role="alert"></div>
+                </section>
 
                 <div class="u-mt-1" id="switchBox" hidden>
                     <h2 class="section-label" data-i18n="checkout.switch-title">Pay another way</h2>

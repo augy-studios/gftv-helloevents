@@ -18,6 +18,11 @@
 //        for a public account, shown once, valid 24 hours, for someone with
 //        neither Telegram nor 2FA whose identity was checked another way.
 //        Making a new one cancels the last. -> { code, expiresAt }
+//   POST { action: "personal-fix", username, legalName?, dateOfBirth?, country? }
+//        (migrations/024) correct a locked personal detail on any account
+//        (public, or staff by their gftv.asia username), after checking who
+//        they are. A blank value clears it, so they can fill it in again.
+//        -> { fixed: [the details changed] }
 //
 // Every write is in the audit log. Answers carry no IP hash, email or id of
 // a person; flagged names are a username and a display name.
@@ -28,6 +33,9 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
 import { hashIp, randomBytesCode, sha256 } from '../_lib/crypto.js';
+import { countryCode } from '../_lib/countries.js';
+import { ensureStaffAccount } from '../_lib/users.js';
+import { personName, birthDate } from '../../js/registration-fields.js';
 import { fold, blockedTerm, customTerms, forgetNameFilters, BUILT_IN_TERMS } from '../_lib/name-filter.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -311,6 +319,90 @@ async function issueResetCode(request, response, body, user) {
   return ok(response, { code, expiresAt });
 }
 
+// The account a username names: a public account's, or a staff member's
+// (by their gftv.asia username): { id, kind } or null.
+async function accountByUsername(username) {
+  const { data: account, error } = await database()
+    .from(TABLES.accounts)
+    .select('id, kind')
+    .eq('kind', 'public')
+    .eq('username', username)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (account) {
+    return account;
+  }
+  const { data: staff, error: staffError } = await database()
+    .from(TABLES.users)
+    .select('id')
+    .eq('username', username)
+    .maybeSingle();
+  if (staffError) {
+    throw staffError;
+  }
+  if (!staff) {
+    return null;
+  }
+  await ensureStaffAccount(staff.id);
+  return { id: staff.id, kind: 'staff' };
+}
+
+// "personal-fix": corrects a locked personal detail (migrations/024).
+async function fixPersonal(request, response, body, user) {
+  const username = stringOrEmpty(body.username).trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{2,64}$/.test(username)) {
+    return fail(response, 400, 'bad_request');
+  }
+  const changes = {};
+  if (body.legalName !== undefined) {
+    const name = personName(body.legalName);
+    if (!name.ok) {
+      return fail(response, 400, 'legal_name_invalid');
+    }
+    changes.legal_name = null;
+    if (name.value) {
+      changes.legal_name = name.value;
+    }
+  }
+  if (body.dateOfBirth !== undefined) {
+    const date = birthDate(body.dateOfBirth);
+    if (!date.ok) {
+      return fail(response, 400, 'date_of_birth_invalid');
+    }
+    changes.date_of_birth = null;
+    if (date.value) {
+      changes.date_of_birth = date.value;
+    }
+  }
+  if (body.country !== undefined) {
+    if (body.country === '' || body.country === null) {
+      changes.country = null;
+    } else {
+      const country = countryCode(body.country);
+      if (!country) {
+        return fail(response, 400, 'country_required');
+      }
+      changes.country = country;
+    }
+  }
+  if (Object.keys(changes).length === 0) {
+    return fail(response, 400, 'bad_request');
+  }
+  const account = await accountByUsername(username);
+  if (!account) {
+    return fail(response, 404, 'account_not_found');
+  }
+  const { error } = await database().from(TABLES.accounts).update(changes).eq('id', account.id);
+  if (error) {
+    throw error;
+  }
+  const fixed = Object.keys(changes);
+  await audit(request, { action: 'admin.personal_fixed', actorId: user.id, details: { username, fields: fixed } });
+  return ok(response, { fixed });
+}
+
 // Sends each request to its step. Allowances are for every editor; the
 // word list and reset codes are for admins only. Every POST counts against
 // the manageWrite limit.
@@ -361,6 +453,10 @@ export default route('manage/admin', async (request, response) => {
   }
   if (body.action === 'reset-issue') {
     await issueResetCode(request, response, body, user);
+    return;
+  }
+  if (body.action === 'personal-fix') {
+    await fixPersonal(request, response, body, user);
     return;
   }
   fail(response, 400, 'bad_request');

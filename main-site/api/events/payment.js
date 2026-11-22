@@ -1,6 +1,7 @@
 // POST /api/events/payment   (migrations/016)
 //   { slug, action: "report", reference, proof? }   I have paid
 //   { slug, action: "method", method }               pay another way instead
+//   { slug, action: "upgrade", tier, tierName, method }  upgrade to a dearer tier
 //
 // For someone holding a ticket from /checkout that is not confirmed paid yet.
 //
@@ -14,14 +15,22 @@
 // ticket into a plain RSVP; link or QR code waits for payment again. What
 // was reported so far is dropped, screenshot and all. The amount stays.
 //
+// upgrade (migrations/024): swaps the dearest tier held (one of) for a
+// dearer one still sold (event-rules.js upgradeOptions), paid by method
+// (one the new tiers share). What was paid so far is kept as credit, and
+// only the difference is owed: the order waits for payment again (or is
+// paid on the day). A paid ticket can be upgraded; one whose reported
+// payment waits for a check cannot, nor once registration has closed for
+// the person (RSVPs closed, the event over, or their tier closed).
+//
 // -> { checkout } as api/events/checkout.js answers.
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
-import { attendance } from '../_lib/events.js';
-import { ticketOptions, readPaymentReference, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { attendance, withVolunteerSource, volunteerStanding } from '../_lib/events.js';
+import { ticketOptions, readPaymentReference, registrationOpenFor, upgradeBasket, paidSoFar, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { preparePicture, storeProof, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { checkoutEvent, checkoutAnswer } from './checkout.js';
 
@@ -99,6 +108,59 @@ async function switchMethod(request, response, event, user, stored, body) {
   return ok(response, { checkout: await checkoutAnswer(event, user) });
 }
 
+// "upgrade": a dearer tier, paying only the difference.
+async function upgrade(request, response, event, user, stored, body) {
+  if (!registrationOpenFor(event, stored)) {
+    return fail(response, 409, 'registration_closed');
+  }
+  if (stored.payment_status === 'submitted') {
+    return fail(response, 409, 'payment_pending_check');
+  }
+  if (!stored.payment_method) {
+    return fail(response, 400, 'upgrade_unavailable');
+  }
+  await withVolunteerSource(event);
+  const standing = await volunteerStanding(event, user.id);
+  const priced = upgradeBasket(event, stored, body.tier, body.tierName, { volunteerDiscount: standing.discount });
+  if (!priced.ok) {
+    return fail(response, 400, priced.error);
+  }
+  if (!priced.methods.includes(body.method)) {
+    return fail(response, 400, 'payment_method_required');
+  }
+  const credit = paidSoFar(stored);
+  let status = 'none';
+  if (ONLINE_METHODS.includes(body.method)) {
+    status = 'awaiting';
+  }
+  if (priced.due <= 0 && stored.payment_status === 'paid') {
+    status = 'paid';
+  }
+  let creditKept = null;
+  if (credit > 0) {
+    creditKept = credit;
+  }
+  const columns = {
+    payment_method: body.method,
+    payment_status: status,
+    payment_tier: priced.text,
+    payment_items: priced.items,
+    payment_amount: priced.amount,
+    payment_credit: creditKept,
+    payment_reference: null,
+    payment_proof_path: null,
+    payment_submitted_at: null,
+  };
+  if (status !== 'paid') {
+    columns.paid_at = null;
+    columns.paid_by = null;
+  }
+  await writePayment(event.id, user.id, columns);
+  await deletePaymentFiles([stored.payment_proof_path]);
+  await audit(request, { action: 'payment.upgraded', actorId: user.id, eventId: event.id, details: { from: stored.payment_tier, to: priced.text, amount: priced.amount, credit } });
+  return ok(response, { checkout: await checkoutAnswer(event, user) });
+}
+
 export default route('events/payment', async (request, response) => {
   if (guard(request, response, ['POST'])) {
     return;
@@ -125,6 +187,10 @@ export default route('events/payment', async (request, response) => {
   const mine = await attendance(event.id, session.user.id);
   if (!mine.going || !mine.payment) {
     return fail(response, 404, 'not_going');
+  }
+  if (body.action === 'upgrade') {
+    await upgrade(request, response, event, session.user, mine.payment, body);
+    return;
   }
   if (mine.payment.payment_status === 'paid') {
     return fail(response, 409, 'payment_confirmed');

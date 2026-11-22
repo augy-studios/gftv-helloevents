@@ -134,9 +134,10 @@ export default [
   // The API strips control characters (\u0000 to \u001f) out of names,
   // labels and event text on purpose, so a regular expression that matches
   // them is intended there (and in js/contact-fields.js, the contact
-  // details' rules it shares with the browser).
+  // details' rules it shares with the browser, and js/registration-fields.js,
+  // the registration form's).
   {
-    files: ['api/**/*.js', 'js/contact-fields.js'],
+    files: ['api/**/*.js', 'js/contact-fields.js', 'js/registration-fields.js'],
     rules: {
       'no-control-regex': 'off',
     },

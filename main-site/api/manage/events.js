@@ -41,7 +41,7 @@ import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js
 import { deleteCover } from '../_lib/covers.js';
 import { galleryRows, deleteGalleryFiles } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
-import { deletePaymentFiles, proofPaths } from '../_lib/payments.js';
+import { deletePaymentFiles, proofPaths, registrationPhotoPaths } from '../_lib/payments.js';
 import { editableEventIds } from '../_lib/event-editors.js';
 import { background, queueEventChange, sendEventChangeWhenDue, sendPaymentConfirmed } from '../_lib/notify.js';
 
@@ -67,7 +67,8 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
 
 // The event columns the attendee list needs: the meals it offers, and its
 // kind and volunteer benefit, for who volunteered.
-const ATTENDEE_EVENT_COLUMNS = 'id, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value, contact_fields';
+const ATTENDEE_EVENT_COLUMNS = 'id, slug, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value, contact_fields, ' +
+  'fursuiters_asked, price_type, starts_at, timezone, registration_enabled, registration_fields';
 
 // The event's attendees in RSVP order, as the edit page lists them, each
 // with the meals they are coming for that the event still offers, and for
@@ -78,7 +79,8 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, lepak, volunteer, fursuiter, contact, ${PAYMENT_COLUMNS}, account:${TABLES.accounts}!user_id ( kind, username, display_name, country, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, lepak, volunteer, fursuiter, contact, registration, ${PAYMENT_COLUMNS}, ` +
+        `account:${TABLES.accounts}!user_id ( kind, username, display_name, country, legal_name, date_of_birth, emergency_name, emergency_phone, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -347,8 +349,9 @@ async function deleteEvent(request, response, body, user) {
   if (!isUuid(body.id)) {
     return fail(response, 400, 'bad_request');
   }
-  // The attendees' payment screenshots go with the event.
-  const proofs = await proofPaths(body.id);
+  // The attendees' payment screenshots and registration photos go with the
+  // event.
+  const proofs = [...(await proofPaths(body.id)), ...(await registrationPhotoPaths(body.id))];
   // So are the gallery's files; its rows go with the event.
   const galleryPaths = (await galleryRows(body.id)).map((image) => image.path);
   const { data, error } = await database()
@@ -451,7 +454,7 @@ async function removeAttendee(request, response, body, user) {
   if (!match) {
     return fail(response, 404, 'not_found');
   }
-  const proofs = await proofPaths(body.id, match.user_id);
+  const proofs = [...(await proofPaths(body.id, match.user_id)), ...(await registrationPhotoPaths(body.id, match.user_id))];
   for (const table of [TABLES.attendees, TABLES.volunteers]) {
     const { error } = await database()
       .from(table)

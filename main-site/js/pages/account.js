@@ -4,7 +4,7 @@
 // kept in the address (/account#security).
 
 import { session } from '../app.js';
-import { t as translate, onChange } from '../../assets/i18n/i18n.js';
+import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, withBusy, errorText, openModal, closeModal, formatDate, toast } from '../ui.js';
 import { iconNode } from '../icons.js';
@@ -53,6 +53,77 @@ function renderProfile() {
   if (document.activeElement !== byId('countryInput')) {
     fillCountrySelect(byId('countryInput'), currentUser.country);
   }
+  renderPersonal();
+}
+
+// The personal details (migrations/024): the legal name, date of birth and
+// country are filled in once, then shown locked (greyed out); the emergency
+// contact can change any time. An event that needs some of them sends
+// people here with ?need=legalName,dateOfBirth to fill them in.
+function renderPersonal() {
+  let personal = currentUser.personal;
+  if (!personal) {
+    personal = {};
+  }
+  const lockable = [
+    ['legalNameInput', personal.legalName],
+    ['dateOfBirthInput', personal.dateOfBirth],
+    ['countryInput', currentUser.country],
+  ];
+  let anyLocked = false;
+  for (const [id, value] of lockable) {
+    const input = byId(id);
+    const locked = Boolean(value);
+    input.disabled = locked;
+    if (locked) {
+      anyLocked = true;
+    }
+    if (id !== 'countryInput' && document.activeElement !== input) {
+      let text = '';
+      if (value) {
+        text = value;
+      }
+      input.value = text;
+    }
+  }
+  byId('personalLocked').hidden = !anyLocked;
+  byId('dateOfBirthInput').max = new Date().toISOString().slice(0, 10);
+  for (const [id, value] of [['emergencyNameInput', personal.emergencyName], ['emergencyPhoneInput', personal.emergencyPhone]]) {
+    if (document.activeElement !== byId(id)) {
+      let text = '';
+      if (value) {
+        text = value;
+      }
+      byId(id).value = text;
+    }
+  }
+  // What an event asked for that is still missing.
+  const needed = neededDetails().filter((id) => {
+    if (id === 'legalName') {
+      return !personal.legalName;
+    }
+    if (id === 'dateOfBirth') {
+      return !personal.dateOfBirth;
+    }
+    if (id === 'emergencyContact' && (!personal.emergencyName || !personal.emergencyPhone)) {
+      return true;
+    }
+    return false;
+  });
+  byId('personalNeeded').hidden = needed.length === 0;
+  if (needed.length > 0) {
+    const names = needed.map((id) => translate(`registration.preset.${id}`));
+    byId('personalNeeded').textContent = translate('account.personal-needed', { details: new Intl.ListFormat(getLocale(), { type: 'conjunction' }).format(names) });
+  }
+}
+
+// The details an event page asked for (?need=), known ones only.
+function neededDetails() {
+  const need = new URLSearchParams(location.search).get('need');
+  if (!need) {
+    return [];
+  }
+  return need.split(',').filter((id) => ['legalName', 'dateOfBirth', 'emergencyContact'].includes(id));
 }
 
 function renderRsvps() {
@@ -421,7 +492,21 @@ function backToEvent() {
 byId('countryForm').addEventListener('submit', (event) => {
   event.preventDefault();
   withBusy(byId('countrySubmit'), byId('countryError'), async () => {
-    const { user } = await post('/api/me/profile', { country: byId('countryInput').value });
+    // Only what can be sent: a locked detail is left out, and a blank one
+    // not set yet is not sent (it cannot be emptied).
+    const body = {};
+    if (!byId('countryInput').disabled && byId('countryInput').value) {
+      body.country = byId('countryInput').value;
+    }
+    if (!byId('legalNameInput').disabled && byId('legalNameInput').value.trim()) {
+      body.legalName = byId('legalNameInput').value;
+    }
+    if (!byId('dateOfBirthInput').disabled && byId('dateOfBirthInput').value) {
+      body.dateOfBirth = byId('dateOfBirthInput').value;
+    }
+    body.emergencyName = byId('emergencyNameInput').value;
+    body.emergencyPhone = byId('emergencyPhoneInput').value;
+    const { user } = await post('/api/me/profile', body);
     currentUser = user;
     renderProfile();
     const back = backToEvent();
@@ -429,7 +514,7 @@ byId('countryForm').addEventListener('submit', (event) => {
       location.assign(back);
       return;
     }
-    byId('accountNotice').textContent = translate('account.country-saved');
+    byId('accountNotice').textContent = translate('account.personal-saved');
   });
 });
 

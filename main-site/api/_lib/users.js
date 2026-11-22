@@ -23,7 +23,8 @@ import { optionalEnv } from './env.js';
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
 const ACCOUNT_COLUMNS =
-  'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram, country';
+  'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram, country, ' +
+  'legal_name, date_of_birth, emergency_name, emergency_phone';
 
 // When reminders can come, in hours before an event starts (migrations/011):
 // 1, 2 and 3 hours, a day and a week. An account picks any of them.
@@ -63,6 +64,7 @@ function fromStaff(staff, account = null) {
     is_editor: staff.is_editor === true,
     is_approved: staff.is_approved === true,
     country: countryOf(account),
+    personal: personalDetails(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in staff) {
@@ -87,6 +89,7 @@ function fromPublic(account) {
     is_editor: false,
     is_approved: account.status === 'active',
     country: countryOf(account),
+    personal: personalDetails(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in account) {
@@ -103,6 +106,34 @@ function countryOf(account) {
     return account.country;
   }
   return null;
+}
+
+// The account's personal details (migrations/024): { legalName,
+// dateOfBirth ('YYYY-MM-DD'), emergencyName, emergencyPhone }, each null
+// while blank (and for a staff member with no accounts row yet). They leave
+// the server only to the person themselves (serialize.js selfView), and to
+// the editors of an event whose registration form asks for them.
+export function personalDetails(account) {
+  const text = (value) => {
+    if (typeof value === 'string' && value !== '') {
+      return value;
+    }
+    return null;
+  };
+  let row = account;
+  if (row === null || row === undefined) {
+    row = {};
+  }
+  let dateOfBirth = text(row.date_of_birth);
+  if (dateOfBirth) {
+    dateOfBirth = dateOfBirth.slice(0, 10);
+  }
+  return {
+    legalName: text(row.legal_name),
+    dateOfBirth,
+    emergencyName: text(row.emergency_name),
+    emergencyPhone: text(row.emergency_phone),
+  };
 }
 
 // The account's notification choices. Updates are on unless switched off;

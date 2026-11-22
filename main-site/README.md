@@ -259,8 +259,8 @@ the functions with the service role key. No Supabase Auth, no request signing.
   ticks it (the editor can untick it), and the conventions already there were marked by the
   migration. It shows a "Cross-border" chip. Every account has a **country of origin** (Singapore,
   Malaysia and Indonesia first, then every other country): new public accounts pick it at sign-up,
-  and anyone, staff included, sets or changes it in the account page's Profile tab, which is marked
-  while it is missing. On a cross-border event:
+  and anyone, staff included, sets it in the account page's Profile tab, which is marked
+  while it is missing (locked once set since migrations/024; an admin corrects it). On a cross-border event:
   - an RSVP needs a country of origin. Without one the page says so, with a "Set my country"
     button that goes to the Profile tab and comes back to the event once it is saved. Someone
     already going (from before the event was made cross-border) can still change or cancel;
@@ -328,6 +328,53 @@ the functions with the service role key. No Supabase Auth, no request signing.
   fursuiter" by the RSVP button and at checkout; it goes with the RSVP, and someone going can
   tick or untick it (saved at once) until the event is over. The attendee list marks each
   fursuiter and counts them. Unticking the setting hides it all and keeps what people said.
+- **Registration forms** (migrations/024, `js/registration-fields.js` holds the rules). Under
+  Price and RSVP, an editor ticks "Ask a registration form", on any kind of event; setting Kind
+  to Convention ticks it (the editor can untick it). The form starts from ready-made questions,
+  each ticked to ask it and marked required or not: badge name, NFC website URL on the con badge
+  (https:// only), "Are you fursuiting?" (Yes or No), handler name(s), con badge photo, T-shirt
+  size (the sizes can be changed), "I will be accompanying a minor", a donation (paid events
+  only) and the Code of Conduct (always required, with the editor's link). Three more come from
+  the person's account rather than the form: legal name, date of birth and emergency contact.
+  The editor adds up to ten questions of their own (short or long text, a website link, Yes or
+  No, one from a list, a tick box with an optional link, or a photo), each with a label, a hint
+  and required or not (`js/manage-registration.js`). A form never set up is the ready-made
+  defaults (`registration_fields` null). People answer it with "I am going" on the event page,
+  or at checkout with their ticket (`js/registration-form.js`); the form says what is missing or
+  wrong before anything is sent, and the server checks every answer again. A photo is made a WebP
+  in the browser, uploaded on its own as soon as it is picked (`api/events/registration-photo.js`)
+  and kept in the private `gftvevents_payments` bucket under `reg/<event>/<account>/`, so an
+  answer can only ever name the person's own photo; the RSVP checks the file is there. Only the
+  person and the event's editors see a photo (never cached), and it is deleted with the RSVP,
+  the event or the account. "Are you fursuiting?" sets the fursuiter flag too (migrations/023),
+  so the attendee list's marks and count keep working, and the plain "I'm a fursuiter" box is
+  hidden while the form asks it. The donation is added to the ticket's total at checkout and is
+  fixed once the order holds it.
+- **Registration details card.** Someone going to an event with a form sees "Registration
+  details" at the top of the event page (`js/registration-card.js`): their badge name and the
+  tier they hold, "Badge: N" (their RSVP ID), the account details the form asks for, and every
+  answer, each with a pencil that opens just that question to change, while registration is open
+  for them: RSVPs open, the event not over, and none of their tiers closed. Each ticket tier can
+  have a "Sales close" time (in the event's zone): after it, the tier is not sold, and its holders
+  can no longer change their answers or upgrade from it. A question added after someone
+  registered is pointed out on their card.
+- **Upgrading a tier.** From the card, "Upgrade registration tier" opens checkout on the
+  upgrade: it swaps the dearest tier they hold one of for a dearer one still on sale that can be
+  paid with the rest of their order (`event-rules.js upgradeOptions`). What they have paid so far
+  is kept (`payment_credit`), so only the difference is owed; the order waits for payment again,
+  checkout shows "Paid before upgrading" and "Left to pay", and the editor ticks Paid once the
+  difference arrives. Not while a reported payment waits for a check, and not once registration
+  has closed for them.
+- **Personal details on the account.** The account page's Profile tab has the legal name, date of
+  birth, country of origin and an emergency contact (name and number). The first three are
+  filled in once and then locked (greyed out): an admin corrects one, after checking who the
+  person is, under "Correct a personal detail" in `/manage`'s Password resets tab (blank clears
+  it, so they can fill it in again; in the audit log). The emergency contact can change any time.
+  None is required at sign-up: an event whose form needs one sends the person to the Profile tab
+  (`?need=`), which points out what is missing and goes back to the event once saved. Editors see
+  only the details the event's form asks for: the legal name, the emergency contact, and from
+  the date of birth the age on the day the event starts and whether that is under 18 (the full
+  date only when the form asks for it).
 - **Organiser.** The edit form's Organiser is a list of GFTV's teams (`js/manage-organiser.js`,
   as the GFTV jobs portal lists them: CIISC, CIO, CCS, MAWS, PAL, PSOSC and TIDSC), or **Other**,
   which shows a box to type anyone's name in. It is stored as text, a team by its full name.
@@ -342,7 +389,14 @@ the functions with the service role key. No Supabase Auth, no request signing.
   steps for things that are not on screen (another role's tabs, an empty list) are left out. The
   header's **?** button replays the tours for the page and tab on show. What has been seen is kept
   in `localStorage` (`tour.seen`); the end-to-end tests mark every tour seen unless a test asks
-  otherwise.
+  otherwise. Registration forms (migrations/024) brought tours of their own, under new ids so
+  people who saw the older tours still see them once: the form in the RSVP box
+  (`event.registration-form`), the Registration details card (`event.registration`), the form
+  and the upgrade at checkout (`checkout.registration`, `checkout.upgrade`), the personal details
+  on the Profile tab (`account.personal`), the edit form's Registration form section and tier
+  closing times (`editor.registration`), and the admin's personal detail fix
+  (`manage.personal-fix`). A page calls `checkTours()` (`js/tour.js`) when one of these appears
+  after it has drawn, such as the card after an RSVP.
 - **Link previews.** `/e/<slug>` is served by `api/events/page.js`: `event.html` with the event's
   own title, when and where, summary and cover picture in its Open Graph and Twitter tags, so a
   link unfurls as the event in Discord, Telegram, WhatsApp, X and iMessage (the same idea as SG Bus
@@ -379,7 +433,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 023) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 024) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -408,7 +462,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    columns. Run `022_tier_baskets.sql` before deploying tier baskets (several tiers bought at
    once): RSVPs, checkout, payments and the attendee list read its column. Run
    `023_fursuiters.sql` before deploying the fursuiter question: the event pages, RSVPs, checkout,
-   the edit form and the attendee list read its columns.
+   the edit form and the attendee list read its columns. Run `024_registration_forms.sql` before
+   deploying registration forms: sign-in reads the account's new personal columns, and the event
+   pages, RSVPs, checkout, the edit form and the attendee list read the event and attendee ones.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

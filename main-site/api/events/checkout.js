@@ -41,6 +41,8 @@ export async function checkoutAnswer(row, user) {
     payment: mine.payment,
     contact: mine.contact,
     contactSuggest,
+    registration: mine.registration,
+    personal: user.personal,
   });
 }
 

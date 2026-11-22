@@ -174,16 +174,41 @@
             </section>
 
             <div role="tabpanel" id="panel-profile" aria-labelledby="tab-profile" class="account-panel-stack" hidden>
+            <!-- Personal details (migrations/015, 024): the country of origin,
+                 legal name and date of birth are filled in once and then
+                 locked (an admin corrects them); the emergency contact can
+                 change any time. Events see them only when their
+                 registration form asks. -->
             <section class="glass-card page-card" aria-labelledby="countryTitle">
-                <h2 id="countryTitle" data-i18n="account.country-title">Country of origin</h2>
-                <p class="muted small" data-i18n="account.country-lede">Cross-border events and conventions ask for it before you RSVP. Only you, and the organisers of those events, see it.</p>
+                <h2 id="countryTitle" data-i18n="account.personal-title">Personal details</h2>
+                <p class="muted small" data-i18n="account.personal-lede">Filled in here once, so registration forms never ask you to type them again. Only you see them, and the organisers of an event whose form asks for them.</p>
                 <div class="callout warn small u-mt-1" id="countryMissing" hidden data-i18n="account.country-missing">You have not added your country of origin yet.</div>
+                <div class="callout warn small u-mt-1" id="personalNeeded" hidden></div>
                 <form class="u-mt-1" id="countryForm" novalidate>
+                    <label class="field">
+                        <span data-i18n="field.legal-name">Legal name</span>
+                        <input id="legalNameInput" type="text" autocomplete="name" maxlength="100" aria-describedby="legalNameHint">
+                        <span class="field-hint" id="legalNameHint" data-i18n="account.legal-name-hint">As on your ID, for events that check it at the door.</span>
+                    </label>
+                    <label class="field">
+                        <span data-i18n="field.date-of-birth">Date of birth</span>
+                        <input id="dateOfBirthInput" type="date" autocomplete="bday" min="1900-01-01">
+                    </label>
                     <label class="field">
                         <span data-i18n="field.country">Country of origin</span>
                         <select id="countryInput" required></select>
                     </label>
-                    <div class="actions inline"><button class="btn" type="submit" id="countrySubmit"><span data-i18n="account.country-save">Save country</span></button></div>
+                    <p class="field-hint" id="personalLocked" hidden data-i18n="account.personal-locked">Greyed-out details are set and locked. To correct one, ask GFTV staff.</p>
+                    <label class="field">
+                        <span data-i18n="field.emergency-name">Emergency contact name</span>
+                        <input id="emergencyNameInput" type="text" autocomplete="off" maxlength="100">
+                    </label>
+                    <label class="field">
+                        <span data-i18n="field.emergency-phone">Emergency contact number</span>
+                        <input id="emergencyPhoneInput" type="tel" inputmode="tel" autocomplete="off" maxlength="30" placeholder="+65 9123 4567">
+                    </label>
+                    <p class="field-hint" data-i18n="account.personal-lock-note">Your legal name, date of birth and country of origin are locked once saved: check them before you press Update details.</p>
+                    <div class="actions inline"><button class="btn btn-primary" type="submit" id="countrySubmit"><span data-i18n="account.personal-save">Update details</span></button></div>
                     <div class="callout danger" id="countryError" role="alert"></div>
                 </form>
             </section>

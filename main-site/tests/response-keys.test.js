@@ -110,7 +110,13 @@ const listOf = (name, paths) => [name, ...paths.map((path) => `${name}[].${path}
 
 // Maps keyed by the event's own ids, not by names the code chooses: the
 // contact details someone gave, by the event's field ids (migrations/021).
-const KEYED_BY_EVENT = ['event.viewer.contact', 'checkout.viewer.contact'];
+// The registration answers, photos and account details asked for
+// (migrations/024) are keyed by the form's question ids too.
+const KEYED_BY_EVENT = [
+  'event.viewer.contact', 'checkout.viewer.contact',
+  'event.viewer.registration.answers', 'event.viewer.registration.photos', 'event.viewer.registration.personal',
+  'checkout.viewer.registration.answers', 'checkout.viewer.registration.photos', 'checkout.viewer.registration.personal',
+];
 
 // The answer was a success, and its keys are exactly "ok" plus expected.
 function assertKeys(response, expected, opaque = []) {
@@ -124,7 +130,10 @@ function assertKeys(response, expected, opaque = []) {
 
 // The signed-in person: the account page shows all of it; the header and
 // /manage read canManage and role.
-const USER = ['username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage', 'editsEvents', 'country'];
+const USER = [
+  'username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage', 'editsEvents', 'country',
+  ...nest('personal', ['legalName', 'dateOfBirth', 'emergencyName', 'emergencyPhone']),
+];
 const METHODS = ['totp', 'passkey', 'telegram', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];
 
@@ -156,14 +165,19 @@ const DETAIL = [
   ...CARD, 'price.note', 'capacity', 'left', 'description', 'descriptionZh', 'organiserName',
   ...nest('externalLink', ['url', 'label', 'customLabel', 'locked']), 'crossBorder', 'gallery',
   ...listOf('where.locations', LOCATION), 'where.addressForAttendees', 'where.onlineUrl', 'where.onlineUrlForAttendees',
-  ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'maxPerPerson', 'methods']),
+  ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'maxPerPerson', 'methods', 'closesAt', 'closed']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
   ...nest('timetable', TIMETABLE),
   ...nest('volunteers', ['wanted', 'discount']), 'fursuitersAsked',
   ...nest('payment', ['checkout', 'methods']),
   ...nest('lepak', ['offered', 'label', 'limit', 'left']),
   ...nest('contact', [...listOf('fields', ['id', 'type', 'label']), 'rule']),
-  ...nest('viewer', ['signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry', ...nest('payment', ['method', 'status']), 'contact', 'contactMissing']),
+  ...nest('registration', ['fields', 'currency']),
+  ...nest('viewer', [
+    'signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry',
+    ...nest('payment', ['method', 'status']), 'contact', 'contactMissing',
+    ...nest('registration', ['answers', 'photos', 'missing', 'accountMissing', 'personal', 'tier', 'open']), 'canUpgrade',
+  ]),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
 const DETAIL_WITH_DISCOUNT = [...DETAIL, ...nest('volunteers.discount', ['type', 'value', 'currency', 'fromTitle', 'fromSlug'])];
@@ -177,7 +191,7 @@ const EDITOR = [
   ...listOf('locations', EDITOR_LOCATION), 'addressAttendeesOnly', 'coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop', 'externalUrl',
   'externalUrlLabel', 'externalUrlCustomLabel', 'crossBorder',
   'organiserName', 'priceType', 'priceHidden', 'priceMin', 'priceMax', 'currency', 'priceNote', 'tiersEnabled',
-  ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includes', 'previousDisplay', 'maxPerPerson', 'paymentMethods', 'paymentLink', 'paymentQrUrl']), 'rsvpOpen',
+  ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includes', 'previousDisplay', 'maxPerPerson', 'paymentMethods', 'paymentLink', 'paymentQrUrl', 'closesLocal']), 'rsvpOpen',
   ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]),
   'volunteersWanted', 'fursuitersAsked', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
   'timetableView', ...listOf('timetableRooms', ['id', 'name', 'tag']),
@@ -185,6 +199,7 @@ const EDITOR = [
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
   'lepakEnabled', 'lepakLimit', 'lepakLabel',
   ...listOf('contactFields', ['id', 'type', 'label']), 'contactRule',
+  'registrationEnabled', ...listOf('registrationFields', ['id', 'type', 'label', 'hint', 'required', 'options', 'link', 'fullDate']),
 ];
 const COVER = ['coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop'];
 // The gallery (migrations/019): in the edit form, and on the event page.
@@ -194,7 +209,8 @@ const CROP = ['x', 'y', 'width', 'height'];
 const ATTENDEE = [
   'rsvpNumber', 'username', 'displayName', 'staff', 'meals', 'lepak', 'country', 'volunteer', 'fursuiter', 'volunteered', 'pastVolunteer', 'rsvpAt',
   ...listOf('contact', ['id', 'type', 'label', 'value']),
-  ...nest('payment', ['method', 'status', 'tier', 'items', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt']),
+  ...nest('payment', ['method', 'status', 'tier', 'items', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt', 'credit']),
+  'registration', 'personal',
 ];
 // The staff tools under the events on /manage.
 const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];

@@ -31,7 +31,7 @@ import { methodsFor, hasSecondFactor, issueBackupCodes, localBackupCount, hasLoc
 import { createLinkToken, linkedChat, telegramConfigured } from '../_lib/telegram.js';
 import { generateTotpSecret, verifyTotp, otpauthUri } from '../_lib/totp.js';
 import { forgetAllSubscriptions } from '../_lib/push.js';
-import { deletePaymentFiles, proofPaths } from '../_lib/payments.js';
+import { deletePaymentFiles, proofPaths, registrationPhotoPaths } from '../_lib/payments.js';
 import { accountStickerFiles, deleteStickerFiles } from '../_lib/stickers.js';
 import { passkeyView } from '../_lib/serialize.js';
 import { LIMITS } from '../_lib/event-rules.js';
@@ -274,10 +274,11 @@ async function deleteAccount(context) {
   }
   // Cascades to sessions, factors, Telegram link and RSVPs; the audit
   // log keeps its rows with the actor set to null. The RSVPs' payment
-  // screenshots (migrations/016) and the account's sticker files
+  // screenshots (migrations/016), registration photos (migrations/024)
+  // and the account's sticker files
   // (migrations/020) are deleted from Storage after them.
   await forgetAllSubscriptions(userId);
-  const proofs = await proofPaths(null, userId);
+  const proofs = [...(await proofPaths(null, userId)), ...(await registrationPhotoPaths(null, userId))];
   const stickerFiles = await accountStickerFiles(userId);
   const { error } = await database().from(TABLES.accounts).delete().eq('id', userId).eq('kind', 'public');
   if (error) {

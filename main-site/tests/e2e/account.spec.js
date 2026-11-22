@@ -92,9 +92,19 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
   await expect(countries.nth(3)).toHaveText('Indonesia');
   await page.locator('#countryInput').selectOption('MY');
   await page.locator('#countrySubmit').click();
-  await expect(page.locator('#accountNotice')).toHaveText('Country of origin saved.');
+  await expect(page.locator('#accountNotice')).toHaveText('Personal details saved.');
   await expect(page.locator('#countryMissing')).toBeHidden();
   await expect(page.locator('#profileMark')).toBeHidden();
+  // Set once, then locked (migrations/024); the emergency contact stays open.
+  await expect(page.locator('#countryInput')).toBeDisabled();
+  await expect(page.locator('#personalLocked')).toBeVisible();
+  await page.locator('#legalNameInput').fill('Otter Tan');
+  await page.locator('#emergencyNameInput').fill('Ma Tan');
+  await page.locator('#emergencyPhoneInput').fill('+65 9123 4567');
+  await page.locator('#countrySubmit').click();
+  await expect(page.locator('#legalNameInput')).toBeDisabled();
+  await expect(page.locator('#legalNameInput')).toHaveValue('Otter Tan');
+  await expect(page.locator('#emergencyNameInput')).toBeEnabled();
 
   // A reload opens the same tab, from the address.
   await page.reload();
@@ -112,5 +122,5 @@ test('a staff account sets only its country in Profile: its name comes from gftv
   await expect(page.locator('#deleteBox')).toBeHidden();
   await page.locator('#countryInput').selectOption('SG');
   await page.locator('#countrySubmit').click();
-  await expect(page.locator('#accountNotice')).toHaveText('Country of origin saved.');
+  await expect(page.locator('#accountNotice')).toHaveText('Personal details saved.');
 });

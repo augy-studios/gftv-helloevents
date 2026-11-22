@@ -87,6 +87,10 @@
 
             <div class="event-layout">
                 <div class="event-main">
+                <!-- Someone going: their registration details, each answer with a
+                     pencil to change it while registration is open
+                     (migrations/024, js/registration-card.js). -->
+                <section class="glass-card event-section registration-section" id="registrationBox" hidden aria-label="Registration details" data-i18n-attr="aria-label:registration.card-title"></section>
                 <section class="glass-card event-section">
                     <div class="row between">
                         <h2 data-i18n="event.about">About this event</h2>
@@ -156,6 +160,13 @@
                             <div id="rsvpContactFields"></div>
                             <button class="btn btn-small" type="button" id="rsvpContactSave" hidden><span data-icon="check"></span><span data-i18n="contact.save">Save my contact details</span></button>
                             <p class="small muted" id="rsvpContactSaved" role="status" hidden data-i18n="contact.saved">Saved.</p>
+                        </fieldset>
+                        <!-- The registration form, for someone joining here (a ticket's
+                             goes with it on the checkout page; migrations/024,
+                             js/registration-form.js). -->
+                        <fieldset class="rsvp-contact rsvp-registration" id="rsvpRegistration" hidden>
+                            <legend data-i18n="registration.legend">Registration details</legend>
+                            <div id="rsvpRegistrationFields"></div>
                         </fieldset>
                         <label class="check rsvp-volunteer" id="rsvpVolunteerRow" hidden>
                             <input type="checkbox" id="rsvpVolunteer">

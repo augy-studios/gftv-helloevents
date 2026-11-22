@@ -57,6 +57,30 @@ export const TOURS = [
     ],
   },
 
+  // Registration forms (migrations/024): the form with an RSVP, and the
+  // Registration details card for someone going.
+  {
+    id: 'event.registration-form',
+    page: 'event',
+    needs: '#rsvpRegistration',
+    steps: [
+      { el: '#rsvpRegistration', i18n: 'tour.event.registration-form' },
+      { el: '#rsvpRegistration .reg-account', i18n: 'tour.event.registration-account' },
+      { el: '#rsvpRegistration .reg-photo', i18n: 'tour.event.registration-photo' },
+    ],
+  },
+  {
+    id: 'event.registration',
+    page: 'event',
+    needs: '#registrationBox',
+    steps: [
+      { el: '#registrationBox .reg-card-head', i18n: 'tour.event.registration-card' },
+      { el: '#registrationBox .reg-badge-number', i18n: 'tour.event.registration-badge' },
+      { el: '#registrationBox .reg-edit', i18n: 'tour.event.registration-edit' },
+      { el: '#registrationBox .reg-upgrade', i18n: 'tour.event.registration-upgrade' },
+    ],
+  },
+
   // --- Checkout (migrations/016) -------------------------------------------
   {
     id: 'checkout',
@@ -78,6 +102,24 @@ export const TOURS = [
       { el: ['#payQrBox', '#payLink'], i18n: 'tour.checkout.pay' },
       { el: '#reportForm', i18n: 'tour.checkout.report' },
       { el: '#switchBox', i18n: 'tour.checkout.switch' },
+    ],
+  },
+  {
+    id: 'checkout.registration',
+    page: 'checkout',
+    needs: '#registrationStep',
+    steps: [
+      { el: '#registrationStep', i18n: 'tour.checkout.registration' },
+      { el: '#registrationStep .reg-amount', i18n: 'tour.checkout.registration-donation' },
+    ],
+  },
+  {
+    id: 'checkout.upgrade',
+    page: 'checkout',
+    needs: '#upgradeBox',
+    steps: [
+      { el: '#upgradeList', i18n: 'tour.checkout.upgrade-pick' },
+      { el: '#upgradeBtn', i18n: 'tour.checkout.upgrade-pay' },
     ],
   },
 
@@ -131,9 +173,20 @@ export const TOURS = [
     page: 'account',
     needs: '#panel-profile',
     steps: [
-      { el: '#countryForm', i18n: 'tour.account.profile-country' },
       { el: '#nameForm', i18n: 'tour.account.profile-name' },
       { el: '#deleteBox', i18n: 'tour.account.profile-delete' },
+    ],
+  },
+  // Personal details (migrations/024), a tour of its own so people who saw
+  // the Profile tab before see it too.
+  {
+    id: 'account.personal',
+    page: 'account',
+    needs: '#panel-profile',
+    steps: [
+      { el: '.field:has(#legalNameInput)', i18n: 'tour.account.personal-name' },
+      { el: ['#personalLocked', '#countrySubmit'], i18n: 'tour.account.personal-locked' },
+      { el: '.field:has(#emergencyNameInput)', i18n: 'tour.account.personal-emergency' },
     ],
   },
 
@@ -214,6 +267,18 @@ export const TOURS = [
       { el: '#volunteerSection', i18n: 'tour.editor.price-volunteers' },
     ],
   },
+  // The registration form and tier closing times (migrations/024).
+  {
+    id: 'editor.registration',
+    page: 'manage',
+    needs: '#registrationSection',
+    steps: [
+      { el: 'label:has(> #f-registrationEnabled)', i18n: 'tour.editor.registration-on' },
+      { el: '#registrationPresets', i18n: 'tour.editor.registration-presets' },
+      { el: '#registrationAdd', i18n: 'tour.editor.registration-own' },
+      { el: '.field:has(> [data-key="closesLocal"])', i18n: 'tour.editor.registration-tier-closes' },
+    ],
+  },
   {
     id: 'editor.meals',
     page: 'manage',
@@ -284,6 +349,14 @@ export const TOURS = [
     steps: [
       { el: '.field:has(#resetUsername)', i18n: 'tour.tools.reset-check' },
       { el: '#resetSubmit', i18n: 'tour.tools.reset-code' },
+    ],
+  },
+  {
+    id: 'manage.personal-fix',
+    page: 'manage',
+    needs: '#personalFixBox',
+    steps: [
+      { el: '#personalFixForm', i18n: 'tour.tools.personal-fix' },
     ],
   },
 ];

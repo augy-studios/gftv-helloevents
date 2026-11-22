@@ -181,6 +181,11 @@ export function attendeePaymentText(attendee) {
   if (payment.amount !== null) {
     parts.push(formatMoney(payment.amount, payment.currency));
   }
+  // Upgraded (migrations/024): what was paid before, so only the rest is
+  // to be checked.
+  if (payment.credit > 0) {
+    parts.push(translate('manage.payment-credit', { amount: formatMoney(payment.credit, payment.currency) }));
+  }
   parts.push(translate(`payment.method.${payment.method}`));
   if (payment.method !== 'onsite') {
     parts.push(translate(`manage.payment-status.${payment.status}`));

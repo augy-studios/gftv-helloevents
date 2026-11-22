@@ -24,6 +24,10 @@
 //   On a cross-border event (migrations/015), the link goes only to people
 //   signed in with a country of origin, and to editors; an attendee's
 //   country goes only to editors, and only for a cross-border event.
+//   Registration answers and photos (migrations/024) go only to the person
+//   and the event's editors; of the account's personal details, editors get
+//   only those the event's form asks for, a date of birth as the age at the
+//   event unless the form asks for the full date.
 //   Whether someone signed up to volunteer, or volunteered, goes only to
 //   them and to editors (migrations/012); the public page says only whether
 //   a convention takes volunteers and what its volunteer benefit is.
@@ -41,7 +45,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, fursuiterTickShown, tierClosed, registrationOpenFor, upgradeOptions, paidSoFar, donationOf, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
@@ -49,6 +53,7 @@ import { galleryImageUrl } from './gallery.js';
 import { displayDescription } from './rich-text.js';
 import { storedContactFields, storedContactRule, storedContact, contactComplete } from '../../js/contact-fields.js';
 import { qrUrl } from './payments.js';
+import { storedRegistrationFields, configuredRegistrationFields, storedAnswers, answersComplete, missingAccountDetails, ageOn } from '../../js/registration-fields.js';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -140,6 +145,23 @@ export function selfView(user, { editsEvents = false } = {}) {
     canManage: canManage(user),
     editsEvents: editsEvents === true,
     country: missingToNull(user.country),
+    // Personal details (migrations/024), theirs to see and fill in on the
+    // Profile tab: the legal name, date of birth and country are locked
+    // once set.
+    personal: selfPersonal(user.personal),
+  };
+}
+
+function selfPersonal(personal) {
+  let given = personal;
+  if (given === null || given === undefined) {
+    given = {};
+  }
+  return {
+    legalName: missingToNull(given.legalName),
+    dateOfBirth: missingToNull(given.dateOfBirth),
+    emergencyName: missingToNull(given.emergencyName),
+    emergencyPhone: missingToNull(given.emergencyPhone),
   };
 }
 
@@ -188,7 +210,176 @@ export function attendeeView(row, event = {}, standing = {}) {
     pastVolunteer: standing.pastVolunteer === true,
     payment: attendeePayment(row),
     contact: attendeeContact(event, row.contact),
+    registration: attendeeRegistration(event, row, person, isStaff),
+    personal: attendeePersonal(event, account),
     rsvpAt: row.created_at,
+  };
+}
+
+// The registration answers someone gave (migrations/024), for the event's
+// editors: one entry for each question of the form they answered, in its
+// order; a photo as the address editors open it at.
+function attendeeRegistration(event, row, person, isStaff) {
+  const fields = storedRegistrationFields(event).filter((field) => field.type !== 'account');
+  const answers = storedAnswers(fields, row.registration);
+  return fields
+    .filter((field) => answers[field.id] !== undefined)
+    .map((field) => {
+      let value = answers[field.id];
+      let photoUrl = null;
+      if (field.type === 'photo') {
+        photoUrl = registrationPhotoUrl(event.slug, field.id, value, { username: person.username, staff: isStaff });
+        value = null;
+      }
+      return { id: field.id, type: field.type, label: field.label, value, photoUrl };
+    });
+}
+
+// Where a registration photo is opened (api/events/registration-photo.js):
+// the person's own, or, with who (editors only), an attendee's.
+function registrationPhotoUrl(slug, questionId, name, who = null) {
+  if (!slug || typeof name !== 'string') {
+    return null;
+  }
+  let url = `/api/events/registration-photo?slug=${encodeURIComponent(slug)}&q=${encodeURIComponent(questionId)}&v=${encodeURIComponent(name)}`;
+  if (who && who.username) {
+    url = `${url}&u=${encodeURIComponent(who.username)}`;
+    if (who.staff) {
+      url = `${url}&staff=1`;
+    }
+  }
+  return url;
+}
+
+// The day an event starts, in its own zone ('YYYY-MM-DD'), or today.
+function eventDay(event) {
+  if (event.starts_at && event.timezone) {
+    const wall = utcToWall(event.starts_at, event.timezone);
+    if (wall) {
+      return wall.slice(0, 10);
+    }
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
+// The account details an event's form asks for (migrations/024), for its
+// editors, and only those: the legal name, the emergency contact, and from
+// the date of birth the age on the day the event starts (and whether that
+// is under 18), with the date itself only when the form asks for it. null
+// for a detail asked but not given; the key is missing when not asked.
+function attendeePersonal(event, account) {
+  const fields = storedRegistrationFields(event).filter((field) => field.type === 'account');
+  if (fields.length === 0) {
+    return null;
+  }
+  const personal = {};
+  for (const field of fields) {
+    if (field.id === 'legalName') {
+      personal.legalName = emptyToNull(account.legal_name);
+    }
+    if (field.id === 'emergencyContact') {
+      personal.emergencyName = emptyToNull(account.emergency_name);
+      personal.emergencyPhone = emptyToNull(account.emergency_phone);
+    }
+    if (field.id === 'dateOfBirth') {
+      let born = emptyToNull(account.date_of_birth);
+      if (born) {
+        born = String(born).slice(0, 10);
+      }
+      const age = ageOn(born, eventDay(event));
+      personal.age = age;
+      personal.under18 = false;
+      if (age !== null && age < 18) {
+        personal.under18 = true;
+      }
+      if (field.fullDate) {
+        personal.dateOfBirth = born;
+      }
+    }
+  }
+  return personal;
+}
+
+// The registration form (migrations/024), for the event page and checkout:
+// its questions (none while it is off), and the currency a donation is in.
+function registrationView(row) {
+  return {
+    fields: storedRegistrationFields(row).map((field) => ({
+      id: field.id,
+      type: field.type,
+      label: field.label,
+      hint: field.hint,
+      required: field.required,
+      options: field.options,
+      link: field.link,
+    })),
+    currency: emptyToNull(row.currency),
+  };
+}
+
+// The account details the form asks for, from the viewer's own account,
+// for the card and the form to show (their own data): only those asked.
+function askedPersonal(fields, personal) {
+  const given = {};
+  if (!personal) {
+    return given;
+  }
+  for (const field of fields) {
+    if (field.id === 'legalName') {
+      given.legalName = missingToNull(personal.legalName);
+    }
+    if (field.id === 'dateOfBirth') {
+      given.dateOfBirth = missingToNull(personal.dateOfBirth);
+    }
+    if (field.id === 'emergencyContact') {
+      given.emergencyName = missingToNull(personal.emergencyName);
+      given.emergencyPhone = missingToNull(personal.emergencyPhone);
+    }
+  }
+  return given;
+}
+
+// This person and the form (migrations/024): their answers (someone going),
+// their photos' addresses, whether answers the form needs are missing,
+// which account details it needs that their account lacks, the account
+// details it asks for, the tier they hold, and whether they can still
+// change their answers (registration open for them).
+function viewerRegistration(row, viewer, now) {
+  const fields = storedRegistrationFields(row);
+  const answers = {};
+  const photos = {};
+  let missing = false;
+  let tier = null;
+  let stored = null;
+  if (viewer.going === true) {
+    if (viewer.payment) {
+      stored = viewer.payment;
+    }
+    Object.assign(answers, storedAnswers(fields, viewer.registration));
+    if (fields.length > 0 && !answersComplete(fields, answers)) {
+      missing = true;
+    }
+    for (const field of fields) {
+      if (field.type === 'photo' && answers[field.id]) {
+        photos[field.id] = registrationPhotoUrl(row.slug, field.id, answers[field.id]);
+      }
+    }
+    if (stored) {
+      tier = missingToNull(stored.payment_tier);
+    }
+  }
+  let open = false;
+  if (fields.length > 0 && registrationOpenFor(row, stored, now)) {
+    open = true;
+  }
+  return {
+    answers,
+    photos,
+    missing,
+    accountMissing: missingAccountDetails(fields, viewer.personal),
+    personal: askedPersonal(fields, viewer.personal),
+    tier,
+    open,
   };
 }
 
@@ -268,6 +459,8 @@ function attendeePayment(row) {
     hasProof: Boolean(row.payment_proof_path),
     submittedAt: missingToNull(row.payment_submitted_at),
     paidAt: missingToNull(row.paid_at),
+    // Paid before an upgrade (migrations/024): only the rest is owed.
+    credit: paidCredit(row),
   };
 }
 
@@ -481,7 +674,8 @@ function tiersView(row) {
     }
     // How this tier can be paid for (migrations/016), when it says.
     const methods = tierOptions(row, tier);
-    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, maxPerPerson: tier.max_per_person, methods };
+    // When it stops being sold, and whether it has (migrations/024).
+    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, maxPerPerson: tier.max_per_person, methods, closesAt: missingToNull(tier.closes_at), closed: tierClosed(tier) };
   });
 }
 
@@ -620,6 +814,7 @@ function managedTier(tier, row) {
     paymentMethods: tier.payment_methods,
     paymentLink: emptyToBlank(tier.payment_link),
     paymentQrUrl: emptyToBlank(qrUrl({ slug: row.slug, payment_qr_path: tier.payment_qr_path })),
+    closesLocal: emptyToBlank(utcToWall(tier.closes_at, row.timezone)),
   };
 }
 
@@ -835,10 +1030,12 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     meals: mealsView(row, addressShown),
     lepak: lepakView(row),
     contact: contactView(row),
+    registration: registrationView(row),
     timetable: timetableDetail(row),
     volunteers: volunteersView(row),
-    // Whether people going are asked if they are fursuiters (migrations/023).
-    fursuitersAsked: asksFursuiters(row),
+    // Whether people going are asked if they are fursuiters (migrations/023),
+    // by the plain tick box (not when the registration form asks it).
+    fursuitersAsked: fursuiterTickShown(row),
     // How people pay, and whether a ticket goes through /checkout.
     payment: { checkout: needsCheckout(row), methods: paymentOptions(row) },
     viewer: {
@@ -856,8 +1053,23 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       needsCountry,
       contact: myContact,
       contactMissing,
+      registration: viewerRegistration(row, viewer, now),
+      // Whether they can upgrade their tier at checkout (migrations/024).
+      canUpgrade: canUpgradeNow(row, viewer, volunteerDiscount, now),
     },
   };
+}
+
+// Whether someone going has a tier to upgrade to.
+function canUpgradeNow(row, viewer, volunteerDiscount, now) {
+  if (viewer.going !== true || !viewer.payment) {
+    return false;
+  }
+  const upgrade = upgradeOptions(row, viewer.payment, { volunteerDiscount, now });
+  if (upgrade === null) {
+    return false;
+  }
+  return upgrade.options.length > 0;
 }
 
 // One of my RSVPs, for the account page: the event's card and my RSVP ID
@@ -1016,6 +1228,8 @@ export function managedEvent(row) {
     lepakLabel: emptyToBlank(row.lepak_label),
     contactFields: storedContactFields(row),
     contactRule: storedContactRule(row),
+    registrationEnabled: row.registration_enabled === true,
+    registrationFields: configuredRegistrationFields(row),
     paymentMethods: storedPaymentMethods(row),
     paymentLink: emptyToBlank(row.payment_link),
     paymentInstructions: emptyToBlank(row.payment_instructions),
@@ -1057,7 +1271,7 @@ function checkoutTickets(row, volunteerDiscount) {
   const tiers = storedTiers(row);
   if (row.tiers_enabled === true && tiers.length > 0) {
     return tiers.map((tier, index) => {
-      const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount });
+      const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount, ignoreClosed: true });
       let linkTo = 'event';
       if (tier.payment_link) {
         linkTo = tier.id;
@@ -1075,6 +1289,7 @@ function checkoutTickets(row, volunteerDiscount) {
         maxPerPerson: tier.max_per_person,
         methods: tierOptions(row, tier),
         payTo: { link: linkTo, qr: qrTo },
+        closed: tierClosed(tier),
       };
     });
   }
@@ -1082,7 +1297,7 @@ function checkoutTickets(row, volunteerDiscount) {
   if (!priced.ok) {
     return [];
   }
-  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, maxPerPerson: 1, methods: paymentOptions(row), payTo: { link: 'event', qr: 'event' } }];
+  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, maxPerPerson: 1, methods: paymentOptions(row), payTo: { link: 'event', qr: 'event' }, closed: false }];
 }
 
 // The tiers someone bought, as kept at checkout (migrations/022): each
@@ -1136,7 +1351,26 @@ function myCheckoutPayment(stored) {
     currency: missingToNull(stored.payment_currency),
     reference: missingToNull(stored.payment_reference),
     hasProof: Boolean(stored.payment_proof_path),
+    // After an upgrade (migrations/024): what was already paid, and what is
+    // left to pay (the whole amount when nothing was).
+    credit: paidCredit(stored),
+    due: amountDue(stored),
   };
+}
+
+function paidCredit(stored) {
+  if (stored.payment_status === 'paid') {
+    return 0;
+  }
+  return paidSoFar(stored);
+}
+
+function amountDue(stored) {
+  const amount = numberOrNull(stored.payment_amount);
+  if (amount === null) {
+    return null;
+  }
+  return Math.max(0, Math.round((amount - paidSoFar(stored)) * 100) / 100);
 }
 
 // The checkout page (migrations/016), for someone signed in. Only call this
@@ -1214,9 +1448,10 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     paymentLink,
     paymentQrUrl,
     takesVolunteers: takesVolunteers(row),
-    asksFursuiters: asksFursuiters(row),
+    asksFursuiters: fursuiterTickShown(row),
     needsCountry,
     contact: contactView(row),
+    registration: registrationView(row),
     viewer: {
       going: viewer.going === true,
       withoutTicket,
@@ -1226,8 +1461,31 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
       payment: mine,
       contact: myContact,
       contactMissing,
+      registration: viewerRegistration(row, viewer, now),
+      // The donation in their order (migrations/024), 0 for none.
+      donation: myDonation(row, viewer),
+      // The tiers they can upgrade to, and what each costs (null: none).
+      upgrade: myUpgrade(row, viewer, volunteerDiscount, now),
     },
   };
+}
+
+function myDonation(row, viewer) {
+  if (viewer.going !== true) {
+    return 0;
+  }
+  return donationOf(row, viewer.registration);
+}
+
+function myUpgrade(row, viewer, volunteerDiscount, now) {
+  if (viewer.going !== true || !viewer.payment) {
+    return null;
+  }
+  const upgrade = upgradeOptions(row, viewer.payment, { volunteerDiscount, now });
+  if (!upgrade || upgrade.options.length === 0) {
+    return null;
+  }
+  return upgrade;
 }
 
 // The kind of volunteer benefit, 'percent' unless it is stored as 'amount'.

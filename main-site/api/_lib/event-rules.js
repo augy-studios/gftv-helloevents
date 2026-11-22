@@ -5,6 +5,7 @@
 
 import { cleanDescription } from './rich-text.js';
 import { readContactFields, readContactRule } from '../../js/contact-fields.js';
+import { readRegistrationFields, registrationAsksFursuiting } from '../../js/registration-fields.js';
 
 export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
@@ -842,7 +843,23 @@ export function asksFursuiters(row) {
   if (!row) {
     return false;
   }
-  return row.fursuiters_asked === true;
+  if (row.fursuiters_asked === true) {
+    return true;
+  }
+  return registrationAsksFursuiting(row);
+}
+
+// Whether the plain "I'm a fursuiter" tick box is shown: the event asks,
+// and its registration form does not ask "Are you fursuiting?" itself
+// (migrations/024, whose answer sets the same flag).
+export function fursuiterTickShown(row) {
+  if (!row) {
+    return false;
+  }
+  if (row.fursuiters_asked !== true) {
+    return false;
+  }
+  return !registrationAsksFursuiting(row);
 }
 
 // Whether a meal id is one an event can offer: breakfast, lunch, dinner, or
@@ -1024,7 +1041,7 @@ function readMeals(body, fields) {
 // as { ok: true, tier } (tier null when
 // it is left wholly blank, so an untouched card is dropped) or
 // { ok: false, field }. A tier needs a name and a price (0 for a free tier).
-function readTier(entry) {
+function readTier(entry, timeZone = DEFAULT_TIMEZONE) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
     return { ok: false, field: 'ticketTiers' };
   }
@@ -1098,10 +1115,22 @@ function readTier(entry) {
   if (typeof id !== 'string' || !TIER_ID.test(id)) {
     id = newTierId();
   }
+  // When it stops being sold (migrations/024): a wall time in the event's
+  // zone, blank for never. Its holders can no longer change their
+  // registration answers or upgrade from it once it has passed.
+  let closesAt = null;
+  const closesWall = cleanText(entry.closesLocal, 16);
+  if (closesWall !== '') {
+    closesAt = wallToUtc(closesWall, timeZone);
+    if (!closesAt) {
+      return { ok: false, field: 'tierClosesLocal' };
+    }
+  }
   return {
     ok: true,
     tier: {
       id,
+      closes_at: closesAt,
       name,
       price: price.value,
       benefits,
@@ -1214,7 +1243,7 @@ function readTiers(body, fields) {
   }
   const tiers = [];
   for (const [index, entry] of entries.entries()) {
-    const check = readTier(entry);
+    const check = readTier(entry, fields.timezone);
     if (!check.ok) {
       fields.badTier = index;
       return check.field;
@@ -1302,8 +1331,13 @@ export function storedTiers(row) {
     if (!Number.isInteger(most) || most < 1) {
       most = 1;
     }
+    let closesAt = null;
+    if (typeof tier.closes_at === 'string' && Number.isFinite(Date.parse(tier.closes_at))) {
+      closesAt = tier.closes_at;
+    }
     tiers.push({
       id,
+      closes_at: closesAt,
       name: tier.name,
       price,
       benefits,
@@ -1317,6 +1351,15 @@ export function storedTiers(row) {
     });
   }
   return settleIncludes(tiers);
+}
+
+// Whether a tier has stopped being sold (migrations/024): its closing time
+// has come.
+export function tierClosed(tier, now = Date.now()) {
+  if (!tier || !tier.closes_at) {
+    return false;
+  }
+  return Date.parse(tier.closes_at) <= now;
 }
 
 // Volunteers (migrations/012), for a convention only: whether it takes
@@ -1680,7 +1723,7 @@ export function needsCheckout(row) {
 // tier list that changed meanwhile is caught); ignored without tiers.
 // volunteerDiscount: whether this person gets the event's volunteer benefit
 // (events.js volunteerStanding).
-export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerDiscount = false } = {}) {
+export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerDiscount = false, ignoreClosed = false } = {}) {
   let tier = null;
   let price;
   const tiers = storedTiers(row);
@@ -1690,6 +1733,9 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
     }
     if (tiers[tierIndex].name !== tierName) {
       return { ok: false, error: 'tier_changed' };
+    }
+    if (!ignoreClosed && tierClosed(tiers[tierIndex])) {
+      return { ok: false, error: 'tier_closed' };
     }
     tier = tiers[tierIndex].name;
     price = tiers[tierIndex].price;
@@ -1726,7 +1772,7 @@ function volunteerOff(row, price, volunteerDiscount) {
 // -> { ok: true, tiers, items: [{ id, name, quantity, price }], text,
 // price, amount, discount } (text: the tiers in words, "Day pass × 2,
 // Dinner", as kept in payment_tier), or { ok: false, error }.
-export function basketPrice(row, items, { volunteerDiscount = false } = {}) {
+export function basketPrice(row, items, { volunteerDiscount = false, now = Date.now(), allowClosed = [] } = {}) {
   const tiers = storedTiers(row);
   if (!sellsTiers(row)) {
     return { ok: false, error: 'payment_unavailable' };
@@ -1753,6 +1799,11 @@ export function basketPrice(row, items, { volunteerDiscount = false } = {}) {
     }
     if (chosen.includes(tier)) {
       return { ok: false, error: 'bad_request' };
+    }
+    // A closed tier is not sold (migrations/024), except one already held
+    // that an upgrade keeps (allowClosed: tier ids).
+    if (tierClosed(tier, now) && !allowClosed.includes(tier.id)) {
+      return { ok: false, error: 'tier_closed' };
     }
     let quantity = 1;
     if (item.quantity !== undefined) {
@@ -1840,6 +1891,28 @@ function readContact(body, fields) {
   }
   fields.contact_fields = read.fields;
   fields.contact_rule = rule;
+  return null;
+}
+
+// The registration form (migrations/024, js/registration-fields.js):
+// switched on or not, and its questions, kept while it is off. With neither
+// field at all the stored ones are kept, so a page from before cannot wipe
+// them.
+function readRegistration(body, fields) {
+  if (body.registrationEnabled !== undefined) {
+    fields.registration_enabled = body.registrationEnabled === true;
+  }
+  if (body.registrationFields === undefined) {
+    return null;
+  }
+  const read = readRegistrationFields(body.registrationFields);
+  if (!read.ok) {
+    if (Number.isInteger(read.index)) {
+      fields.badRegistration = read.index;
+    }
+    return read.field;
+  }
+  fields.registration_fields = read.fields;
   return null;
 }
 
@@ -2142,7 +2215,7 @@ export function itemTimes(item, timeZone) {
 // The steps, in order. The order decides which field is reported when more
 // than one is wrong, and later steps read columns earlier ones wrote (the
 // times need the time zone).
-const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readLepak, readContact, readCapacity, readMeals, readVolunteers, readTimetable];
+const VALIDATION_STEPS = [readIdentity, readTextFields, readTimes, readLocations, readPlaceAndLinks, readLinkLabelAndBorder, readPrice, readTiers, readPayment, readLepak, readContact, readRegistration, readCapacity, readMeals, readVolunteers, readTimetable];
 
 // { ok: true, fields } with the columns to write, or
 // { ok: false, error: 'invalid_field', field } naming the first form field
@@ -2179,8 +2252,181 @@ export function validateEvent(input) {
       if (fields.badContact !== undefined) {
         problem.contact = fields.badContact;
       }
+      if (fields.badRegistration !== undefined) {
+        problem.registration = fields.badRegistration;
+      }
       return problem;
     }
   }
   return { ok: true, fields };
+}
+
+// ---------------------------------------------------------------------------
+// Registration (migrations/024): who can still change their answers, the
+// donation added to a ticket, and upgrading to a dearer tier.
+// ---------------------------------------------------------------------------
+
+// Whether someone going can still change their registration answers or
+// upgrade: the event is not cancelled or over, RSVPs are open, and none of
+// the tiers they hold has closed. stored: their attendee row (null for
+// someone not going yet, who is held only to the event).
+export function registrationOpenFor(row, stored = null, now = Date.now()) {
+  if (!row || row.status === 'cancelled' || isOver(row, now) || row.rsvp_open === false) {
+    return false;
+  }
+  return !heldTiers(row, stored).some((tier) => tierClosed(tier, now));
+}
+
+// The donation in someone's registration answers (0 for none), at a paid
+// event whose form asks for one.
+export function donationOf(row, registration) {
+  if (!row || row.price_type !== 'paid' || !registration || typeof registration !== 'object') {
+    return 0;
+  }
+  const amount = Number(registration.donation);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return 0;
+  }
+  return Math.round(amount * 100) / 100;
+}
+
+// What has been paid towards someone's ticket so far: all of it once it is
+// confirmed paid, otherwise what was paid before their last upgrade.
+export function paidSoFar(stored) {
+  if (!stored) {
+    return 0;
+  }
+  if (stored.payment_status === 'paid') {
+    const amount = Number(stored.payment_amount);
+    if (!Number.isFinite(amount)) {
+      return 0;
+    }
+    return amount;
+  }
+  const credit = Number(stored.payment_credit);
+  if (!Number.isFinite(credit) || credit < 0) {
+    return 0;
+  }
+  return credit;
+}
+
+// The dearest tier in a basket that is held only once (the one an upgrade
+// swaps), or null.
+function upgradeFrom(basket) {
+  let from = null;
+  for (const item of basket) {
+    if (item.quantity !== 1) {
+      continue;
+    }
+    if (from === null || item.price > from.price) {
+      from = item;
+    }
+  }
+  return from;
+}
+
+// The basket someone holds, as basketPrice takes it: [{ tier, tierName,
+// quantity }] by the event's current tier list, or null when a tier they
+// bought has since gone.
+function heldBasket(row, stored) {
+  const tiers = storedTiers(row);
+  if (!stored || !Array.isArray(stored.payment_items) || stored.payment_items.length === 0) {
+    let tierText = null;
+    if (stored) {
+      tierText = stored.payment_tier;
+    }
+    const named = tierNamed(row, tierText);
+    if (!named) {
+      return null;
+    }
+    return [{ tier: tiers.indexOf(named), tierName: named.name, quantity: 1, id: named.id, price: named.price }];
+  }
+  const basket = [];
+  for (const item of stored.payment_items.filter(isObject)) {
+    const index = tiers.findIndex((tier) => tier.id === item.id);
+    if (index < 0) {
+      return null;
+    }
+    let quantity = Number(item.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      quantity = 1;
+    }
+    basket.push({ tier: index, tierName: tiers[index].name, quantity, id: tiers[index].id, price: tiers[index].price });
+  }
+  return basket;
+}
+
+// The tiers someone holding a ticket can upgrade to, and what each would
+// cost: { from: the tier they would give up ({ name }), options: [{ index,
+// name, price, total, due }] } (total: the new order's amount, with the
+// volunteer benefit and their donation; due: total less what they have
+// paid), or null when they cannot upgrade at all. An upgrade swaps the
+// dearest tier they hold one of for a dearer one they do not hold, that
+// is still sold, and that can be paid for with the rest of their tiers.
+// Not while a payment they reported waits to be checked.
+export function upgradeOptions(row, stored, { volunteerDiscount = false, now = Date.now() } = {}) {
+  if (!stored || !stored.payment_method || !sellsTiers(row) || !registrationOpenFor(row, stored, now)) {
+    return null;
+  }
+  if (stored.payment_status === 'submitted') {
+    return null;
+  }
+  const basket = heldBasket(row, stored);
+  if (!basket) {
+    return null;
+  }
+  const from = upgradeFrom(basket);
+  if (!from) {
+    return null;
+  }
+  const heldIds = basket.map((item) => item.id);
+  const options = [];
+  storedTiers(row).forEach((tier, index) => {
+    if (heldIds.includes(tier.id) || tier.price <= from.price || tierClosed(tier, now)) {
+      return;
+    }
+    const priced = upgradeBasket(row, stored, index, tier.name, { volunteerDiscount, now });
+    if (!priced.ok) {
+      return;
+    }
+    options.push({ index, name: tier.name, price: tier.price, total: priced.amount, due: priced.due });
+  });
+  return { from: { name: from.tierName }, options };
+}
+
+// The order after an upgrade to tier index (named tierName, so a list that
+// changed meanwhile is caught): { ok: true, items, text, tiers, amount,
+// due, methods } or { ok: false, error }.
+export function upgradeBasket(row, stored, index, tierName, { volunteerDiscount = false, now = Date.now() } = {}) {
+  const basket = heldBasket(row, stored);
+  if (!basket) {
+    return { ok: false, error: 'upgrade_unavailable' };
+  }
+  const from = upgradeFrom(basket);
+  if (!from) {
+    return { ok: false, error: 'upgrade_unavailable' };
+  }
+  const tiers = storedTiers(row);
+  const target = tiers[index];
+  if (!Number.isInteger(index) || !target || target.name !== tierName) {
+    return { ok: false, error: 'tier_changed' };
+  }
+  if (target.price <= from.price || basket.some((item) => item.id === target.id)) {
+    return { ok: false, error: 'upgrade_unavailable' };
+  }
+  const items = basket
+    .filter((item) => item !== from)
+    .map((item) => ({ tier: item.tier, tierName: item.tierName, quantity: item.quantity }));
+  items.push({ tier: index, tierName, quantity: 1 });
+  const priced = basketPrice(row, items, { volunteerDiscount, now, allowClosed: basket.map((item) => item.id) });
+  if (!priced.ok) {
+    return priced;
+  }
+  const methods = basketOptions(row, priced.tiers);
+  if (methods.length === 0) {
+    return { ok: false, error: 'tiers_not_together' };
+  }
+  const amount = Math.round((priced.amount + donationOf(row, stored.registration)) * 100) / 100;
+  const due = Math.max(0, Math.round((amount - paidSoFar(stored)) * 100) / 100);
+  return { ok: true, items: priced.items, text: priced.text, tiers: priced.tiers, amount, due, methods };
 }
