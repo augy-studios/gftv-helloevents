@@ -446,10 +446,13 @@ test('ticket tiers are checked, set the price range, and are only on for a paid 
     ['Sponsor', 120.5, ['Sponsor badge'], true, 'reference'],
   ]);
 
-  // Kept but off for a free event; the From field is not needed while on.
+  // Kept, tick and all, at a free event, but not sold there: set to Paid
+  // again, its tiers are back. The From field is not needed while on.
   const free = rules.validateEvent(form({ priceType: 'free', tiersEnabled: true, ticketTiers: tiers }));
-  assert.equal(free.fields.tiers_enabled, false);
+  assert.equal(free.fields.tiers_enabled, true);
   assert.equal(free.fields.ticket_tiers.length, 3);
+  assert.equal(rules.sellsTiers({ ...free.fields, price_type: 'free' }), false);
+  assert.equal(rules.sellsTiers({ ...free.fields, price_type: 'paid' }), true);
   assert.equal('ticket_tiers' in rules.validateEvent(form()).fields, false, 'no tiers field keeps the stored ones');
 
   const bad = (list) => rules.validateEvent(form({ priceType: 'paid', tiersEnabled: true, ticketTiers: list }));

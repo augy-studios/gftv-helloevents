@@ -153,7 +153,8 @@ export async function signInWithBackupCode(page, username, backupCode) {
 }
 
 // Opens one of the edit form's section tabs on /manage ("Basics", "When and
-// where", "Price and RSVP", "Meals", "Attendees and notes").
+// where", "Price and RSVP", "Questions" (a paid event's), "Meals",
+// "Attendees and notes").
 export async function openSection(page, name) {
   const tab = page.locator('#editorTabs').getByRole('tab', { name, exact: false });
   await tab.click();

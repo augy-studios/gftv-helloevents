@@ -2,8 +2,9 @@
 // database: the questions an editor picks, answering them with an RSVP or a
 // ticket, the account details a form needs, photos, a donation on top of a
 // ticket, changing answers until registration closes (for the event or a
-// tier), upgrading to a dearer tier and paying the difference, and the
-// personal details on the account, locked once set.
+// tier), upgrading to a dearer tier and paying the difference, questions
+// asked only of some tiers, and the personal details on the account, locked
+// once set.
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,6 +67,8 @@ const FORM = [
   { id: 'conduct', link: 'https://example.com/coc' },
 ];
 
+// A paid con (only a paid event asks a form) taking plain RSVPs: no way to
+// pay is set up, so nobody goes through checkout.
 function addEvent(over = {}) {
   const row = {
     id: crypto.randomUUID(),
@@ -73,6 +76,8 @@ function addEvent(over = {}) {
     title: 'Mega Con',
     kind: 'convention',
     status: 'published',
+    price_type: 'paid',
+    currency: 'SGD',
     starts_at: new Date(Date.now() + 30 * 86400_000).toISOString(),
     description: 'About.',
     description_zh: '关于。',
@@ -132,15 +137,45 @@ test('a new form starts with the ready-made questions, and the editor can change
   assert.equal(reg.readRegistrationFields([{ id: 'nope' }]).field, 'registrationFields');
 
   // Saved with the event; a form from before keeps what is stored.
-  const form = { title: 'Con', kind: 'convention', description: 'A', descriptionZh: 'B', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', priceType: 'free' };
+  const form = { title: 'Con', kind: 'convention', description: 'A', descriptionZh: 'B', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', priceType: 'paid', currency: 'SGD', priceMin: '40' };
   const saved = rules.validateEvent({ ...form, registrationEnabled: true, registrationFields: [{ id: 'badgeName' }] });
-  assert.equal(saved.ok, true);
+  assert.equal(saved.ok, true, JSON.stringify(saved));
   assert.equal(saved.fields.registration_enabled, true);
   assert.equal(saved.fields.registration_fields.length, 1);
   assert.equal('registration_fields' in rules.validateEvent(form).fields, false);
-  const bad = rules.validateEvent({ ...form, registrationFields: [{ id: 'badgeName' }, { id: 'qx00001', type: 'text', label: '' }] });
+  const broken = [{ id: 'badgeName' }, { id: 'qx00001', type: 'text', label: '' }];
+  const bad = rules.validateEvent({ ...form, registrationFields: broken });
   assert.equal(bad.field, 'registrationLabel');
   assert.equal(bad.registration, 1);
+  // A free event asks no form, and its editor has no Questions tab to fix
+  // one in: what it cannot take is not refused, the stored form is kept.
+  const free = rules.validateEvent({ ...form, priceType: 'free', registrationFields: broken });
+  assert.equal(free.ok, true, JSON.stringify(free));
+  assert.equal('registration_fields' in free.fields, false);
+});
+
+test('a question can be for some tiers only', () => {
+  const read = reg.readRegistrationFields([
+    { id: 'tshirt', tiers: ['t-sponsor1', 't-sponsor1'] },
+    { id: 'badgeName', tiers: [] },
+    { id: 'qroom01', type: 'text', label: 'Room', tiers: ['t-super01'] },
+  ]);
+  assert.equal(read.ok, true);
+  assert.deepEqual(read.fields.map((field) => [field.id, field.tiers]), [['badgeName', null], ['tshirt', ['t-sponsor1']], ['qroom01', ['t-super01']]]);
+  assert.equal(reg.readRegistrationFields([{ id: 'tshirt', tiers: ['Sponsor'] }]).field, 'registrationTiers');
+  assert.equal(reg.readRegistrationFields([{ id: 'tshirt', tiers: 't-sponsor1' }]).field, 'registrationTiers');
+  assert.deepEqual(reg.questionsAskedOf(read.fields, ['t-attend1']).map((field) => field.id), ['badgeName']);
+  assert.deepEqual(reg.questionsAskedOf(read.fields, ['t-sponsor1']).map((field) => field.id), ['badgeName', 'tshirt']);
+});
+
+test('only a paid event asks its form', async () => {
+  addEvent({ price_type: 'free', currency: null });
+  const fox = await signedIn('fox');
+  const page = (await fox.call(detail, { query: { slug: 'mega-con' } })).json.event;
+  assert.deepEqual(page.registration.fields, []);
+  const joined = await fox.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
+  assert.equal(joined.status, 200, JSON.stringify(joined.json));
+  assert.deepEqual(db.table('gftvevents_attendees')[0].registration ?? {}, {}, 'nothing asked, nothing kept');
 });
 
 test('answers are checked for their kind, and required ones are needed', () => {
@@ -169,7 +204,8 @@ test('joining needs the answers and the account details the form requires; edito
   const editor = await signedIn('editor', { is_editor: true });
 
   const page = (await fox.call(detail, { query: { slug: 'mega-con' } })).json.event;
-  assert.deepEqual(page.registration.fields.map((field) => field.id), ['legalName', 'dateOfBirth', 'badgeName', 'fursuiting', 'badgePhoto', 'tshirt', 'conduct']);
+  assert.deepEqual(page.registration.fields.map((field) => field.id), ['legalName', 'dateOfBirth', 'badgeName', 'fursuiting', 'badgePhoto', 'tshirt', 'donation', 'conduct']);
+  assert.equal(page.registration.fields.every((field) => field.tiers === null), true, 'no tiers: every question for everyone');
   assert.deepEqual(page.viewer.registration.accountMissing, ['legalName', 'dateOfBirth']);
   assert.equal(page.fursuitersAsked, false, 'the form asks it, not the plain tick box');
 
@@ -203,7 +239,7 @@ test('a signed-out visitor sees the form\'s questions and nothing of anyone\'s a
   addEvent({ registration_fields: reg.readRegistrationFields([...FORM, { id: 'legalName' }]).fields });
   const page = await browser().call(detail, { query: { slug: 'mega-con' } });
   assert.equal(page.status, 200, JSON.stringify(page.json));
-  assert.deepEqual(page.json.event.viewer.registration, { answers: {}, photos: {}, missing: false, accountMissing: ['legalName'], personal: {}, tier: null, open: true });
+  assert.deepEqual(page.json.event.viewer.registration, { answers: {}, photos: {}, missing: false, accountMissing: ['legalName'], personal: {}, tier: null, asked: null, open: true });
 });
 
 test('a photo is uploaded first, sent as the answer, and shown only to its owner and editors', async () => {
@@ -316,6 +352,67 @@ test('upgrading to a dearer tier keeps what was paid, and only the difference is
   assert.equal(after.due, 0);
   // Down is not an upgrade.
   assert.equal((await fox.call(payment, { method: 'POST', body: { slug: 'mega-con', action: 'upgrade', tier: 0, tierName: 'Attendee', method: 'link' } })).json.error, 'upgrade_unavailable');
+});
+
+test('a question for some tiers is asked only of the people holding them, or a tier including one', async () => {
+  // A T-shirt for Sponsors, and for Super Sponsors, whose tier includes the
+  // Sponsor's; a room only for Super Sponsors.
+  const event = addPaidEvent({
+    ticket_tiers: [
+      { id: 't-attend1', name: 'Attendee', price: 60, benefits: ['Entry'], previous_display: 'reference' },
+      { id: 't-sponsor1', name: 'Sponsor', price: 175, benefits: ['A shirt'], previous_display: 'reference' },
+      { id: 't-super01', name: 'Super Sponsor', price: 400, benefits: ['A room'], includes: 't-sponsor1', previous_display: 'reference' },
+    ],
+    price_max: 400,
+    registration_fields: reg.readRegistrationFields([
+      { id: 'badgeName' },
+      { id: 'tshirt', options: ['S', 'M', 'L'], tiers: ['t-sponsor1'] },
+      { id: 'qroom01', type: 'text', label: 'Room-mate', required: true, tiers: ['t-super01', 't-gone001'] },
+      { id: 'qold001', type: 'text', label: 'Old question', required: true, tiers: ['t-gone001'] },
+      { id: 'conduct' },
+    ]).fields,
+  });
+  const fox = await signedIn('fox');
+  const badger = await signedIn('badger');
+  const editor = await signedIn('editor', { is_editor: true });
+
+  // The page says which tiers (by their places) each question is for; one
+  // whose only tier was removed is asked of no one.
+  const page = (await fox.call(detail, { query: { slug: 'mega-con' } })).json.event;
+  assert.deepEqual(page.registration.fields.map((field) => [field.id, field.tiers]), [['badgeName', null], ['tshirt', [1, 2]], ['qroom01', [2]], ['qold001', []], ['conduct', null]]);
+
+  // An Attendee is not asked for a T-shirt size.
+  const basic = { badgeName: 'Augy', conduct: true };
+  const attendee = await fox.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Attendee' }] }, registration: basic } });
+  assert.equal(attendee.status, 200, JSON.stringify(attendee.json));
+  assert.deepEqual(attendee.json.event.viewer.registration.asked, ['badgeName', 'conduct']);
+  assert.equal(attendee.json.event.viewer.registration.missing, false);
+
+  // A Super Sponsor is asked both, the T-shirt through the Sponsor tier.
+  const superBasket = { method: 'link', items: [{ tier: 2, tierName: 'Super Sponsor' }] };
+  const short = await badger.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, payment: superBasket, registration: basic } });
+  assert.equal(short.json.error, 'registration_required');
+  assert.equal(short.json.field, 'tshirt');
+  const full = await badger.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, payment: superBasket, registration: { ...basic, tshirt: 'L', qroom01: 'Fox' } } });
+  assert.equal(full.status, 200, JSON.stringify(full.json));
+  assert.deepEqual(full.json.event.viewer.registration.asked, ['badgeName', 'tshirt', 'qroom01', 'conduct']);
+
+  // The attendee list shows each the questions their tier is asked.
+  const list = (await editor.call(manage, { query: { id: event.id } })).json.attendees;
+  const answered = (username) => list.find((each) => each.username === username).registration.map((entry) => entry.id);
+  assert.deepEqual(answered('fox'), ['badgeName', 'conduct']);
+  assert.deepEqual(answered('badger'), ['badgeName', 'tshirt', 'qroom01', 'conduct']);
+
+  // Upgraded to Sponsor: now asked for a T-shirt size, and told so.
+  const upgraded = await fox.call(payment, { method: 'POST', body: { slug: 'mega-con', action: 'upgrade', tier: 1, tierName: 'Sponsor', method: 'link' } });
+  assert.equal(upgraded.status, 200, JSON.stringify(upgraded.json));
+  const after = (await fox.call(detail, { query: { slug: 'mega-con' } })).json.event.viewer.registration;
+  assert.deepEqual(after.asked, ['badgeName', 'tshirt', 'conduct']);
+  assert.equal(after.missing, true);
+  const sized = await fox.call(rsvp, { method: 'POST', body: { slug: 'mega-con', registration: { tshirt: 'M' } } });
+  assert.equal(sized.status, 200, JSON.stringify(sized.json));
+  assert.equal(sized.json.event.viewer.registration.missing, false);
+  assert.equal(sized.json.event.viewer.registration.answers.tshirt, 'M');
 });
 
 // ---------------------------------------------------------------------------

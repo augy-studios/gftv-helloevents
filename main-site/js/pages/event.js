@@ -14,6 +14,7 @@ import { startTours, checkTours } from '../tour.js';
 import { drawContactForm } from '../contact-form.js';
 import { drawRegistrationForm, registrationErrorText } from '../registration-form.js';
 import { renderRegistrationCard } from '../registration-card.js';
+import { askedForPicks } from '../registration-fields.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -540,7 +541,7 @@ function renderRsvp() {
   // ticket's goes with it on the checkout page). Someone going changes their
   // answers on the Registration details card instead.
   let registrationShown = false;
-  if (event.registration.fields.length > 0 && signedIn && !going && !rsvpButtonHidden && !ticketNeeded()) {
+  if (rsvpQuestions().fields.length > 0 && signedIn && !going && !rsvpButtonHidden && !ticketNeeded()) {
     registrationShown = true;
   }
   renderRegistrationForm(registrationShown);
@@ -549,6 +550,12 @@ function renderRsvp() {
     event = fresh;
     render();
   });
+}
+
+// The registration questions asked with "I am going": an RSVP here is for
+// no tier, so only those asked of every ticket.
+function rsvpQuestions() {
+  return askedForPicks(event.registration.fields, event.viewer.registration.accountMissing, []);
 }
 
 // The registration form in the RSVP box: drawn again only when what it
@@ -560,7 +567,8 @@ function renderRegistrationForm(shown) {
     return;
   }
   const mine = event.viewer.registration;
-  const drawFor = JSON.stringify([event.registration, mine.accountMissing, mine.personal, getLocale()]);
+  const asked = rsvpQuestions();
+  const drawFor = JSON.stringify([asked, event.registration.currency, mine.personal, getLocale()]);
   if (drawFor === registrationDrawn && registrationForm) {
     return;
   }
@@ -571,10 +579,10 @@ function renderRegistrationForm(shown) {
   }
   registrationDrawn = drawFor;
   registrationForm = drawRegistrationForm(byId('rsvpRegistrationFields'), {
-    fields: event.registration.fields,
+    fields: asked.fields,
     values: typed,
     personal: mine.personal,
-    accountMissing: mine.accountMissing,
+    accountMissing: asked.accountMissing,
     currency: event.registration.currency,
     idPrefix: 'rsvpReg',
     slug: event.slug,

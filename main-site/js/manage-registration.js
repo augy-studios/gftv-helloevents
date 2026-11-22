@@ -6,6 +6,14 @@
 // editor's own, each a card with a label, a kind, a hint, required or not,
 // and for a list its options. A card still without a label is not sent, so
 // a new one is not refused while it is being named.
+//
+// While the event sells tiers, every question also says which tiers it is
+// for (a T-shirt size only for the tiers with a shirt): one tick box per
+// tier in the Price and RSVP tab's list, none ticked for every ticket. What
+// is ticked is kept on the picker (data-reg-tiers, the tiers' ids), so
+// turning tiers off and on again loses nothing. A question whose tiers have
+// all been removed is asked of no one, and says so, until another is
+// ticked.
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { createElement } from './ui.js';
@@ -14,6 +22,11 @@ import { REGISTRATION_PRESETS, ACCOUNT_PRESETS, CUSTOM_TYPES, MAX_CUSTOM_QUESTIO
 
 const byId = (id) => document.getElementById(id);
 const customList = () => byId('registrationCustomList');
+
+// The event's tiers as the edit form has them now: { on, tiers: [{ id, name
+// }] } (on: a paid event selling tiers). Set by startRegistration.
+let currentTiers = () => ({ on: false, tiers: [] });
+let pickerCount = 0;
 
 // Tells the edit form the questions changed without a field being left
 // (one removed), so it autosaves them.
@@ -24,6 +37,77 @@ function announceChange() {
 
 // The ready-made questions whose "required" cannot be changed.
 const FIXED_REQUIRED = ['guardian', 'conduct'];
+
+// Which tiers a question is for: a tick box per tier, drawn by drawTiers.
+function tierPicker(tiers) {
+  let picked = [];
+  if (Array.isArray(tiers)) {
+    picked = tiers;
+  }
+  pickerCount += 1;
+  const titleId = `regTiers-${pickerCount}`;
+  return createElement('div', { class: 'reg-tiers', role: 'group', 'aria-labelledby': titleId, 'data-reg-tiers': JSON.stringify(picked) }, [
+    createElement('span', { class: 'reg-tiers-title', id: titleId, 'data-reg-text': 'manage.registration-tiers' }),
+    createElement('div', { class: 'reg-tiers-list' }),
+    createElement('p', { class: 'callout warn small reg-tiers-gone', 'data-reg-text': 'manage.registration-tiers-gone', hidden: true }),
+    createElement('span', { class: 'field-hint', 'data-reg-text': 'manage.registration-tiers-hint' }),
+  ]);
+}
+
+function pickedTiers(picker) {
+  try {
+    const ids = JSON.parse(picker.dataset.regTiers);
+    if (Array.isArray(ids)) {
+      return ids.filter((id) => typeof id === 'string');
+    }
+  } catch {
+    // A picker never set: none ticked.
+  }
+  return [];
+}
+
+// The tick boxes, one per tier as the form has them now, drawn again only
+// when the tiers changed (so a box just ticked keeps its focus).
+function drawTiers(picker, tiers) {
+  const drawnFor = JSON.stringify(tiers);
+  if (picker.dataset.drawnFor === drawnFor) {
+    return;
+  }
+  picker.dataset.drawnFor = drawnFor;
+  const picked = pickedTiers(picker);
+  picker.querySelector('.reg-tiers-list').replaceChildren(...tiers.map((tier, index) => {
+    const box = createElement('input', { type: 'checkbox', 'data-reg-tier': tier.id });
+    box.checked = picked.includes(tier.id);
+    let name = tier.name;
+    if (!name) {
+      name = translate('manage.tier-number', { number: index + 1 });
+    }
+    return createElement('label', { class: 'check small' }, [box, createElement('span', { text: name })]);
+  }));
+}
+
+// Whether every tier a question was for has been removed from the list.
+function tiersGone(picker, tiers) {
+  const picked = pickedTiers(picker);
+  if (picked.length === 0) {
+    return false;
+  }
+  return !picked.some((id) => tiers.some((tier) => tier.id === id));
+}
+
+// What a picker sends: the tiers ticked, of those the event has now. All
+// that were ticked go while tiers are off, to keep them for when they are
+// on, and while all of them have been removed, so the question stays asked
+// of no one rather than of every tier.
+function readTierPicker(picker) {
+  const state = currentTiers();
+  const picked = pickedTiers(picker);
+  if (!state.on || tiersGone(picker, state.tiers)) {
+    return picked;
+  }
+  const ids = state.tiers.map((tier) => tier.id);
+  return picked.filter((id) => ids.includes(id));
+}
 
 function presetRow(preset) {
   const on = createElement('input', { type: 'checkbox', 'data-reg-on': preset.id });
@@ -64,17 +148,19 @@ function presetRow(preset) {
   const row = createElement('div', { class: 'reg-preset', 'data-reg-preset': preset.id }, [
     createElement('div', { class: 'reg-preset-head' }, head),
     extraBox,
+    tierPicker(null),
   ]);
   return row;
 }
 
-function syncPresetRow(row) {
+function syncPresetRow(row, tiersOn) {
   const on = row.querySelector('[data-reg-on]').checked;
   const extras = row.querySelector('.reg-preset-extras');
   extras.hidden = true;
   if (on && extras.children.length > 0) {
     extras.hidden = false;
   }
+  row.querySelector('.reg-tiers').hidden = !(on && tiersOn);
   const required = row.querySelector('[data-reg-required]');
   if (required) {
     required.disabled = !on;
@@ -118,6 +204,7 @@ function customCard(field) {
       createElement('label', { class: 'field span-2 reg-link-field' }, [createElement('span', { 'data-reg-text': 'manage.registration-link' }), link]),
       createElement('label', { class: 'check span-2 reg-required-field' }, [required, createElement('span', { 'data-reg-text': 'manage.registration-required' })]),
     ]),
+    tierPicker(field.tiers),
   ]);
   type.addEventListener('change', () => syncCustom(card));
   remove.addEventListener('click', () => {
@@ -146,11 +233,25 @@ function syncAdd() {
   byId('registrationAdd').hidden = customList().children.length >= MAX_CUSTOM_QUESTIONS;
 }
 
-// The section shown, or only its switch while the form is off.
+// The section shown, or only its switch while the form is off; the tier
+// pickers only while the event sells tiers, each listing them as they are
+// now in the Price and RSVP tab.
 export function syncRegistration() {
   byId('registrationFieldsBox').hidden = !byId('f-registrationEnabled').checked;
+  const state = currentTiers();
+  let tiersOn = false;
+  if (state.on && state.tiers.length > 0) {
+    tiersOn = true;
+  }
+  for (const picker of byId('registrationSection').querySelectorAll('.reg-tiers')) {
+    if (tiersOn) {
+      drawTiers(picker, state.tiers);
+    }
+    picker.hidden = !tiersOn;
+    picker.querySelector('.reg-tiers-gone').hidden = !tiersGone(picker, state.tiers);
+  }
   for (const row of byId('registrationPresets').children) {
-    syncPresetRow(row);
+    syncPresetRow(row, tiersOn);
   }
 }
 
@@ -197,6 +298,13 @@ export function setRegistration(values) {
         fullDate.checked = true;
       }
     }
+    const picker = row.querySelector('.reg-tiers');
+    let tiers = [];
+    if (field && Array.isArray(field.tiers)) {
+      tiers = field.tiers;
+    }
+    picker.dataset.regTiers = JSON.stringify(tiers);
+    delete picker.dataset.drawnFor;
   }
   customList().replaceChildren();
   for (const field of fields) {
@@ -237,6 +345,7 @@ export function readRegistration() {
     if (fullDate) {
       entry.fullDate = fullDate.checked;
     }
+    entry.tiers = readTierPicker(row.querySelector('.reg-tiers'));
     registrationFields.push(entry);
   }
   for (const card of customList().children) {
@@ -258,6 +367,7 @@ export function readRegistration() {
     if (type === 'checkbox') {
       entry.link = card.querySelector('[data-key="link"]').value.trim();
     }
+    entry.tiers = readTierPicker(card.querySelector('.reg-tiers'));
     registrationFields.push(entry);
   }
   return { registrationEnabled: byId('f-registrationEnabled').checked, registrationFields };
@@ -277,6 +387,11 @@ export function relabelRegistration() {
   for (const node of byId('registrationSection').querySelectorAll('[data-reg-text]')) {
     node.textContent = translate(node.dataset.regText);
   }
+  // Untitled tiers read "Tier 1" in the reader's language.
+  for (const picker of byId('registrationSection').querySelectorAll('.reg-tiers')) {
+    delete picker.dataset.drawnFor;
+  }
+  syncRegistration();
   [...customList().children].forEach((card, index) => {
     card.querySelector('.reg-custom-title').textContent = translate('manage.registration-custom-title', { number: index + 1 });
     card.querySelector('.btn-label').textContent = translate('security.remove');
@@ -286,13 +401,39 @@ export function relabelRegistration() {
   });
 }
 
-export function startRegistration() {
+// getTiers: the event's tiers as the edit form has them now ({ on, tiers:
+// [{ id, name }] }).
+export function startRegistration({ getTiers } = {}) {
+  if (getTiers) {
+    currentTiers = getTiers;
+  }
   byId('registrationPresets').replaceChildren(...REGISTRATION_PRESETS.map(presetRow));
+  // A tier ticked or unticked is kept on its picker before the form saves.
+  byId('registrationSection').addEventListener('change', (event) => {
+    const tier = event.target.dataset.regTier;
+    if (tier === undefined) {
+      return;
+    }
+    // Ticking afresh: the tiers since removed go.
+    const picker = event.target.closest('.reg-tiers');
+    const ids = currentTiers().tiers.map((each) => each.id);
+    const picked = pickedTiers(picker).filter((id) => {
+      if (id === tier) {
+        return false;
+      }
+      return ids.includes(id);
+    });
+    if (event.target.checked) {
+      picked.push(tier);
+    }
+    picker.dataset.regTiers = JSON.stringify(picked);
+    picker.querySelector('.reg-tiers-gone').hidden = true;
+  });
   byId('registrationAdd').addEventListener('click', () => {
     if (customList().children.length >= MAX_CUSTOM_QUESTIONS) {
       return;
     }
-    const card = customCard({ id: newQuestionId(), type: 'text', label: '', hint: '', required: false, options: [] });
+    const card = customCard({ id: newQuestionId(), type: 'text', label: '', hint: '', required: false, options: [], tiers: null });
     customList().append(card);
     relabelRegistration();
     syncAdd();

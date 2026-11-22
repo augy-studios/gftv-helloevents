@@ -563,6 +563,16 @@ function syncDependent() {
     byId(`f-${name}`).disabled = rangeOff;
   }
   byId('tierSection').hidden = !tiersOn;
+  // The registration form's questions go with a ticket: a paid event's
+  // Questions tab, its tier pickers listing the tiers as they are now.
+  const questionsTab = byId('etab-questions');
+  if (questionsTab.hidden === paid) {
+    questionsTab.hidden = !paid;
+    if (editorTabs) {
+      editorTabs.refresh();
+    }
+  }
+  syncRegistration();
   byId('f-onlineUrl').disabled = !byId('f-isOnline').checked;
   // The editor's own words for the link button, only for "My own words".
   byId('externalUrlCustomField').hidden = byId('f-externalUrlLabel').value !== 'custom';
@@ -850,7 +860,7 @@ const FIELD_TABS = {
   ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price', tierMaxPerPerson: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
   contactFields: 'price', contactLabel: 'price',
-  registrationFields: 'price', registrationLabel: 'price', registrationHint: 'price', registrationOptions: 'price', registrationLink: 'price',
+  registrationFields: 'questions', registrationLabel: 'questions', registrationHint: 'questions', registrationOptions: 'questions', registrationLink: 'questions', registrationTiers: 'questions',
   tierClosesLocal: 'price',
   timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
   timetableItems: 'timetable', itemTitle: 'timetable', itemDate: 'timetable', itemStart: 'timetable', itemEnd: 'timetable', itemNote: 'timetable',
@@ -1598,7 +1608,18 @@ startOrganiser();
 startTimetable();
 startPayment({ getEvent: () => editing });
 startContact();
-startRegistration();
+// The tiers the registration questions can be for: those in the Price and
+// RSVP tab now, while the event is paid and sells tiers.
+startRegistration({
+  getTiers() {
+    let on = false;
+    if (byId('f-priceType').value === 'paid' && byId('f-tiersEnabled').checked) {
+      on = true;
+    }
+    const tiers = readTiers().map((tier) => ({ id: tier.id, name: tier.name.trim() }));
+    return { on, tiers };
+  },
+});
 startEditors({ getEvent: () => editing });
 
 // The edit form's section tabs, kept out of the address (it already says
@@ -1607,6 +1628,10 @@ startEditors({ getEvent: () => editing });
 editorTabs = startTabs(byId('editorTabs'), {
   useHash: false,
   onSelect(name) {
+    // The tiers' names may have changed under Price and RSVP.
+    if (name === 'questions') {
+      syncRegistration();
+    }
     const bar = byId('editorTabs');
     if (form.hidden) {
       return;

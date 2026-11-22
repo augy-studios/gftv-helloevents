@@ -176,7 +176,7 @@ const DETAIL = [
   ...nest('viewer', [
     'signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry',
     ...nest('payment', ['method', 'status']), 'contact', 'contactMissing',
-    ...nest('registration', ['answers', 'photos', 'missing', 'accountMissing', 'personal', 'tier', 'open']), 'canUpgrade',
+    ...nest('registration', ['answers', 'photos', 'missing', 'accountMissing', 'personal', 'tier', 'asked', 'open']), 'canUpgrade',
   ]),
 ];
 // The event page of a convention whose volunteer benefit is in effect.
@@ -199,7 +199,7 @@ const EDITOR = [
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
   'lepakEnabled', 'lepakLimit', 'lepakLabel',
   ...listOf('contactFields', ['id', 'type', 'label']), 'contactRule',
-  'registrationEnabled', ...listOf('registrationFields', ['id', 'type', 'label', 'hint', 'required', 'options', 'link', 'fullDate']),
+  'registrationEnabled', ...listOf('registrationFields', ['id', 'type', 'label', 'hint', 'required', 'options', 'link', 'fullDate', 'tiers']),
 ];
 const COVER = ['coverImageUrl', 'hasCover', 'coverSourceId', 'coverCrop'];
 // The gallery (migrations/019): in the edit form, and on the event page.

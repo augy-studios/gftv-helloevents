@@ -33,8 +33,8 @@ test('a cross-border event asks for a country of origin before the link or an RS
   await expect(page.locator('#f-crossBorder')).toBeChecked();
   // A convention switches the registration form on too (migrations/024);
   // this test is about the country, so it goes off again.
+  await openSection(page, 'Questions');
   await expect(page.locator('#f-registrationEnabled')).toBeChecked();
-  await openSection(page, 'Price and RSVP');
   await page.locator('#f-registrationEnabled').uncheck();
   await expect(status(page)).toHaveText(SAVED);
 

@@ -13,6 +13,10 @@
 //     says whether the event needs them, and editors then see them;
 //   - up to MAX_CUSTOM_QUESTIONS of their own, each with a label, a hint,
 //     a type (CUSTOM_TYPES), and for a choice its options.
+// Any question can be asked of every ticket (tiers null) or only of the
+// people holding some of the event's tiers (tiers: their ids), such as a
+// T-shirt size for the tiers that come with a shirt. Only a paid event asks
+// a form at all.
 // A list never set up (registration_fields null) is the ready-made defaults.
 // What each person answered is stored on their RSVP as registration
 // ({ question id: answer }), seen only by them and the event's editors.
@@ -46,6 +50,10 @@ export const DEFAULT_TSHIRT_SIZES = Object.freeze(['XS', 'S', 'M', 'L', 'XL', '2
 
 export const CUSTOM_TYPES = ['text', 'paragraph', 'url', 'yesno', 'choice', 'checkbox', 'photo'];
 export const MAX_CUSTOM_QUESTIONS = 10;
+// The most tiers one question can name (an event has at most 10).
+export const MAX_QUESTION_TIERS = 10;
+// A tier's id, as api/_lib/event-rules.js keeps it.
+const TIER_ID = /^t-[a-z0-9]{4,16}$/;
 export const MAX_OPTIONS = 20;
 export const LIMITS = Object.freeze({ label: 80, hint: 200, option: 40, link: 500 });
 const VALUE_MAX = { text: 200, paragraph: 1000, url: 300, badgeName: 40, handlers: 100 };
@@ -142,6 +150,30 @@ function readOptions(input) {
   return options;
 }
 
+// The tiers a question is asked of, as sent: { ok: true, tiers } (null for
+// every ticket, as for none ticked) or { ok: false }.
+function readQuestionTiers(input) {
+  if (input === undefined || input === null) {
+    return { ok: true, tiers: null };
+  }
+  if (!Array.isArray(input) || input.length > MAX_QUESTION_TIERS) {
+    return { ok: false };
+  }
+  const tiers = [];
+  for (const id of input) {
+    if (typeof id !== 'string' || !TIER_ID.test(id)) {
+      return { ok: false };
+    }
+    if (!tiers.includes(id)) {
+      tiers.push(id);
+    }
+  }
+  if (tiers.length === 0) {
+    return { ok: true, tiers: null };
+  }
+  return { ok: true, tiers };
+}
+
 // One ready-made question in the stored shape.
 function presetEntry(preset, each = {}) {
   let required = preset.required;
@@ -151,7 +183,7 @@ function presetEntry(preset, each = {}) {
   if (FIXED_REQUIRED[preset.id] !== undefined) {
     required = FIXED_REQUIRED[preset.id];
   }
-  const entry = { id: preset.id, type: preset.type, label: null, hint: '', required, options: [], link: null, fullDate: false };
+  const entry = { id: preset.id, type: preset.type, label: null, hint: '', required, options: [], link: null, fullDate: false, tiers: null };
   if (preset.id === 'tshirt') {
     entry.options = [...DEFAULT_TSHIRT_SIZES];
   }
@@ -166,8 +198,9 @@ function presetEntry(preset, each = {}) {
 // wrong: 'registrationFields' (not a list, a question twice, too many),
 // 'registrationLabel' (one of the editor's own without a label, or too
 // long), 'registrationHint', 'registrationOptions' (a choice with fewer than
-// two options, or too many) or 'registrationLink' (a link that is not
-// https://). index is the question's place in the list sent, from 0.
+// two options, or too many), 'registrationLink' (a link that is not
+// https://) or 'registrationTiers' (tiers that are not a list of tier ids).
+// index is the question's place in the list sent, from 0.
 export function readRegistrationFields(input) {
   if (input === undefined || input === null) {
     return { ok: true, fields: [] };
@@ -191,9 +224,14 @@ export function readRegistrationFields(input) {
       return { ok: false, field: 'registrationFields' };
     }
     seen.add(id);
+    const tiers = readQuestionTiers(each.tiers);
+    if (!tiers.ok) {
+      return { ok: false, field: 'registrationTiers', index };
+    }
     const preset = presetOf(id);
     if (preset) {
       const entry = presetEntry(preset, each);
+      entry.tiers = tiers.tiers;
       if (id === 'tshirt' && each.options !== undefined) {
         const options = readOptions(each.options);
         if (options === null || options.length < 2) {
@@ -225,7 +263,7 @@ export function readRegistrationFields(input) {
     if (hint.length > LIMITS.hint) {
       return { ok: false, field: 'registrationHint', index };
     }
-    const entry = { id, type: each.type, label, hint, required: each.required === true, options: [], link: null, fullDate: false };
+    const entry = { id, type: each.type, label, hint, required: each.required === true, options: [], link: null, fullDate: false, tiers: tiers.tiers };
     if (each.type === 'choice') {
       const options = readOptions(each.options);
       if (options === null || options.length < 2) {
@@ -289,19 +327,16 @@ export function configuredRegistrationFields(row) {
   return read.fields;
 }
 
-// The questions an event asks the people going: none while its form is off.
-// A donation is asked only at a paid event (it is added to the ticket's
-// total, in the event's currency).
+// The questions an event asks the people going: none while its form is off,
+// and none at an event that is not paid (the form goes with a ticket; a
+// donation is added to its total, in the event's currency). Each still
+// names the tiers it is for: api/_lib/event-rules.js registrationFieldsFor
+// says which of them someone is asked.
 export function storedRegistrationFields(row) {
-  if (!row || row.registration_enabled !== true) {
+  if (!row || row.registration_enabled !== true || row.price_type !== 'paid') {
     return [];
   }
-  return configuredRegistrationFields(row).filter((field) => {
-    if (field.id === 'donation') {
-      return row.price_type === 'paid';
-    }
-    return true;
-  });
+  return configuredRegistrationFields(row);
 }
 
 export function asksRegistration(row) {
@@ -312,6 +347,33 @@ export function asksRegistration(row) {
 // the fursuiter flag too, migrations/023).
 export function registrationAsksFursuiting(row) {
   return storedRegistrationFields(row).some((field) => field.id === 'fursuiting');
+}
+
+// The questions asked of someone holding these tiers, or about to: held
+// lists the tiers (as the questions' tiers name them, each tier with the
+// ones it includes). A question for some tiers only is asked of someone
+// holding one of them (none at all: of no one); one for every ticket (tiers
+// null) of everyone.
+export function questionsAskedOf(fields, held) {
+  return fields.filter((field) => {
+    if (!Array.isArray(field.tiers)) {
+      return true;
+    }
+    return field.tiers.some((tier) => held.includes(tier));
+  });
+}
+
+// What a page asks someone about to get a ticket for these tiers (places:
+// their places in the tier list, as the event page and checkout have the
+// questions' tiers; none for an RSVP with no tier): the questions, and of
+// the account details their account lacks (accountMissing), those the
+// questions need.
+export function askedForPicks(fields, accountMissing, places) {
+  const asked = questionsAskedOf(fields, places);
+  return {
+    fields: asked,
+    accountMissing: accountMissing.filter((id) => asked.some((field) => field.id === id)),
+  };
 }
 
 // The questions answered on the form itself (not the account ones).

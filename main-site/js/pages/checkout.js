@@ -24,7 +24,7 @@ import { proofPicture } from '../picture-file.js';
 import { startTours, checkTours } from '../tour.js';
 import { drawContactForm } from '../contact-form.js';
 import { drawRegistrationForm, registrationErrorText } from '../registration-form.js';
-import { answerValue } from '../registration-fields.js';
+import { answerValue, askedForPicks } from '../registration-fields.js';
 
 const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -42,9 +42,12 @@ let pickedMethod = null;
 // a re-render keeps what is being typed.
 let contactForm = null;
 let contactDrawn = '';
-// The registration form (migrations/024), and what it was drawn for.
+// The registration form (migrations/024), what it was drawn for, and every
+// answer typed so far: a question for some tiers only goes when they are
+// unticked, and comes back with its answer when they are ticked again.
 let registrationForm = null;
 let registrationDrawn = '';
+let registrationTyped = null;
 // The tier picked to upgrade to (its index), and how to pay the difference.
 let upgradePick = null;
 let upgradeMethod = null;
@@ -360,30 +363,44 @@ function renderOrder() {
   button.disabled = needsCountry;
 }
 
+// The registration questions asked of the tickets picked: those for every
+// ticket, and those for the tiers ticked.
+function askedQuestions() {
+  let places = [];
+  if (sellsTiers()) {
+    places = [...picked.keys()];
+  }
+  return askedForPicks(checkout.registration.fields, checkout.viewer.registration.accountMissing, places);
+}
+
 // The registration form the event asks, sent with the ticket.
 function renderRegistration() {
-  const fields = checkout.registration.fields;
+  const asked = askedQuestions();
+  const fields = asked.fields;
+  const mine = checkout.viewer.registration;
+  if (registrationTyped === null) {
+    registrationTyped = { ...mine.answers };
+  }
+  if (registrationForm) {
+    Object.assign(registrationTyped, registrationForm.read());
+  }
   byId('registrationStep').hidden = fields.length === 0;
   if (fields.length === 0) {
     registrationForm = null;
+    registrationDrawn = '';
     return;
   }
-  const mine = checkout.viewer.registration;
-  const drawFor = JSON.stringify([checkout.registration, mine.accountMissing, mine.personal, getLocale()]);
+  const drawFor = JSON.stringify([fields, checkout.registration.currency, asked.accountMissing, mine.personal, getLocale()]);
   if (drawFor === registrationDrawn && registrationForm) {
     return;
-  }
-  let typed = mine.answers;
-  if (registrationForm) {
-    typed = registrationForm.read();
   }
   registrationDrawn = drawFor;
   registrationForm = drawRegistrationForm(byId('registrationFields'), {
     fields,
-    values: typed,
+    values: registrationTyped,
     photos: mine.photos,
     personal: mine.personal,
-    accountMissing: mine.accountMissing,
+    accountMissing: asked.accountMissing,
     currency: checkout.registration.currency,
     idPrefix: 'checkoutReg',
     slug,
@@ -686,6 +703,8 @@ byId('ticketList').addEventListener('change', (changed) => {
       again.focus();
     }
   }
+  // The questions follow the tiers picked.
+  renderRegistration();
   renderMethods();
   renderOrder();
 });

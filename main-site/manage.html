@@ -116,6 +116,8 @@
                     <button class="tab" type="button" role="tab" id="etab-basics" data-tab="basics" aria-controls="epanel-basics" aria-selected="true"><span data-icon="edit"></span><span data-i18n="manage.etab.basics">Basics</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-when" data-tab="when" aria-controls="epanel-when" aria-selected="false" tabindex="-1"><span data-icon="calendar"></span><span data-i18n="manage.etab.when">When and where</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-price" data-tab="price" aria-controls="epanel-price" aria-selected="false" tabindex="-1"><span data-icon="ticket"></span><span data-i18n="manage.etab.price">Price and RSVP</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <!-- The registration form's questions: for a paid event only. -->
+                    <button class="tab" type="button" role="tab" id="etab-questions" data-tab="questions" aria-controls="epanel-questions" aria-selected="false" tabindex="-1" hidden><span data-icon="help"></span><span data-i18n="manage.etab.questions">Questions</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-timetable" data-tab="timetable" aria-controls="epanel-timetable" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="manage.etab.timetable">Timetable</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
@@ -543,26 +545,6 @@
                         </label>
                     </fieldset>
 
-                    <!-- The registration form asked of the people going
-                         (migrations/024, js/manage-registration.js). -->
-                    <fieldset id="registrationSection">
-                        <legend data-i18n="manage.section.registration">Registration form</legend>
-                        <p class="muted small" data-i18n="manage.registration-lede">Questions people answer when they RSVP or get a ticket, such as a badge name and T-shirt size. They can change their answers until RSVPs close or their tier closes. Only this event's editors see them, on the attendee list.</p>
-                        <label class="check">
-                            <input type="checkbox" id="f-registrationEnabled" name="registrationEnabled">
-                            <span data-i18n="manage.field.registrationEnabled">Ask a registration form</span>
-                        </label>
-                        <div id="registrationFieldsBox">
-                            <h3 class="section-label" data-i18n="manage.registration-presets">Ready-made questions</h3>
-                            <div class="reg-presets" id="registrationPresets"></div>
-                            <h3 class="section-label" data-i18n="manage.registration-own">Your own questions</h3>
-                            <div class="location-list" id="registrationCustomList"></div>
-                            <div class="actions inline">
-                                <button class="btn" type="button" id="registrationAdd"><span data-icon="plus"></span><span data-i18n="manage.registration-add">Add a question</span></button>
-                            </div>
-                        </div>
-                    </fieldset>
-
                     <fieldset id="volunteerSection">
                         <legend data-i18n="manage.section.volunteers">Volunteers</legend>
                         <p class="muted small" id="volunteersConventionOnly" data-i18n="manage.volunteers-convention-only">Only conventions take volunteers. Set Kind to Convention under Basics to use this.</p>
@@ -592,6 +574,28 @@
                             </label>
                             <p class="field-hint span-2" id="volunteerDiscountHint" data-i18n="manage.hint.volunteerDiscount">Only the people an editor ticked as "Volunteered" in that convention's attendee list get it. A percentage is up to 100; an amount is in this event's currency. Applying it at checkout comes later: for now the event page tells them they have it.</p>
                             <p class="field-hint span-2" id="volunteerSourcesNone" hidden data-i18n="manage.volunteer-sources-none">There are no other conventions yet. Once there is one, it can be picked here.</p>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-questions" aria-labelledby="etab-questions" hidden>
+                    <!-- The registration form asked of the people going
+                         (migrations/024, js/manage-registration.js). -->
+                    <fieldset id="registrationSection">
+                        <legend data-i18n="manage.section.registration">Registration form</legend>
+                        <p class="muted small" data-i18n="manage.registration-lede">Questions people answer when they get a ticket, such as a badge name and T-shirt size. Each question can be asked of every tier, or only of some. People can change their answers until RSVPs close or their tier closes. Only this event's editors see them, on the attendee list.</p>
+                        <label class="check">
+                            <input type="checkbox" id="f-registrationEnabled" name="registrationEnabled">
+                            <span data-i18n="manage.field.registrationEnabled">Ask a registration form</span>
+                        </label>
+                        <div id="registrationFieldsBox">
+                            <h3 class="section-label" data-i18n="manage.registration-presets">Ready-made questions</h3>
+                            <div class="reg-presets" id="registrationPresets"></div>
+                            <h3 class="section-label" data-i18n="manage.registration-own">Your own questions</h3>
+                            <div class="location-list" id="registrationCustomList"></div>
+                            <div class="actions inline">
+                                <button class="btn" type="button" id="registrationAdd"><span data-icon="plus"></span><span data-i18n="manage.registration-add">Add a question</span></button>
+                            </div>
                         </div>
                     </fieldset>
                 </div>

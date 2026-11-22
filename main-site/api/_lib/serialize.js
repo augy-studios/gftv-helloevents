@@ -45,7 +45,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, fursuiterTickShown, tierClosed, registrationOpenFor, upgradeOptions, paidSoFar, donationOf, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, fursuiterTickShown, tierClosed, registrationOpenFor, upgradeOptions, paidSoFar, donationOf, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath, sellsTiers, tieredRegistrationFields, heldRegistrationFields, questionTierPlaces } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
@@ -53,7 +53,7 @@ import { galleryImageUrl } from './gallery.js';
 import { displayDescription } from './rich-text.js';
 import { storedContactFields, storedContactRule, storedContact, contactComplete } from '../../js/contact-fields.js';
 import { qrUrl } from './payments.js';
-import { storedRegistrationFields, configuredRegistrationFields, storedAnswers, answersComplete, missingAccountDetails, ageOn } from '../../js/registration-fields.js';
+import { configuredRegistrationFields, storedAnswers, answersComplete, missingAccountDetails, ageOn } from '../../js/registration-fields.js';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -211,16 +211,17 @@ export function attendeeView(row, event = {}, standing = {}) {
     payment: attendeePayment(row),
     contact: attendeeContact(event, row.contact),
     registration: attendeeRegistration(event, row, person, isStaff),
-    personal: attendeePersonal(event, account),
+    personal: attendeePersonal(event, row, account),
     rsvpAt: row.created_at,
   };
 }
 
 // The registration answers someone gave (migrations/024), for the event's
-// editors: one entry for each question of the form they answered, in its
-// order; a photo as the address editors open it at.
+// editors: one entry for each question of the form they answered that the
+// tiers they hold are asked, in its order; a photo as the address editors
+// open it at.
 function attendeeRegistration(event, row, person, isStaff) {
-  const fields = storedRegistrationFields(event).filter((field) => field.type !== 'account');
+  const fields = heldRegistrationFields(event, row).filter((field) => field.type !== 'account');
   const answers = storedAnswers(fields, row.registration);
   return fields
     .filter((field) => answers[field.id] !== undefined)
@@ -266,9 +267,10 @@ function eventDay(event) {
 // editors, and only those: the legal name, the emergency contact, and from
 // the date of birth the age on the day the event starts (and whether that
 // is under 18), with the date itself only when the form asks for it. null
-// for a detail asked but not given; the key is missing when not asked.
-function attendeePersonal(event, account) {
-  const fields = storedRegistrationFields(event).filter((field) => field.type === 'account');
+// for a detail asked but not given; the key is missing when not asked (of
+// the tiers they hold).
+function attendeePersonal(event, row, account) {
+  const fields = heldRegistrationFields(event, row).filter((field) => field.type === 'account');
   if (fields.length === 0) {
     return null;
   }
@@ -302,9 +304,11 @@ function attendeePersonal(event, account) {
 
 // The registration form (migrations/024), for the event page and checkout:
 // its questions (none while it is off), and the currency a donation is in.
+// tiers: the places in the tier list (as checkout picks them) of the tiers
+// whose holders a question is asked, or null for every ticket.
 function registrationView(row) {
   return {
-    fields: storedRegistrationFields(row).map((field) => ({
+    fields: tieredRegistrationFields(row).map((field) => ({
       id: field.id,
       type: field.type,
       label: field.label,
@@ -312,6 +316,7 @@ function registrationView(row) {
       required: field.required,
       options: field.options,
       link: field.link,
+      tiers: questionTierPlaces(row, field),
     })),
     currency: emptyToNull(row.currency),
   };
@@ -342,19 +347,27 @@ function askedPersonal(fields, personal) {
 // This person and the form (migrations/024): their answers (someone going),
 // their photos' addresses, whether answers the form needs are missing,
 // which account details it needs that their account lacks, the account
-// details it asks for, the tier they hold, and whether they can still
-// change their answers (registration open for them).
+// details it asks for, the tier they hold, which questions they are asked
+// (asked: ids, by the tiers they hold; null for someone not going, whose
+// questions follow the tiers they pick), and whether they can still change
+// their answers (registration open for them). Not going, the account
+// details are those any ticket's questions need: the page keeps those of
+// the tiers picked.
 function viewerRegistration(row, viewer, now) {
-  const fields = storedRegistrationFields(row);
+  let fields = tieredRegistrationFields(row);
   const answers = {};
   const photos = {};
   let missing = false;
   let tier = null;
   let stored = null;
+  let asked = null;
+  const asksForm = fields.length > 0;
   if (viewer.going === true) {
     if (viewer.payment) {
       stored = viewer.payment;
     }
+    fields = heldRegistrationFields(row, stored);
+    asked = fields.map((field) => field.id);
     Object.assign(answers, storedAnswers(fields, viewer.registration));
     if (fields.length > 0 && !answersComplete(fields, answers)) {
       missing = true;
@@ -369,7 +382,7 @@ function viewerRegistration(row, viewer, now) {
     }
   }
   let open = false;
-  if (fields.length > 0 && registrationOpenFor(row, stored, now)) {
+  if (asksForm && registrationOpenFor(row, stored, now)) {
     open = true;
   }
   return {
@@ -379,6 +392,7 @@ function viewerRegistration(row, viewer, now) {
     accountMissing: missingAccountDetails(fields, viewer.personal),
     personal: askedPersonal(fields, viewer.personal),
     tier,
+    asked,
     open,
   };
 }
@@ -1269,7 +1283,7 @@ export function managedTierQr(row) {
 // place is reserved.
 function checkoutTickets(row, volunteerDiscount) {
   const tiers = storedTiers(row);
-  if (row.tiers_enabled === true && tiers.length > 0) {
+  if (sellsTiers(row)) {
     return tiers.map((tier, index) => {
       const priced = ticketPrice(row, { tierIndex: index, tierName: tier.name, volunteerDiscount, ignoreClosed: true });
       let linkTo = 'event';

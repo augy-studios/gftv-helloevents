@@ -2,7 +2,8 @@
 // picks its questions, a member fills in their account details once,
 // registers with the form (photo and all), sees their "Registration
 // details" card and changes an answer with its pencil, and the editor sees
-// the answers on the attendee list.
+// the answers on the attendee list. A question can be for some tiers only:
+// checkout asks it once one of them is picked.
 
 import sharp from 'sharp';
 import { test, expect, serverOrigin, signInAsStaff, enterPassword, openSection } from './fixtures.js';
@@ -22,7 +23,9 @@ async function openEditor(page) {
 
 test('an editor sets up a registration form; a member registers, then changes an answer from the card', async ({ page, context }) => {
   await openEditor(page);
-  await openSection(page, 'Price and RSVP');
+  // The form is a paid event's own tab, next to Price and RSVP.
+  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Questions', 'Meals', 'Timetable', 'Attendees and notes'], { useInnerText: true });
+  await openSection(page, 'Questions');
   await expect(page.locator('#registrationFieldsBox')).toBeHidden();
   await page.locator('#f-registrationEnabled').check();
   await expect(status(page)).toHaveText(SAVED);
@@ -125,19 +128,49 @@ test('a donation goes on top of the ticket, and an upgrade asks only the differe
   await page.locator('#f-paymentLink').fill('https://pay.example.com/lcf');
   await page.locator('#f-paymentLink').blur();
   await expect(status(page)).toHaveText(SAVED);
-  // A short form: the badge name, a donation and the Code of Conduct.
+  // A short form: the badge name, a donation and the Code of Conduct, and a
+  // T-shirt size for Sponsors only.
+  await openSection(page, 'Questions');
   await page.locator('#f-registrationEnabled').check();
-  for (const id of ['nfcUrl', 'fursuiting', 'handlers', 'badgePhoto', 'tshirt', 'guardian']) {
+  for (const id of ['nfcUrl', 'fursuiting', 'handlers', 'badgePhoto', 'guardian']) {
     await page.locator(`[data-reg-on="${id}"]`).uncheck();
   }
   await expect(status(page)).toHaveText(SAVED);
+  const shirtTiers = page.locator('[data-reg-preset="tshirt"] .reg-tiers');
+  await expect(shirtTiers).toContainText('Attendee');
+  await expect(page.locator('[data-reg-preset="badgeName"] .reg-tiers')).toBeVisible();
+  await shirtTiers.getByRole('checkbox', { name: 'Sponsor' }).check();
+  await expect(status(page)).toHaveText(SAVED);
+  await page.reload();
+  await openSection(page, 'Questions');
+  await expect(shirtTiers.getByRole('checkbox', { name: 'Sponsor' })).toBeChecked();
+  await expect(shirtTiers.getByRole('checkbox', { name: 'Attendee' })).not.toBeChecked();
+  // A free event has no Questions tab; set to Paid again, its tiers and
+  // questions are all back.
+  await openSection(page, 'Price and RSVP');
+  await page.locator('#f-priceType').selectOption('free');
+  await expect(page.getByRole('tab', { name: 'Questions' })).toBeHidden();
+  await expect(status(page)).toHaveText(SAVED);
+  await page.locator('#f-priceType').selectOption('paid');
+  await expect(status(page)).toHaveText(SAVED);
+  await expect(page.locator('#f-tiersEnabled')).toBeChecked();
+  await openSection(page, 'Questions');
+  await expect(shirtTiers.getByRole('checkbox', { name: 'Sponsor' })).toBeChecked();
 
   // A member gets the Attendee tier with a donation.
   await context.clearCookies();
   await page.goto(`/login?next=${encodeURIComponent(`/checkout?slug=${event.slug}`)}`);
   await enterPassword(page, MEMBER.username);
   await page.waitForURL(/\/checkout\?slug=/);
+  // The T-shirt size is asked only once Sponsor is picked.
+  await expect(page.locator('#checkoutReg-badgeName')).toBeVisible();
+  await expect(page.locator('#checkoutReg-tshirt')).toHaveCount(0);
   await page.locator('#checkoutReg-badgeName').fill('Otter');
+  await page.locator('#ticketList input[name="ticket"][value="1"]').check();
+  await expect(page.locator('#checkoutReg-tshirt')).toBeVisible();
+  await expect(page.locator('#checkoutReg-badgeName')).toHaveValue('Otter');
+  await page.locator('#ticketList input[name="ticket"][value="1"]').uncheck();
+  await expect(page.locator('#checkoutReg-tshirt')).toHaveCount(0);
   await page.locator('#checkoutReg-donation').fill('25');
   await expect(page.locator('#orderLines')).toContainText('Donation');
   await expect(page.locator('#orderLines')).toContainText('85.00');
@@ -173,4 +206,39 @@ test('a donation goes on top of the ticket, and an upgrade asks only the differe
   await expect(page.locator('#payLines')).toContainText('115.00');
   await expect(page.locator('#upgradeBox')).toBeHidden();
   await page.locator('#payBox').screenshot({ path: 'tests/e2e/output/registration-upgraded.png' });
+});
+
+test('a question whose tiers are all removed is asked of no one, and says so', async ({ page }) => {
+  await openEditor(page);
+  await openSection(page, 'Price and RSVP');
+  await page.locator('#f-tiersEnabled').check();
+  const cards = page.locator('#tierList .tier-edit-card');
+  await cards.nth(0).locator('[data-key="name"]').fill('Attendee');
+  await cards.nth(0).locator('[data-key="price"]').fill('60');
+  await page.locator('#tierAdd').click();
+  await cards.nth(1).locator('[data-key="name"]').fill('Sponsor');
+  await cards.nth(1).locator('[data-key="price"]').fill('175');
+  await page.locator('#f-priceNote').click();
+  await expect(status(page)).toHaveText(SAVED);
+  await openSection(page, 'Questions');
+  await page.locator('#f-registrationEnabled').check();
+  const shirtTiers = page.locator('[data-reg-preset="tshirt"] .reg-tiers');
+  await shirtTiers.getByRole('checkbox', { name: 'Sponsor' }).check();
+  await expect(status(page)).toHaveText(SAVED);
+  await expect(shirtTiers.locator('.reg-tiers-gone')).toBeHidden();
+
+  // The Sponsor tier goes: the T-shirt size is asked of no one, and says so,
+  // saved and all.
+  await openSection(page, 'Price and RSVP');
+  await cards.nth(1).locator('.tier-remove').click();
+  await expect(status(page)).toHaveText(SAVED);
+  await openSection(page, 'Questions');
+  await expect(shirtTiers.locator('.reg-tiers-gone')).toBeVisible();
+  await page.reload();
+  await openSection(page, 'Questions');
+  await expect(shirtTiers.locator('.reg-tiers-gone')).toBeVisible();
+  // Ticking another tier asks it again.
+  await shirtTiers.getByRole('checkbox', { name: 'Attendee' }).check();
+  await expect(shirtTiers.locator('.reg-tiers-gone')).toBeHidden();
+  await expect(status(page)).toHaveText(SAVED);
 });

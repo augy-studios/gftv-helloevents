@@ -15,7 +15,7 @@ import { anyEventBySlug, attendance } from '../_lib/events.js';
 import { qrVersion, readPaymentFile } from '../_lib/payments.js';
 import { storedTiers, heldTiers, tierQrPath } from '../_lib/event-rules.js';
 
-const COLUMNS = 'id, slug, payment_qr_path, tiers_enabled, ticket_tiers';
+const COLUMNS = 'id, slug, price_type, payment_qr_path, tiers_enabled, ticket_tiers';
 
 function notFound(response) {
   response.setHeader('Cache-Control', 'no-store');

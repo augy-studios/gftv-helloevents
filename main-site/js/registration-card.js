@@ -112,15 +112,19 @@ function questionRow(event, field, redraw, onEvent, errorBox) {
 // Draws the card into box, or hides it (nobody going, or no form).
 // onEvent(event): the event as the server answered after a change.
 export function renderRegistrationCard(box, event, onEvent) {
-  const fields = event.registration.fields;
   const viewer = event.viewer;
-  if (!viewer.going || fields.length === 0) {
+  if (!viewer.going || event.registration.fields.length === 0) {
     box.hidden = true;
     editing = null;
     return;
   }
   box.hidden = false;
   const mine = viewer.registration;
+  // Only the questions the tiers they hold are asked.
+  let fields = event.registration.fields;
+  if (Array.isArray(mine.asked)) {
+    fields = fields.filter((field) => mine.asked.includes(field.id));
+  }
   const errorBox = createElement('div', { class: 'callout danger', role: 'alert' });
   const redraw = () => renderRegistrationCard(box, event, onEvent);
 

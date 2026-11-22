@@ -68,12 +68,12 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, withMealCounts, withVolunteerSource, attendance, volunteerStanding } from '../_lib/events.js';
-import { chooseMeals, takesVolunteers, asksFursuiters, needsCheckout, paymentOptions, sellsTiers, basketPrice, basketOptions, ticketPrice, lepakOffered, registrationOpenFor, donationOf, ONLINE_METHODS } from '../_lib/event-rules.js';
+import { chooseMeals, takesVolunteers, asksFursuiters, needsCheckout, paymentOptions, sellsTiers, basketPrice, basketOptions, ticketPrice, lepakOffered, registrationOpenFor, donationOf, heldTiers, registrationFieldsFor, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, registrationPhotoExists, registrationPhotoPath } from '../_lib/payments.js';
-import { storedRegistrationFields, readRegistrationAnswers, missingAccountDetails, registrationAsksFursuiting, photoNames } from '../../js/registration-fields.js';
+import { readRegistrationAnswers, missingAccountDetails, registrationAsksFursuiting, photoNames } from '../../js/registration-fields.js';
 import { storedContactFields, storedContactRule, readContactAnswers } from '../../js/contact-fields.js';
 
 // What the gftvevents_rsvp database function can answer: null for a place
@@ -127,6 +127,29 @@ const NO_PAYMENT = {
   paid_by: null,
 };
 
+// The tiers a checkout asks for, as sent: a basket (items), or the one tier
+// a page from before baskets sends.
+function wantedItems(payment) {
+  if (payment.items === undefined && Number.isInteger(payment.tier)) {
+    return [{ tier: payment.tier, tierName: payment.tierName, quantity: 1 }];
+  }
+  return payment.items;
+}
+
+// The tiers a ticket about to be bought is for (storedTiers entries), for
+// the registration questions their holders are asked; none when the basket
+// is not one that can be bought (checkoutTicket then says why).
+function buyingTiers(event, payment) {
+  if (!sellsTiers(event) || !payment || typeof payment !== 'object') {
+    return [];
+  }
+  const priced = basketPrice(event, wantedItems(payment));
+  if (!priced.ok) {
+    return [];
+  }
+  return priced.tiers;
+}
+
 // The ticket a checkout asks for: { ok: true, columns } with the attendee
 // payment columns to write, or { ok: false, error }. event: after
 // withVolunteerSource, for the benefit.
@@ -140,11 +163,7 @@ async function checkoutTicket(event, userId, payment, donation = 0) {
   let tierText = null;
   let items = null;
   if (sellsTiers(event)) {
-    let wanted = payment.items;
-    if (wanted === undefined && Number.isInteger(payment.tier)) {
-      wanted = [{ tier: payment.tier, tierName: payment.tierName, quantity: 1 }];
-    }
-    priced = basketPrice(event, wanted, { volunteerDiscount: standing.discount });
+    priced = basketPrice(event, wantedItems(payment), { volunteerDiscount: standing.discount });
     if (!priced.ok) {
       return priced;
     }
@@ -209,13 +228,13 @@ async function writeContact(eventId, userId, contact) {
   }
 }
 
-// The registration answers sent, checked against the event's form and
-// merged over the ones given before (previous): { ok: true, answers } (null
-// when the event has no form) or { ok: false, error, field }. stored: the
-// person's attendee row while going; once it holds an order, its donation
-// stays as it is.
-async function checkRegistration(event, userId, given, previous, stored) {
-  const fields = storedRegistrationFields(event);
+// The registration answers sent, checked against the questions this person
+// is asked (fields: event-rules.js registrationFieldsFor, by the tiers
+// their ticket is for) and merged over the ones given before (previous):
+// { ok: true, answers } (null when they are asked none) or { ok: false,
+// error, field }. stored: the person's attendee row while going; once it
+// holds an order, its donation stays as it is.
+async function checkRegistration(event, userId, fields, given, previous, stored) {
   if (fields.length === 0) {
     return { ok: true, answers: null };
   }
@@ -355,6 +374,23 @@ export default route('events/rsvp', async (request, response) => {
     // A ticket for the whole event, at an event taking payment online, by
     // someone not already holding one: it needs a method and a tier.
     const before = await attendance(event.id, session.user.id);
+    let heldWholeEvent = false;
+    if (before.going && before.meals.length === 0 && !before.lepak) {
+      heldWholeEvent = true;
+    }
+    let buying = false;
+    if (meals.length === 0 && !lepak && !heldWholeEvent && needsCheckout(event)) {
+      buying = true;
+    }
+    // The registration questions this person is asked: those for the tiers
+    // they are buying now, or hold.
+    let tiers = [];
+    if (buying) {
+      tiers = buyingTiers(event, body.payment);
+    } else if (before.going) {
+      tiers = heldTiers(event, before.payment);
+    }
+    const asked = registrationFieldsFor(event, tiers);
     // Contact details: needed to join; sent with a change, checked too.
     if (!before.going || body.contact !== undefined) {
       const check = checkContact(event, body.contact);
@@ -366,7 +402,7 @@ export default route('events/rsvp', async (request, response) => {
     // The registration form (migrations/024): needed to join, with the
     // account details it requires; a change only while it is open.
     if (!before.going) {
-      const missing = missingAccountDetails(storedRegistrationFields(event), session.user.personal);
+      const missing = missingAccountDetails(asked, session.user.personal);
       if (missing.length > 0) {
         return fail(response, 400, 'account_details_required', { fields: missing });
       }
@@ -379,18 +415,14 @@ export default route('events/rsvp', async (request, response) => {
       if (before.going) {
         previous = before.registration;
       }
-      const check = await checkRegistration(event, session.user.id, body.registration, previous, before.payment);
+      const check = await checkRegistration(event, session.user.id, asked, body.registration, previous, before.payment);
       if (!check.ok) {
         return registrationRefusal(response, check);
       }
       registrationSent = check.answers;
     }
     let ticket = null;
-    let heldWholeEvent = false;
-    if (before.going && before.meals.length === 0 && !before.lepak) {
-      heldWholeEvent = true;
-    }
-    if (meals.length === 0 && !lepak && !heldWholeEvent && needsCheckout(event)) {
+    if (buying) {
       await withVolunteerSource(event);
       let answers = before.registration;
       if (registrationSent !== null) {
@@ -493,7 +525,8 @@ export default route('events/rsvp', async (request, response) => {
       if (!registrationOpenFor(event, before.payment)) {
         return fail(response, 409, 'registration_closed');
       }
-      const check = await checkRegistration(event, session.user.id, body.registration, before.registration, before.payment);
+      const asked = registrationFieldsFor(event, heldTiers(event, before.payment));
+      const check = await checkRegistration(event, session.user.id, asked, body.registration, before.registration, before.payment);
       if (!check.ok) {
         return registrationRefusal(response, check);
       }

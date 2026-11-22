@@ -265,18 +265,20 @@ export const TOURS = [
       { el: '.field:has(#f-capacity)', i18n: 'tour.editor.price-capacity' },
       { el: '#contactSection', i18n: 'tour.editor.price-contact' },
       { el: '#volunteerSection', i18n: 'tour.editor.price-volunteers' },
+      { el: '.field:has(> [data-key="closesLocal"])', i18n: 'tour.editor.registration-tier-closes' },
     ],
   },
-  // The registration form and tier closing times (migrations/024).
+  // The registration form (migrations/024), in a paid event's Questions tab,
+  // each question for every tier or only some.
   {
-    id: 'editor.registration',
+    id: 'editor.questions',
     page: 'manage',
-    needs: '#registrationSection',
+    needs: '#epanel-questions',
     steps: [
       { el: 'label:has(> #f-registrationEnabled)', i18n: 'tour.editor.registration-on' },
       { el: '#registrationPresets', i18n: 'tour.editor.registration-presets' },
+      { el: '.reg-tiers', i18n: 'tour.editor.registration-tiers' },
       { el: '#registrationAdd', i18n: 'tour.editor.registration-own' },
-      { el: '.field:has(> [data-key="closesLocal"])', i18n: 'tour.editor.registration-tier-closes' },
     ],
   },
   {

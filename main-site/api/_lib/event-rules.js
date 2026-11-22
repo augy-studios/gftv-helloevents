@@ -5,7 +5,7 @@
 
 import { cleanDescription } from './rich-text.js';
 import { readContactFields, readContactRule } from '../../js/contact-fields.js';
-import { readRegistrationFields, registrationAsksFursuiting } from '../../js/registration-fields.js';
+import { readRegistrationFields, registrationAsksFursuiting, storedRegistrationFields, questionsAskedOf } from '../../js/registration-fields.js';
 
 export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
@@ -1221,9 +1221,10 @@ function newTierId() {
 }
 
 // Ticket tiers (migrations/008): the list, each checked, and whether they are
-// on. They are on only for a paid event, and then there must be at least
-// and the cheapest and dearest prices become the price range the feed cards
-// show. A tier includes another one in the list or none (settleIncludes).
+// on, as the editor ticked it. They are sold only at a paid event
+// (sellsTiers), and then the cheapest and dearest prices become the price
+// range the feed cards show. The tick is kept while the event is free, so
+// setting it to Paid again brings its tiers straight back. A tier includes another one in the list or none (settleIncludes).
 // With no
 // ticketTiers field at all the stored tiers are kept, so a page from before
 // tiers cannot wipe them.
@@ -1261,13 +1262,10 @@ function readTiers(body, fields) {
     ids.add(tier.id);
   }
   fields.ticket_tiers = settleIncludes(tiers);
-  fields.tiers_enabled = false;
-  if (body.tiersEnabled === true && fields.price_type === 'paid') {
-    fields.tiers_enabled = true;
-  }
+  fields.tiers_enabled = body.tiersEnabled === true;
   // On with no tiers yet (just switched on, nothing typed): no range, so
   // the price reads "to be announced" until the first tier is filled in.
-  if (!fields.tiers_enabled || tiers.length === 0) {
+  if (fields.price_type !== 'paid' || !fields.tiers_enabled || tiers.length === 0) {
     return null;
   }
   const prices = tiers.map((tier) => tier.price);
@@ -1497,7 +1495,7 @@ function storedMethods(row) {
 // Whether a paid event has one amount to pay: a ticket tier picked at
 // checkout, or a single price with no Up to. A range without tiers has none.
 function hasSingleAmount(row) {
-  if (row.tiers_enabled === true && storedTiers(row).length > 0) {
+  if (sellsTiers(row)) {
     return true;
   }
   if (row.price_min === null || row.price_min === undefined) {
@@ -1509,9 +1507,10 @@ function hasSingleAmount(row) {
   return false;
 }
 
-// Whether an event sells its tickets in tiers (with at least one tier).
+// Whether an event sells its tickets in tiers: a paid event with them
+// switched on and at least one tier (a free one keeps its tiers for later).
 export function sellsTiers(row) {
-  if (row.tiers_enabled !== true) {
+  if (row.tiers_enabled !== true || row.price_type !== 'paid') {
     return false;
   }
   return storedTiers(row).length > 0;
@@ -1699,6 +1698,72 @@ function isObject(value) {
   return typeof value === 'object';
 }
 
+// The registration questions (js/registration-fields.js), each naming the
+// tiers it is for as this event has them: only tiers still in its list. One
+// whose tiers have all been removed is asked of no one (tiers []) until its
+// editor ticks another. At an event not selling tiers, every question is
+// for every ticket (tiers null).
+export function tieredRegistrationFields(row) {
+  const fields = storedRegistrationFields(row);
+  if (!sellsTiers(row)) {
+    return fields.map((field) => ({ ...field, tiers: null }));
+  }
+  const ids = storedTiers(row).map((tier) => tier.id);
+  return fields.map((field) => {
+    if (!Array.isArray(field.tiers)) {
+      return field;
+    }
+    return { ...field, tiers: field.tiers.filter((id) => ids.includes(id)) };
+  });
+}
+
+// The ids of these tiers and of every tier they include: a question for a
+// tier is asked too of someone holding one that includes it (a Super
+// Sponsor including the Sponsor tier gets the Sponsor's T-shirt).
+function tiersWithIncluded(row, tiers) {
+  const all = storedTiers(row);
+  const ids = new Set();
+  for (const tier of tiers) {
+    ids.add(tier.id);
+    for (const included of includedTiers(all, tier)) {
+      ids.add(included.id);
+    }
+  }
+  return [...ids];
+}
+
+// The registration questions asked of someone whose ticket is for these
+// tiers (storedTiers entries; none for someone with no tier). At an event not
+// selling tiers, every question.
+export function registrationFieldsFor(row, tiers) {
+  const fields = tieredRegistrationFields(row);
+  if (!sellsTiers(row)) {
+    return fields;
+  }
+  return questionsAskedOf(fields, tiersWithIncluded(row, tiers));
+}
+
+// The registration questions asked of someone going, by the tiers their
+// ticket is for. stored: their attendee row (null: no ticket).
+export function heldRegistrationFields(row, stored) {
+  return registrationFieldsFor(row, heldTiers(row, stored));
+}
+
+// The tiers whose holders a question is asked of, by their places in the
+// event's list (as the checkout page picks them): null for every ticket.
+export function questionTierPlaces(row, field) {
+  if (!Array.isArray(field.tiers)) {
+    return null;
+  }
+  const places = [];
+  storedTiers(row).forEach((tier, index) => {
+    if (questionsAskedOf([field], tiersWithIncluded(row, [tier])).length > 0) {
+      places.push(index);
+    }
+  });
+  return places;
+}
+
 // The ways someone holding a ticket can pay for it: their tiers' (as one
 // basket), or the event's.
 export function ticketOptions(row, stored) {
@@ -1727,7 +1792,7 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
   let tier = null;
   let price;
   const tiers = storedTiers(row);
-  if (row.tiers_enabled === true && tiers.length > 0) {
+  if (sellsTiers(row)) {
     if (!Number.isInteger(tierIndex) || tierIndex < 0 || tierIndex >= tiers.length) {
       return { ok: false, error: 'tier_required' };
     }
@@ -1897,7 +1962,9 @@ function readContact(body, fields) {
 // The registration form (migrations/024, js/registration-fields.js):
 // switched on or not, and its questions, kept while it is off. With neither
 // field at all the stored ones are kept, so a page from before cannot wipe
-// them.
+// them. An event that is not paid asks no form, and its editor cannot see
+// the Questions tab to fix one: questions it cannot take are not refused
+// then, the stored ones are kept.
 function readRegistration(body, fields) {
   if (body.registrationEnabled !== undefined) {
     fields.registration_enabled = body.registrationEnabled === true;
@@ -1906,6 +1973,9 @@ function readRegistration(body, fields) {
     return null;
   }
   const read = readRegistrationFields(body.registrationFields);
+  if (!read.ok && fields.price_type !== 'paid') {
+    return null;
+  }
   if (!read.ok) {
     if (Number.isInteger(read.index)) {
       fields.badRegistration = read.index;

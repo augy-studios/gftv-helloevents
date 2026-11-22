@@ -21,7 +21,7 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, DETAIL_COLUMNS } from '../_lib/events.js';
-import { registrationOpenFor } from '../_lib/event-rules.js';
+import { registrationOpenFor, heldRegistrationFields } from '../_lib/event-rules.js';
 import { preparePicture, storeRegistrationPhoto, registrationPhotoPath, readPaymentFile, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
@@ -177,6 +177,11 @@ async function uploadPhoto(request, response, user) {
   if (mine.going && !registrationOpenFor(event, mine.payment)) {
     return fail(response, 409, 'registration_closed');
   }
+  // Someone going answers only the questions the tiers they hold are asked.
+  const fields = heldRegistrationFields(event, mine.payment);
+  if (mine.going && !fields.some((field) => field.id === question.id)) {
+    return fail(response, 400, 'bad_request');
+  }
   const prepared = await preparePicture(body.picture, 'photo');
   if (!prepared.ok) {
     return fail(response, 400, prepared.error);
@@ -189,7 +194,6 @@ async function uploadPhoto(request, response, user) {
   // Someone going: saved as their answer now (the rest of their answers as
   // they were; a form that has since asked more is not held against them
   // here, only the photo changes).
-  const fields = storedRegistrationFields(event);
   const read = readRegistrationAnswers(fields, { [question.id]: name }, mine.registration);
   let answers = { ...mine.registration, [question.id]: name };
   if (read.ok) {
