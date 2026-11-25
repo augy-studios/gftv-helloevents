@@ -2,6 +2,7 @@
 // form on /manage. Admins only.
 //
 // GET  ?id=<event id>                                 -> { editors, candidates }
+// GET  ?id=<event id>&search=<typed text>              -> { candidates }
 // POST { id, action: "add", username, staff? }         -> { editors, candidates }
 // POST { id, action: "remove", username, staff }       -> { editors, candidates }
 //
@@ -11,7 +12,11 @@
 // candidates: the accounts an admin can add, for the dropdown: active ones
 // that signed in within the last 30 days, not already able to edit every
 // event (staff editors and admins) and not already this event's editors,
-// most recent first. Usernames and display names only.
+// most recent first. Usernames and display names only. With search: any
+// active account, however long since it signed in, whose username or
+// display name holds the text typed, those starting with it first (at most
+// MAX_RESULTS), for the dropdown as an admin types. Adding one takes any
+// active account by its username, likewise.
 //
 // An account is named by its username (and staff or not, when the page
 // knows: a staff member and a public account can share a username).
@@ -26,6 +31,8 @@ import { hasTwoStep } from '../_lib/event-editors.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_DAYS = 30;
 const MAX_CANDIDATES = 500;
+const MAX_RESULTS = 20;
+const MAX_SEARCH = 40;
 // What normaliseAccount and canManage read, with the staff record embedded.
 const ACCOUNT_SELECT = `id, kind, username, display_name, status, last_sign_in_at, staff:${TABLES.users} ( id, username, display_name, is_admin, is_editor, is_approved )`;
 
@@ -82,6 +89,87 @@ async function candidateAccounts(editorIds) {
       }
       return !editorIds.has(account.id);
     });
+}
+
+// Text typed into the search, safe inside a PostgREST or() filter and an
+// ilike pattern: no commas, brackets, quotes, wildcards or backslashes.
+function searchText(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.replace(/[,()*%\\"'.:]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_SEARCH);
+}
+
+// Active accounts that could be added: those whose username or display
+// name holds text (or, exact, whose username is text), staff members
+// (found by their staff record) and public accounts alike, not able to
+// edit every event already nor this event's editors.
+async function searchAccounts(editorIds, typed, { exact = false } = {}) {
+  const text = searchText(typed);
+  if (!text) {
+    return [];
+  }
+  let publicQuery = database().from(TABLES.accounts).select(ACCOUNT_SELECT).eq('kind', 'public').eq('status', 'active');
+  let staffQuery = database().from(TABLES.users).select('id');
+  if (exact) {
+    publicQuery = publicQuery.eq('username', text.toLowerCase());
+    staffQuery = staffQuery.eq('username', text);
+  } else {
+    const filter = `username.ilike.%${text}%,display_name.ilike.%${text}%`;
+    publicQuery = publicQuery.or(filter).order('username', { ascending: true }).limit(MAX_CANDIDATES);
+    staffQuery = staffQuery.or(filter).limit(MAX_CANDIDATES);
+  }
+  const [publicFound, staffFound] = await Promise.all([publicQuery, staffQuery]);
+  if (publicFound.error) {
+    throw publicFound.error;
+  }
+  if (staffFound.error) {
+    throw staffFound.error;
+  }
+  let staffRows = [];
+  const staffIds = rowsOf(staffFound.data).map((row) => row.id);
+  if (staffIds.length > 0) {
+    const { data, error } = await database().from(TABLES.accounts).select(ACCOUNT_SELECT).in('id', staffIds).eq('status', 'active');
+    if (error) {
+      throw error;
+    }
+    staffRows = rowsOf(data);
+  }
+  return [...rowsOf(publicFound.data), ...staffRows]
+    .map((row) => normaliseAccount(row))
+    .filter((account) => {
+      if (!account || !account.username || canManage(account)) {
+        return false;
+      }
+      return !editorIds.has(account.id);
+    });
+}
+
+// The accounts the dropdown lists for text typed: usernames starting with
+// it first, then display names starting with it, then the rest, each
+// alphabetically.
+function ranked(accounts, typed) {
+  const wanted = searchText(typed).toLowerCase();
+  const rank = (account) => {
+    const person = personOf(account);
+    if (person.username.toLowerCase().startsWith(wanted)) {
+      return 0;
+    }
+    if (person.displayName.toLowerCase().startsWith(wanted)) {
+      return 1;
+    }
+    return 2;
+  };
+  return accounts
+    .map((account) => ({ account, rank: rank(account) }))
+    .sort((first, second) => {
+      if (first.rank !== second.rank) {
+        return first.rank - second.rank;
+      }
+      return first.account.username.localeCompare(second.account.username);
+    })
+    .slice(0, MAX_RESULTS)
+    .map((each) => personOf(each.account));
 }
 
 async function answer(response, eventId) {
@@ -155,6 +243,11 @@ export default route('manage/event-editors', async (request, response) => {
   if (!event) {
     return fail(response, 404, 'not_found');
   }
+  if (request.method === 'GET' && query(request, 'search') !== '') {
+    const editorIds = new Set((await editorAccounts(eventId)).map((account) => account.id));
+    const typed = query(request, 'search');
+    return ok(response, { candidates: ranked(await searchAccounts(editorIds, typed), typed) });
+  }
   if (request.method === 'GET') {
     await answer(response, eventId);
     return;
@@ -162,7 +255,7 @@ export default route('manage/event-editors', async (request, response) => {
 
   const editors = await editorAccounts(eventId);
   if (body.action === 'add') {
-    const account = named(await candidateAccounts(new Set(editors.map((each) => each.id))), body);
+    const account = named(await searchAccounts(new Set(editors.map((each) => each.id)), body.username, { exact: true }), body);
     if (!account) {
       return fail(response, 404, 'editor_not_found');
     }

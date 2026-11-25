@@ -197,7 +197,7 @@ export function attendeePaymentText(attendee) {
 }
 
 // The address of an attendee's payment screenshot (editors only).
-function proofHref(eventId, attendee) {
+export function proofHref(eventId, attendee) {
   let staff = '0';
   if (attendee.staff) {
     staff = '1';

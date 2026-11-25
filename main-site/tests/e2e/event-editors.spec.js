@@ -24,8 +24,14 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await expect(page.locator('#autosaveStatus')).toHaveText('All changes saved');
   await openSection(page, 'Editors');
   await expect(page.locator('#eventEditorList')).toContainText('No editors of this event yet.');
-  await expect(page.locator(`#eventEditorCandidates option[value="${PASSKEY_MEMBER.username}"]`)).toHaveCount(1);
-  await page.locator('#eventEditorUsername').fill(PASSKEY_MEMBER.username);
+  // Typing part of their name lists them; picking one fills the box.
+  await page.locator('#eventEditorUsername').fill(PASSKEY_MEMBER.displayName.slice(0, 5));
+  const option = page.locator('#eventEditorOptions .editor-option', { hasText: `@${PASSKEY_MEMBER.username}` });
+  await expect(option).toBeVisible();
+  await expect(page.locator('#eventEditorUsername')).toHaveAttribute('aria-expanded', 'true');
+  await option.click();
+  await expect(page.locator('#eventEditorUsername')).toHaveValue(PASSKEY_MEMBER.username);
+  await expect(page.locator('#eventEditorOptions')).toBeHidden();
   await page.locator('#eventEditorAddBtn').click();
   const row = page.locator('#eventEditorList li', { hasText: PASSKEY_MEMBER.username });
   await expect(row).toContainText(PASSKEY_MEMBER.displayName);

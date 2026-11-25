@@ -176,8 +176,9 @@ the functions with the service role key. No Supabase Auth, no request signing.
   lists those benefits again in full (and what the included tier includes in turn) or says
   "Everything in <tier>, plus:". The From and Up to prices then come from the tiers. A hidden
   price hides the tier prices too. Fields in a tier card save when the card is left.
-- **Several tiers at once** (migrations/022). At checkout someone ticks every tier they want and
-  pays for them together. Each tier is bought once per person, unless its card ticks "One person
+- **One tier per person** (migrations/022, narrowed since). At checkout someone picks one tier
+  (a radio choice; the server refuses more with `one_tier_only`). Tickets bought with several
+  tiers before keep them, through an upgrade too. Each tier is bought once per person, unless its card ticks "One person
   can buy more than one of this tier", with "Most one person can buy" (2 to 20, blank for 20);
   checkout then asks "How many" for it, and the event page says "One person can buy up to N of
   these." The tiers in one order must share a way to pay, and by link or QR code only when they
@@ -185,6 +186,22 @@ the functions with the service role key. No Supabase Auth, no request signing.
   The volunteer benefit comes off the order's total once. What was bought is kept at checkout
   (`payment_items`), and in words in `payment_tier` ("Attendee, Day pass × 2") for the attendee
   list.
+- **A currency per tier.** A tier card's "Currency (optional)" sets the currency it is sold in
+  (blank for the event's). Its price shows in it on the event and checkout pages, and its buyers
+  pay in it (`payment_currency`). Upgrades are offered only to tiers in the same currency, so
+  what was paid can be credited (`upgrade_currency` otherwise). The price range on event cards
+  comes from the tiers in the event's own currency ("to be announced" when there are none). A
+  volunteer benefit of a set amount is in the event's currency and comes off only tickets in
+  it; a percentage comes off any. A donation is in the ticket's currency. No migration: tiers
+  are a jsonb list and gain `currency`.
+- **People per tier** (migrations/025). Besides the event's own capacity, each tier card can set
+  "Most people for this tier" (blank for no limit). Someone holds a tier when their ticket for
+  the whole event includes it, however many of it they bought; people coming just for a meal or
+  lepak hold none. The event and checkout pages say how many places a tier has left, then "Sold
+  out"; a sold-out tier cannot be ticked at checkout, bought (`tier_full`) or upgraded to. The
+  database checks the limit as it sells the tier (`gftvevents_rsvp`, `gftvevents_take_tiers`),
+  under the event's lock, so two people cannot both take its last place. Lowering a limit
+  below the people already holding a tier takes nobody's ticket away.
 - **Coming just for a meal** (migrations/007). In the edit form's "Coming just for a meal"
   section an editor ticks breakfast, lunch or dinner, and names up to five more ("High tea"). With
   any on, a signed-in person on the event page picks "The whole event" or "I only want to show
@@ -278,9 +295,10 @@ the functions with the service role key. No Supabase Auth, no request signing.
   event, for the person signed in (a tier, when the event sells tiers), any volunteer benefit taken
   off, the way to pay, and the order. Reserving by link or QR code takes one of the event's spaces
   at once (no expiry) and shows the link or QR code (only then: neither goes to anyone else) and
-  the organiser's instructions. The person then reports a payment reference and, if they like, a
-  screenshot (WebP, at most 1600 px), and can report again or pay another way until it is
-  confirmed. Editors see each attendee's tier, amount, method, status and reference, open the
+  the organiser's instructions. The person then reports a screenshot of the payment (WebP, at
+  most 1600 px; needed, `payment_proof_required`, since it shows they paid) and, if they like, a
+  payment reference, and can report again (keeping the screenshot sent) or pay another way until
+  it is confirmed. Editors see each attendee's tier, amount, method, status and reference, open the
   screenshot (`api/manage/payment-proof.js`, editors only, never cached), and tick **Paid**, which
   tells the person by push and Telegram. A ticked method that cannot be offered yet is explained
   under it, never refused: a link or QR code needs one amount (tiers, or no Up to), the link, or
@@ -288,6 +306,13 @@ the functions with the service role key. No Supabase Auth, no request signing.
   (refunds are the organisers' business). QR codes and screenshots live in the private
   `gftvevents_payments` bucket, and a screenshot is deleted when it is replaced or its RSVP goes
   (taken back, removed by an editor, the event or account deleted).
+- **Attendee list as CSV.** Under Attendees and notes, **Download CSV** saves the list as
+  `<event link>-attendees-<date>.csv` (built in the browser from what the list shows, nothing
+  new from the server): RSVP ID, name, username, account, RSVP time, what they come for, and,
+  where the event has them, country, volunteering, fursuiter, the payment (tickets, method,
+  status, amount, currency, reference, screenshot and photo links, times), contact details,
+  account details and registration answers, one column each. UTF-8 with a byte order mark, and
+  a cell starting with = + - @ gets a leading apostrophe so a spreadsheet never runs it.
 - **Each tier its own ways to pay.** A tier card ticks its own ways to pay (on the day, link, QR
   code), none for the event's, and can have its own payment link and QR code in place of the
   event's. Tiers keep an id, by which the server keeps a tier's QR code across autosaves (the form
@@ -313,8 +338,11 @@ the functions with the service role key. No Supabase Auth, no request signing.
   fill them in or change them from the RSVP box, and is told when the event asks for more than
   they gave. Only the event's editors see them, on the attendee list, a phone number, email or
   Telegram username as a link.
-- **Editors of one event** (migrations/018). An admin adds any account active in the last 30 days
-  as an editor of a specific event, from that event's Editors tab (admins only). An event editor
+- **Editors of one event** (migrations/018). An admin adds any active account as an editor of a
+  specific event, from that event's Editors tab (admins only). The username box is a dropdown:
+  as the admin types, it lists the accounts whose username or display name holds the text
+  (`GET /api/manage/event-editors?id=&search=`), and left empty, those active in the last 30
+  days. An event editor
   sees only their events on `/manage` (no New event, no staff tools), edits every section and
   manages attendees, but cannot change the Status or release time (the server keeps them), create
   or delete events. Their rights work only while two-step sign-in (an authenticator app or a
@@ -433,7 +461,7 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
 
 1. **Database.** In the Supabase SQL editor, run each file in `../migrations/` in number order,
    once, whole: `001_helloevents_schema.sql`, then `002_public_accounts_covers_notifications.sql`,
-   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 024) in turn.
+   then `003_resets_signup_allowances_name_filters.sql`, and each later one (004 to 025) in turn.
    Run `006_batched_change_notices.sql` before deploying the autosaving edit form: saving an
    event needs its two columns. Run `007_meal_only_rsvps.sql` before deploying meal-only RSVPs:
    the event page and RSVPs read its columns, and it replaces the RSVP function. Run
@@ -465,6 +493,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    the edit form and the attendee list read its columns. Run `024_registration_forms.sql` before
    deploying registration forms: sign-in reads the account's new personal columns, and the event
    pages, RSVPs, checkout, the edit form and the attendee list read the event and attendee ones.
+   Run `025_tier_limits.sql` before deploying limits on people per tier: it replaces the RSVP
+   function (a checkout sends the tiers it buys) and adds the functions that count and check
+   each tier's places, which the event pages, checkout and upgrades call.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

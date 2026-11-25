@@ -51,7 +51,8 @@ import { contactText, contactHref } from '../contact-fields.js';
 import { contactLabel } from '../contact-form.js';
 import { setRegistration, readRegistration, startRegistration, relabelRegistration, syncRegistration, REGISTRATION_CHANGED } from '../manage-registration.js';
 import { questionLabel, answerText } from '../registration-form.js';
-import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, setPaymentProblems, attendeePaymentText, attendeePaymentControls, renderPaymentCounts } from '../manage-payment.js';
+import { startPayment, setPayment, readPayment, applySavedPayment, syncPayment, setPaymentProblems, attendeePaymentText, attendeePaymentControls, renderPaymentCounts, proofHref } from '../manage-payment.js';
+import { csvText, downloadCsv } from '../attendees-csv.js';
 
 const byId = (id) => document.getElementById(id);
 const form = byId('eventForm');
@@ -709,8 +710,9 @@ form.addEventListener('change', (event) => {
     event.target.value = tidySlug(event.target.value);
     showSlugTaken(null);
   }
-  // A currency typed as a code or a name shows as "SGD — Singapore Dollar".
-  if (event.target.id === 'f-currency') {
+  // A currency typed as a code or a name shows as "SGD — Singapore Dollar"
+  // (the event's, or a tier's own).
+  if (event.target.id === 'f-currency' || (event.target.dataset.key === 'currency' && event.target.closest('.tier-edit-card'))) {
     const code = currencyCodeFrom(event.target.value);
     const label = currencyLabel(code);
     if (label !== code) {
@@ -857,7 +859,7 @@ function renderStatus() {
 // Fields that are not one input of their own, by the section tab they are in.
 const FIELD_TABS = {
   locations: 'when', locationLabel: 'when', customLabel: 'when', venueName: 'when', venueAddress: 'when', city: 'when', country: 'when', mapsUrl: 'when',
-  ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price', tierMaxPerPerson: 'price',
+  ticketTiers: 'price', tierName: 'price', tierPrice: 'price', tierBenefits: 'price', tierMaxPerPerson: 'price', tierLimit: 'price', tierCurrency: 'price',
   meals: 'meals', mealLabel: 'meals', mealLimit: 'meals', mealLocations: 'meals',
   contactFields: 'price', contactLabel: 'price',
   registrationFields: 'questions', registrationLabel: 'questions', registrationHint: 'questions', registrationOptions: 'questions', registrationLink: 'questions', registrationTiers: 'questions',
@@ -1246,7 +1248,7 @@ function attendeeRegistration(attendee) {
     if (entry.type === 'photo') {
       rows.push([questionLabel(entry), createElement('a', { class: 'text-link', href: entry.photoUrl, target: '_blank', rel: 'noopener', text: translate('manage.attendee-photo') })]);
     } else {
-      rows.push([questionLabel(entry), answerText(entry, entry.value, currencyCodeFrom(byId('f-currency').value))]);
+      rows.push([questionLabel(entry), answerText(entry, entry.value, attendeeCurrency(attendee))]);
     }
   }
   if (rows.length === 0) {
@@ -1335,12 +1337,241 @@ function attendeeRow(attendee) {
   ]);
 }
 
+// The currency an attendee's answers (a donation) are in: their ticket's
+// (each tier can have its own), else the event's.
+function attendeeCurrency(attendee) {
+  if (attendee.payment && attendee.payment.currency) {
+    return attendee.payment.currency;
+  }
+  return currencyCodeFrom(byId('f-currency').value);
+}
+
+// The account details the form asks for, as plain text for the CSV: legal
+// name, date of birth (or age) and emergency contact, each only when the
+// attendee list shows it.
+function personalCells(personal) {
+  const cells = {};
+  if (!personal) {
+    return cells;
+  }
+  if ('legalName' in personal) {
+    cells.legalName = personal.legalName;
+  }
+  if ('age' in personal) {
+    let shown = '';
+    if (personal.age !== null) {
+      shown = String(personal.age);
+    }
+    if (personal.dateOfBirth) {
+      shown = personal.dateOfBirth;
+    }
+    cells.dateOfBirth = shown;
+  }
+  if ('emergencyName' in personal) {
+    cells.emergencyContact = [personal.emergencyName, personal.emergencyPhone].filter(Boolean).join(', ');
+  }
+  return cells;
+}
+
+// What someone is coming for, in words: the whole event, lepak, or meals.
+function comingForText(attendee) {
+  const meals = attendeeMealsText(attendee);
+  if (attendee.lepak && meals) {
+    return `${lepakLabelShown()} · ${meals}`;
+  }
+  if (attendee.lepak) {
+    return lepakLabelShown();
+  }
+  if (meals) {
+    return translate('manage.attendee-meals', { meals });
+  }
+  return translate('manage.csv.whole-event');
+}
+
+// Yes or No, for a column of ticks.
+function yesNo(value) {
+  if (value) {
+    return translate('manage.csv.yes');
+  }
+  return translate('manage.csv.no');
+}
+
+// An attendee's ticket payment, or null for none (not a ticket bought at
+// checkout).
+function heldPayment(attendee) {
+  if (!attendee.payment || !attendee.payment.method) {
+    return null;
+  }
+  return attendee.payment;
+}
+
+// The payment columns: one cell each from an attendee's payment.
+function paymentColumns() {
+  const cellOf = (read) => (attendee) => {
+    const payment = heldPayment(attendee);
+    if (payment === null) {
+      return null;
+    }
+    return read(payment, attendee);
+  };
+  return [
+    [translate('manage.csv.tickets'), cellOf((payment) => payment.tier)],
+    [translate('manage.csv.payment-method'), cellOf((payment) => translate(`payment.method.${payment.method}`))],
+    [translate('manage.csv.payment-status'), cellOf((payment) => {
+      if (payment.method === 'onsite') {
+        return null;
+      }
+      return translate(`manage.payment-status.${payment.status}`);
+    })],
+    [translate('manage.csv.amount'), cellOf((payment) => payment.amount)],
+    [translate('manage.csv.currency'), cellOf((payment) => payment.currency)],
+    [translate('manage.csv.credit'), cellOf((payment) => {
+      if (payment.credit > 0) {
+        return payment.credit;
+      }
+      return null;
+    })],
+    [translate('manage.csv.reference'), cellOf((payment) => payment.reference)],
+    [translate('manage.csv.screenshot'), cellOf((payment, attendee) => {
+      if (!payment.hasProof) {
+        return null;
+      }
+      return new URL(proofHref(editing.id, attendee), location.origin).href;
+    })],
+    [translate('manage.csv.reported-at'), cellOf((payment) => payment.submittedAt)],
+    [translate('manage.csv.paid-at'), cellOf((payment) => payment.paidAt)],
+  ];
+}
+
+// A list on an attendee (contact or registration), or an empty one.
+function listOf(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  return [];
+}
+
+// The contact detail columns: one per detail asked, in the order first seen.
+function contactColumns() {
+  const labels = [];
+  for (const attendee of attendees) {
+    for (const entry of listOf(attendee.contact)) {
+      const label = contactLabel(entry);
+      if (!labels.includes(label)) {
+        labels.push(label);
+      }
+    }
+  }
+  return labels.map((label) => [label, (attendee) => {
+    const entry = listOf(attendee.contact).find((each) => contactLabel(each) === label);
+    if (!entry) {
+      return null;
+    }
+    return entry.value;
+  }]);
+}
+
+// The registration answer columns: one per question, in the order first
+// seen; a photo as the address editors open it at.
+function registrationColumns() {
+  const questions = [];
+  for (const attendee of attendees) {
+    for (const entry of listOf(attendee.registration)) {
+      if (!questions.some((question) => question.id === entry.id)) {
+        questions.push(entry);
+      }
+    }
+  }
+  return questions.map((question) => [questionLabel(question), (attendee) => {
+    const entry = listOf(attendee.registration).find((each) => each.id === question.id);
+    if (!entry) {
+      return null;
+    }
+    if (entry.type === 'photo') {
+      if (!entry.photoUrl) {
+        return null;
+      }
+      return new URL(entry.photoUrl, location.origin).href;
+    }
+    return answerText(entry, entry.value, attendeeCurrency(attendee));
+  }]);
+}
+
+// The attendee list as CSV rows: a heading row, then one row per person,
+// with the columns this event's list has (volunteering only at a
+// convention, country only when cross-border, payment, contact details,
+// account details and registration answers only when someone has them).
+function attendeeCsvRows() {
+  const columns = [
+    [translate('manage.csv.rsvp-id'), (attendee) => attendee.rsvpNumber],
+    [translate('manage.csv.name'), (attendee) => {
+      if (attendee.displayName) {
+        return attendee.displayName;
+      }
+      return attendee.username;
+    }],
+    [translate('manage.csv.username'), (attendee) => attendee.username],
+    [translate('manage.csv.account'), (attendee) => {
+      if (attendee.staff) {
+        return translate('role.staff');
+      }
+      return translate('role.member');
+    }],
+    [translate('manage.csv.rsvp-at'), (attendee) => attendee.rsvpAt],
+    [translate('manage.csv.coming-for'), comingForText],
+  ];
+  if (savedCrossBorder) {
+    columns.push([translate('manage.csv.country'), attendeeCountryText]);
+  }
+  if (isConvention()) {
+    columns.push(
+      [translate('manage.attendee-volunteer'), (attendee) => yesNo(attendee.volunteer)],
+      [translate('manage.attendee-past-volunteer'), (attendee) => yesNo(attendee.pastVolunteer)],
+      [translate('manage.attendee-volunteered'), (attendee) => yesNo(attendee.volunteered)],
+    );
+  }
+  if (attendees.some((attendee) => attendee.fursuiter)) {
+    columns.push([translate('manage.attendee-fursuiter'), (attendee) => yesNo(attendee.fursuiter)]);
+  }
+  if (attendees.some((attendee) => heldPayment(attendee) !== null)) {
+    columns.push(...paymentColumns());
+  }
+  columns.push(...contactColumns());
+  // Account details the form asks for.
+  const personalKeys = [
+    ['legalName', translate('registration.preset.legalName')],
+    ['dateOfBirth', translate('registration.preset.dateOfBirth')],
+    ['emergencyContact', translate('registration.preset.emergencyContact')],
+  ];
+  for (const [key, label] of personalKeys) {
+    if (attendees.some((attendee) => key in personalCells(attendee.personal))) {
+      columns.push([label, (attendee) => personalCells(attendee.personal)[key]]);
+    }
+  }
+  columns.push(...registrationColumns());
+  return [
+    columns.map(([heading]) => heading),
+    ...attendees.map((attendee) => columns.map(([, cell]) => cell(attendee))),
+  ];
+}
+
+// "Download CSV": the attendee list as a file named after the event's link
+// and today's date.
+function downloadAttendees() {
+  if (!editing) {
+    return;
+  }
+  const day = new Date().toISOString().slice(0, 10);
+  downloadCsv(`${editing.slug}-attendees-${day}.csv`, csvText(attendeeCsvRows()));
+}
+
 function renderAttendees() {
   const box = byId('attendeesBox');
   box.hidden = !editing;
   if (!editing) {
     return;
   }
+  byId('attendeesCsv').hidden = attendees.length === 0;
   byId('attendeesTitle').textContent = translate('manage.attendees', { count: attendees.length });
   renderMealCounts();
   renderVolunteerCounts();
@@ -1621,6 +1852,7 @@ startRegistration({
   },
 });
 startEditors({ getEvent: () => editing });
+byId('attendeesCsv').addEventListener('click', downloadAttendees);
 
 // The edit form's section tabs, kept out of the address (it already says
 // #editor). A tab picked with the tab bar stuck under the page header (the

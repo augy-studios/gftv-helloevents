@@ -743,7 +743,12 @@ function renderTiers() {
   const cards = tiers.map((tier) => {
     const head = [createElement('h3', { class: 'tier-name', text: tier.name })];
     if (tier.price !== null) {
-      head.push(createElement('span', { class: 'tier-price', text: tierPriceText(tier.price, event.price.currency) }));
+      // In the tier's own currency (each tier can have one).
+      let currency = event.price.currency;
+      if (tier.currency) {
+        currency = tier.currency;
+      }
+      head.push(createElement('span', { class: 'tier-price', text: tierPriceText(tier.price, currency) }));
     }
     const body = [createElement('div', { class: 'tier-head' }, head)];
     if (tier.includesTier) {
@@ -763,11 +768,17 @@ function renderTiers() {
     if (tier.maxPerPerson > 1) {
       body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-max', { count: tier.maxPerPerson }) }));
     }
-    // When it stops being sold (migrations/024).
+    // When it stops being sold (migrations/024), or that it has sold out
+    // or how many places it has left (migrations/025).
     if (tier.closed) {
       body.push(createElement('p', { class: 'tier-methods tier-closed', text: translate('event.tier-closed') }));
+    } else if (tier.full) {
+      body.push(createElement('p', { class: 'tier-methods tier-closed', text: translate('event.tier-full') }));
     } else if (tier.closesAt) {
       body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-closes', { date: formatDate(tier.closesAt) }) }));
+    }
+    if (!tier.closed && !tier.full && Number.isInteger(tier.left)) {
+      body.push(createElement('p', { class: 'tier-methods', text: translate('event.tier-left', { count: tier.left }) }));
     }
     // How this tier is paid for, when it differs from the event's.
     if (tier.methods.length > 0 && JSON.stringify(tier.methods) !== JSON.stringify(event.payment.methods)) {

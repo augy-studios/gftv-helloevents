@@ -125,7 +125,7 @@ test('a method is offered only once it can be used, and checkout only for link o
 
 test('a ticket costs its tier, less any volunteer benefit', () => {
   const row = addEvent();
-  assert.deepEqual(rules.ticketPrice(row, { tierIndex: 1, tierName: 'Sponsor' }), { ok: true, tier: 'Sponsor', price: 120, amount: 120, discount: 0 });
+  assert.deepEqual(rules.ticketPrice(row, { tierIndex: 1, tierName: 'Sponsor' }), { ok: true, tier: 'Sponsor', price: 120, amount: 120, discount: 0, currency: 'SGD' });
   assert.equal(rules.ticketPrice(row, { tierIndex: 1, tierName: 'Day pass' }).error, 'tier_changed');
   assert.equal(rules.ticketPrice(row, {}).error, 'tier_required');
   const con = { ...row, kind: 'convention', volunteer_discount_enabled: true, volunteer_discount_from: crypto.randomUUID(), volunteer_discount_type: 'percent', volunteer_discount_value: 25 };
@@ -177,8 +177,10 @@ test('a ticket by QR code reserves a place, then the QR code and report follow',
   assert.equal(qr.headers['cache-control'], 'private, max-age=3600');
   assert.equal((await other.call(paymentQr, { query: { slug: 'paid-con', v } })).status, 404);
 
-  // Reporting it: a reference is needed; a screenshot is kept, privately.
-  assert.equal((await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: '' } })).json.error, 'payment_reference_required');
+  // Reporting it: a screenshot is needed, and kept privately; the
+  // reference is optional.
+  assert.equal((await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: 'TXN 122' } })).json.error, 'payment_proof_required');
+  assert.equal((await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: 'x'.repeat(121), proof: 'x' } })).json.error, 'payment_reference_invalid');
   const proof = base64(await picture(900, 1600, 'webp'));
   const reported = await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: 'TXN 123', proof } });
   assert.equal(reported.status, 200, JSON.stringify(reported.json));
@@ -187,6 +189,12 @@ test('a ticket by QR code reserves a place, then the QR code and report follow',
   const firstProof = row.payment_proof_path;
   assert.match(firstProof, /^proof\//);
   assert.equal(db.objects.has(`gftvevents_payments/${firstProof}`), true);
+  // Reporting again with no new screenshot keeps the one sent, with no
+  // reference at all.
+  const again = await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: '' } });
+  assert.equal(again.status, 200, JSON.stringify(again.json));
+  assert.equal(row.payment_reference, null);
+  assert.equal(row.payment_proof_path, firstProof);
   // A new screenshot replaces the old one.
   await buyer.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'report', reference: 'TXN 124', proof } });
   assert.equal(db.objects.has(`gftvevents_payments/${firstProof}`), false);
@@ -335,4 +343,157 @@ test('each tier takes its own ways to pay, with its own QR code kept across save
   assert.equal(db.objects.has(`gftvevents_payments/${dayPath}`), true);
   await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...form, ticketTiers: [form.ticketTiers[1]] } } });
   assert.equal(db.objects.has(`gftvevents_payments/${dayPath}`), false);
+});
+
+// ---------------------------------------------------------------------------
+// A limit on how many people a tier takes (migrations/025)
+// ---------------------------------------------------------------------------
+
+test('the edit form saves a tier\'s limit on people, blank for none', () => {
+  const form = { title: 'Con', kind: 'convention', description: 'A', descriptionZh: 'B', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', priceType: 'paid', currency: 'SGD', tiersEnabled: true };
+  const saved = (limit) => rules.validateEvent({ ...form, ticketTiers: [{ id: 't-sponsor1', name: 'Sponsor', price: '120', limit }] });
+  assert.equal(saved('20').fields.ticket_tiers[0].limit, 20);
+  assert.equal(saved('').fields.ticket_tiers[0].limit, null);
+  assert.equal(saved(undefined).fields.ticket_tiers[0].limit, null);
+  for (const bad of ['0', '-3', '2.5', 'many']) {
+    const refused = saved(bad);
+    assert.equal(refused.field, 'tierLimit', bad);
+    assert.equal(refused.tier, 0);
+  }
+  // As stored, and as the edit form reads it back.
+  const tiers = rules.storedTiers({ ticket_tiers: [{ id: 't-sponsor1', name: 'Sponsor', price: 120, limit: 20 }, { id: 't-dayticket', name: 'Day', price: 40, limit: 'lots' }] });
+  assert.deepEqual(tiers.map((tier) => tier.limit), [20, null]);
+});
+
+test('a tier with a limit sells out, cannot be bought or upgraded to, and frees a place when someone leaves', async () => {
+  const event = addEvent({
+    capacity: 100,
+    ticket_tiers: [
+      { id: 't-dayticket', name: 'Day pass', price: 40, benefits: ['Entry'], previous_display: 'reference', limit: 1 },
+      { id: 't-sponsor1', name: 'Sponsor', price: 120, benefits: ['A badge'], previous_display: 'reference', limit: 1 },
+      { id: 't-dinner01', name: 'Dinner', price: 30, benefits: ['Food'], previous_display: 'reference' },
+    ],
+  });
+  const fox = await signedIn('fox');
+  const wolf = await signedIn('wolf');
+
+  // Before anyone buys: places left on the event page and at checkout.
+  let page = (await fox.call(detail, { query: { slug: 'paid-con' } })).json.event;
+  assert.deepEqual(page.tiers.map((tier) => [tier.limit, tier.left, tier.full]), [[1, 1, false], [1, 1, false], [null, null, false]]);
+
+  // Fox takes the one Day pass. Only one tier per person.
+  const two = await fox.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Day pass' }, { tier: 2, tierName: 'Dinner' }] } } });
+  assert.equal(two.json.error, 'one_tier_only');
+  const bought = await fox.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Day pass' }] } } });
+  assert.equal(bought.status, 200, JSON.stringify(bought.json));
+  assert.deepEqual(bought.json.event.tiers.map((tier) => [tier.left, tier.full]), [[0, true], [1, false], [null, false]]);
+
+  // Wolf sees it sold out, and cannot buy it.
+  let view = (await wolf.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.deepEqual(view.tickets.map((ticket) => [ticket.name, ticket.left, ticket.full]), [['Day pass', 0, true], ['Sponsor', 1, false], ['Dinner', null, false]]);
+  const refused = await wolf.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Day pass' }] } } });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error, 'tier_full');
+  assert.equal(db.table('gftvevents_attendees').length, 1, 'no place taken');
+
+  // Wolf takes the one Sponsor place instead.
+  const sponsor = await wolf.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 1, tierName: 'Sponsor' }] } } });
+  assert.equal(sponsor.status, 200, JSON.stringify(sponsor.json));
+
+  // Fox cannot upgrade to the sold-out Sponsor tier.
+  view = (await fox.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.equal(view.viewer.upgrade, null, 'nothing to upgrade to');
+  const blocked = await fox.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'upgrade', tier: 1, tierName: 'Sponsor', method: 'link' } });
+  assert.equal(blocked.json.error, 'tier_full');
+
+  // Wolf leaves: the Sponsor place is free again, and Fox upgrades to it,
+  // giving up the Day pass, which is then free too.
+  await wolf.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: false } });
+  view = (await fox.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.deepEqual(view.viewer.upgrade.options.map((option) => option.name), ['Sponsor']);
+  const upgraded = await fox.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'upgrade', tier: 1, tierName: 'Sponsor', method: 'link' } });
+  assert.equal(upgraded.status, 200, JSON.stringify(upgraded.json));
+  assert.deepEqual(upgraded.json.checkout.tickets.map((ticket) => [ticket.name, ticket.left]), [['Day pass', 1], ['Sponsor', 0], ['Dinner', null]]);
+  assert.deepEqual(db.table('gftvevents_attendees').find((row) => row.event_id === event.id).payment_items.map((item) => item.id), ['t-sponsor1']);
+  page = (await fox.call(detail, { query: { slug: 'paid-con' } })).json.event;
+  assert.equal(page.viewer.going, true);
+});
+
+test('someone coming just for a meal, or lepak, holds no tier place', async () => {
+  addEvent({
+    meal_options: [{ id: 'dinner', label: null, limit: null }],
+    lepak_enabled: true,
+    ticket_tiers: [{ id: 't-dayticket', name: 'Day pass', price: 40, benefits: [], previous_display: 'reference', limit: 1 }],
+    price_max: null,
+  });
+  const fox = await signedIn('fox');
+  const meal = await fox.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, meals: ['dinner'] } });
+  assert.equal(meal.status, 200, JSON.stringify(meal.json));
+  assert.deepEqual(meal.json.event.tiers.map((tier) => tier.left), [1]);
+  const wolf = await signedIn('wolf');
+  const bought = await wolf.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Day pass' }] } } });
+  assert.equal(bought.status, 200, JSON.stringify(bought.json));
+  assert.deepEqual(bought.json.event.tiers.map((tier) => tier.full), [true]);
+});
+
+// ---------------------------------------------------------------------------
+// A currency for each tier
+// ---------------------------------------------------------------------------
+
+test('a tier can have its own currency: saved, shown, paid in, and the card range in the event\'s', () => {
+  const form = { title: 'Con', kind: 'convention', description: 'A', descriptionZh: 'B', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-01-01', priceType: 'paid', currency: 'SGD', tiersEnabled: true };
+  const saved = rules.validateEvent({ ...form, ticketTiers: [
+    { id: 't-sgdpass1', name: 'SG pass', price: '40' },
+    { id: 't-myrpass1', name: 'MY pass', price: '150', currency: 'myr' },
+    { id: 't-sgdvip01', name: 'SG VIP', price: '90', currency: 'SGD' },
+  ] });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.deepEqual(saved.fields.ticket_tiers.map((tier) => tier.currency), [null, 'MYR', 'SGD']);
+  // The card range comes from the tiers in the event's currency.
+  assert.deepEqual([saved.fields.price_min, saved.fields.price_max], [40, 90]);
+  assert.equal(rules.validateEvent({ ...form, ticketTiers: [{ name: 'A', price: '1', currency: 'XX' }] }).field, 'tierCurrency');
+  assert.equal(rules.validateEvent({ ...form, ticketTiers: [{ name: 'A', price: '1', currency: 'ZZZ' }] }).field, 'tierCurrency');
+  // None in the event's currency: no range.
+  const foreign = rules.validateEvent({ ...form, ticketTiers: [{ name: 'A', price: '10', currency: 'MYR' }] });
+  assert.deepEqual([foreign.fields.price_min, foreign.fields.price_max], [null, null]);
+
+  const event = { ...saved.fields, id: 'e', price_type: 'paid', tiers_enabled: true, volunteer_discount_enabled: true, volunteer_discount_type: 'amount', volunteer_discount_value: 5, volunteer_discount_from: 'x', kind: 'convention' };
+  const myr = rules.basketPrice(event, [{ tier: 1, tierName: 'MY pass' }], { volunteerDiscount: true });
+  assert.equal(myr.currency, 'MYR');
+  // A set-amount volunteer benefit is in the event's currency: not off MYR.
+  assert.equal(myr.discount, 0);
+  const sgd = rules.basketPrice(event, [{ tier: 0, tierName: 'SG pass' }], { volunteerDiscount: true });
+  assert.deepEqual([sgd.currency, sgd.discount, sgd.amount], ['SGD', 5, 35]);
+  // An older ticket's tiers in two currencies cannot be priced together.
+  assert.equal(rules.basketPrice(event, [{ tier: 0, tierName: 'SG pass' }, { tier: 1, tierName: 'MY pass' }], { allowMany: true }).error, 'tiers_currency_mixed');
+});
+
+test('a tier in another currency is paid in it, and upgrades stay within one currency', async () => {
+  const event = addEvent({
+    ticket_tiers: [
+      { id: 't-dayticket', name: 'Day pass', price: 40, benefits: [], previous_display: 'reference' },
+      { id: 't-myrpass1', name: 'MY pass', price: 150, benefits: [], previous_display: 'reference', currency: 'MYR' },
+      { id: 't-sponsor1', name: 'Sponsor', price: 120, benefits: [], previous_display: 'reference' },
+    ],
+  });
+  const fox = await signedIn('fox');
+  const view = (await fox.call(checkout, { query: { slug: 'paid-con' } })).json.checkout;
+  assert.deepEqual(view.tickets.map((ticket) => ticket.currency), ['SGD', 'MYR', 'SGD']);
+  const page = (await fox.call(detail, { query: { slug: 'paid-con' } })).json.event;
+  assert.deepEqual(page.tiers.map((tier) => tier.currency), ['SGD', 'MYR', 'SGD']);
+
+  const bought = await fox.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 0, tierName: 'Day pass' }] } } });
+  assert.equal(bought.status, 200, JSON.stringify(bought.json));
+  const row = db.table('gftvevents_attendees').find((each) => each.event_id === event.id);
+  assert.equal(row.payment_currency, 'SGD');
+  // The MYR tier is dearer, but not offered as an upgrade from an SGD one.
+  const offer = (await fox.call(checkout, { query: { slug: 'paid-con' } })).json.checkout.viewer.upgrade;
+  assert.deepEqual(offer.options.map((option) => option.name), ['Sponsor']);
+  assert.equal((await fox.call(payment, { method: 'POST', body: { slug: 'paid-con', action: 'upgrade', tier: 1, tierName: 'MY pass', method: 'link' } })).json.error, 'upgrade_currency');
+
+  // Someone buying the MYR tier pays in MYR.
+  const wolf = await signedIn('wolf');
+  await wolf.call(rsvp, { method: 'POST', body: { slug: 'paid-con', going: true, payment: { method: 'link', items: [{ tier: 1, tierName: 'MY pass' }] } } });
+  const wolfRow = db.table('gftvevents_attendees').find((each) => each.event_id === event.id && each !== row);
+  assert.deepEqual([wolfRow.payment_currency, wolfRow.payment_amount], ['MYR', 150]);
 });

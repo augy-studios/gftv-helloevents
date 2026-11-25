@@ -169,7 +169,7 @@ test('a donation goes on top of the ticket, and an upgrade asks only the differe
   await page.locator('#ticketList input[name="ticket"][value="1"]').check();
   await expect(page.locator('#checkoutReg-tshirt')).toBeVisible();
   await expect(page.locator('#checkoutReg-badgeName')).toHaveValue('Otter');
-  await page.locator('#ticketList input[name="ticket"][value="1"]').uncheck();
+  await page.locator('#ticketList input[name="ticket"][value="0"]').check();
   await expect(page.locator('#checkoutReg-tshirt')).toHaveCount(0);
   await page.locator('#checkoutReg-donation').fill('25');
   await expect(page.locator('#orderLines')).toContainText('Donation');
@@ -181,6 +181,8 @@ test('a donation goes on top of the ticket, and an upgrade asks only the differe
 
   // Paid and confirmed by the editor.
   await page.locator('#payReference').fill('PAY-1');
+  const receipt = await sharp({ create: { width: 300, height: 600, channels: 3, background: '#6688cc' } }).png().toBuffer();
+  await page.locator('#payProof').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: receipt });
   await page.locator('#reportSubmit').click();
   await expect(page.locator('#upgradeBox')).toBeHidden();
   await context.clearCookies();

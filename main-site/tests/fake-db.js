@@ -349,6 +349,27 @@ export function createFakeDb() {
     }
   }
 
+  // migrations/025: how many people hold a tier (leaving out one account),
+  // and whether a basket takes a tier, not already held, with no places left.
+  const holds = (row, tier) => {
+    const items = Array.isArray(row.payment_items) ? row.payment_items : [];
+    if (items.length) return items.some((item) => item && item.id === tier.id);
+    return row.payment_tier === tier.name;
+  };
+  function tierHolders(eventId, tier, except) {
+    return table('gftvevents_attendees').filter((r) => r.event_id === eventId && !(r.meals ?? []).length && !r.lepak && r.user_id !== except && holds(r, tier)).length;
+  }
+  function tiersFull(e, userId, items) {
+    if (!Array.isArray(items)) return false;
+    const mine = table('gftvevents_attendees').find((r) => r.event_id === e.id && r.user_id === userId && !(r.meals ?? []).length && !r.lepak);
+    return (e.ticket_tiers ?? []).some((tier) => {
+      if (typeof tier.limit !== 'number' || typeof tier.id !== 'string') return false;
+      if (!items.some((item) => item && item.id === tier.id)) return false;
+      if (mine && Array.isArray(mine.payment_items) && mine.payment_items.some((item) => item && item.id === tier.id)) return false;
+      return tierHolders(e.id, tier, userId) >= tier.limit;
+    });
+  }
+
   const rpcs = {
     gftvevents_rate_hit({ p_bucket, p_window_seconds }) {
       const t = table('gftvevents_rate_limits');
@@ -365,8 +386,8 @@ export function createFakeDb() {
       row.hits += 1;
       return row.hits;
     },
-    // The same rules as the SQL function in migrations/001, 007, 009, 010, 013 and 017.
-    gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [], p_lepak = false }) {
+    // The same rules as the SQL function in migrations/001, 007, 009, 010, 013, 017 and 025.
+    gftvevents_rsvp({ p_event_id, p_user_id, p_meals = [], p_lepak = false, p_items = null }) {
       const meals = p_meals ?? [];
       const lepak = p_lepak === true;
       const e = table('gftvevents_events').find((r) => r.id === p_event_id);
@@ -384,6 +405,7 @@ export function createFakeDb() {
       if (!e.rsvp_open && whole && !hadSpace) return 'rsvp_closed';
       const full = going.filter((r) => !(r.meals ?? []).length && !r.lepak);
       if (whole && !hadSpace && e.capacity !== null && full.length >= e.capacity) return 'event_full';
+      if (whole && p_items && tiersFull(e, p_user_id, p_items)) return 'tier_full';
       if (lepak && !(mine && mine.lepak)) {
         if (!e.lepak_enabled || e.price_type !== 'paid') return 'lepak_not_offered';
         if (e.lepak_limit !== null && going.filter((r) => r.lepak).length >= e.lepak_limit) return 'lepak_full';
@@ -395,6 +417,7 @@ export function createFakeDb() {
       if (mine) {
         mine.meals = [...meals];
         mine.lepak = lepak;
+        if (whole && p_items) mine.payment_items = structuredClone(p_items);
         return 'changed';
       }
       const counters = table('gftvevents_rsvp_counters');
@@ -404,7 +427,22 @@ export function createFakeDb() {
         counters.push(counter);
       }
       counter.last_number += 1;
-      table('gftvevents_attendees').push({ ...DEFAULTS.gftvevents_attendees(), event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], lepak, rsvp_number: counter.last_number });
+      table('gftvevents_attendees').push({ ...DEFAULTS.gftvevents_attendees(), event_id: p_event_id, user_id: p_user_id, created_at: now(), meals: [...meals], lepak, rsvp_number: counter.last_number, payment_items: whole && p_items ? structuredClone(p_items) : null });
+      return 'ok';
+    },
+    // migrations/025.
+    gftvevents_tier_counts({ p_event_id }) {
+      const e = table('gftvevents_events').find((r) => r.id === p_event_id);
+      if (!e) return [];
+      return (e.ticket_tiers ?? []).filter((tier) => typeof tier.id === 'string').map((tier) => ({ tier: tier.id, taken: tierHolders(p_event_id, tier, null) }));
+    },
+    gftvevents_take_tiers({ p_event_id, p_user_id, p_items }) {
+      const e = table('gftvevents_events').find((r) => r.id === p_event_id);
+      if (!e) return 'not_going';
+      const mine = table('gftvevents_attendees').find((r) => r.event_id === p_event_id && r.user_id === p_user_id && !(r.meals ?? []).length && !r.lepak);
+      if (!mine) return 'not_going';
+      if (tiersFull(e, p_user_id, p_items)) return 'tier_full';
+      mine.payment_items = structuredClone(p_items);
       return 'ok';
     },
     gftvevents_meal_counts({ p_event_id }) {

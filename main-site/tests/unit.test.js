@@ -478,17 +478,17 @@ test('the event page shows tiers with earlier benefits in full or by name, and h
     ],
   });
   assert.deepEqual(ser.publicEventDetail(event, {}, now).tiers, [
-    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false },
-    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false },
-    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false },
-    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor', maxPerPerson: 1, methods: [], closesAt: null, closed: false },
-    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false },
+    { name: 'Day', price: 45, benefits: ['Entry'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' },
+    { name: 'Weekend', price: 80, benefits: ['Three days'], includedBenefits: ['Entry'], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' },
+    { name: 'Sponsor', price: 120, benefits: ['Badge'], includedBenefits: ['Entry', 'Three days'], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' },
+    { name: 'Super', price: 300, benefits: ['Dinner'], includedBenefits: [], includesTier: 'Sponsor', maxPerPerson: 1, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' },
+    { name: 'Solo', price: 10, benefits: ['Sticker'], includedBenefits: [], includesTier: null, maxPerPerson: 1, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' },
   ]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_hidden: true }), {}, now).tiers.map((tier) => tier.price), [null, null, null, null, null]);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, tiers_enabled: false }), {}, now).tiers, []);
   assert.deepEqual(ser.publicEventDetail(row({ ...event, price_type: 'free' }), {}, now).tiers, []);
   assert.deepEqual(ser.managedEvent(event).ticketTiers[1], {
-    id: 't-tier2', name: 'Weekend', price: '80', benefits: 'Three days', includes: 't-tier1', previousDisplay: 'full', maxPerPerson: 1,
+    id: 't-tier2', name: 'Weekend', price: '80', benefits: 'Three days', includes: 't-tier1', previousDisplay: 'full', maxPerPerson: 1, limit: '', currency: '',
     paymentMethods: [], paymentLink: '', paymentQrUrl: '', closesLocal: '',
   });
 });
@@ -511,7 +511,7 @@ test('a tier can include any other tier, never round in a loop, and one person c
   ]);
   const event = row({ tiers_enabled: true, ticket_tiers: saved.fields.ticket_tiers });
   const shown = ser.publicEventDetail(event, {}, now).tiers;
-  assert.deepEqual(shown[3], { name: 'Day pass', price: 25, benefits: ['One day'], includedBenefits: ['Entry', 'Badge'], includesTier: null, maxPerPerson: 3, methods: [], closesAt: null, closed: false });
+  assert.deepEqual(shown[3], { name: 'Day pass', price: 25, benefits: ['One day'], includedBenefits: ['Entry', 'Badge'], includesTier: null, maxPerPerson: 3, methods: [], closesAt: null, closed: false, limit: null, left: null, full: false, currency: 'SGD' });
   assert.equal(shown[2].includesTier, 'Sponsor');
   assert.deepEqual(ser.managedEvent(event).ticketTiers.map((tier) => [tier.includes, tier.maxPerPerson]), [['', 1], ['t-attendee', 1], ['t-sponsor1', 1], ['t-attendee', 3]]);
 
@@ -535,9 +535,12 @@ test('a tier can include any other tier, never round in a loop, and one person c
   assert.equal(bad('2.5').field, 'tierMaxPerPerson');
   assert.equal(bad('').fields.ticket_tiers[0].max_per_person, 1);
 
-  // A basket: several tiers, more than one only where the tier allows.
-  const basket = (items, discount = false) => rules.basketPrice(event, items, { volunteerDiscount: discount });
-  const both = basket([{ tier: 3, tierName: 'Day pass', quantity: 2 }, { tier: 0, tierName: 'Attendee', quantity: 1 }]);
+  // One tier per person at checkout, more than one of it only where the
+  // tier allows; an upgrade of an older ticket may keep several tiers.
+  const basket = (items, discount = false, allowMany = false) => rules.basketPrice(event, items, { volunteerDiscount: discount, allowMany });
+  assert.equal(basket([{ tier: 3, tierName: 'Day pass', quantity: 2 }, { tier: 0, tierName: 'Attendee', quantity: 1 }]).error, 'one_tier_only');
+  assert.equal(basket([{ tier: 3, tierName: 'Day pass', quantity: 2 }]).amount, 50);
+  const both = basket([{ tier: 3, tierName: 'Day pass', quantity: 2 }, { tier: 0, tierName: 'Attendee', quantity: 1 }], false, true);
   assert.equal(both.ok, true);
   assert.deepEqual(both.items, [
     { id: 't-attendee', name: 'Attendee', quantity: 1, price: 60 },
@@ -547,7 +550,7 @@ test('a tier can include any other tier, never round in a loop, and one person c
   assert.equal(both.amount, 110);
   assert.equal(basket([{ tier: 3, tierName: 'Day pass', quantity: 4 }]).error, 'tier_quantity');
   assert.equal(basket([{ tier: 0, tierName: 'Attendee', quantity: 2 }]).error, 'tier_quantity');
-  assert.equal(basket([{ tier: 0, tierName: 'Attendee' }, { tier: 0, tierName: 'Attendee' }]).error, 'bad_request');
+  assert.equal(basket([{ tier: 0, tierName: 'Attendee' }, { tier: 0, tierName: 'Attendee' }], false, true).error, 'bad_request');
   assert.equal(basket([]).error, 'tier_required');
   assert.equal(basket([{ tier: 1, tierName: 'Renamed' }]).error, 'tier_changed');
   // The volunteer benefit comes off the total once.
@@ -949,4 +952,15 @@ test('an admin reset code is three groups of five unambiguous characters', () =>
   const code = crypto.randomBytesCode();
   assert.match(code, /^[23456789a-hjkmnp-z]{5}-[23456789a-hjkmnp-z]{5}-[23456789a-hjkmnp-z]{5}$/);
   assert.notEqual(crypto.randomBytesCode(), code);
+});
+
+test('the attendee CSV quotes what needs it, keeps UTF-8, and defuses formulas', async () => {
+  const { csvText } = await import('../js/attendees-csv.js');
+  const text = csvText([
+    ['Name', 'Note', 'Amount'],
+    ['Fox, the "Red"', 'line one\nline two', 45.5],
+    ['狐狸 🦊', '=HYPERLINK("x")', null],
+    ['+6591234567', '-x', -3],
+  ]);
+  assert.equal(text, '\uFEFFName,Note,Amount\r\n"Fox, the ""Red""","line one\nline two",45.5\r\n狐狸 🦊,"\'=HYPERLINK(""x"")",\r\n\'+6591234567,\'-x,-3\r\n');
 });

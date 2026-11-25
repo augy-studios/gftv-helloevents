@@ -1037,7 +1037,8 @@ function readMeals(body, fields) {
 
 // One ticket tier from the form: { name, price, benefits (one per line),
 // includes (another tier's id, or blank for none), previousDisplay,
-// maxPerPerson (blank or 1 for once per person, up to MAX_PER_PERSON) },
+// maxPerPerson (blank or 1 for once per person, up to MAX_PER_PERSON),
+// limit (how many people it takes, blank for no limit, migrations/025) },
 // as { ok: true, tier } (tier null when
 // it is left wholly blank, so an untouched card is dropped) or
 // { ok: false, field }. A tier needs a name and a price (0 for a free tier).
@@ -1082,6 +1083,17 @@ function readTier(entry, timeZone = DEFAULT_TIMEZONE) {
   const most = readMaxPerPerson(entry.maxPerPerson);
   if (!most.ok) {
     return { ok: false, field: 'tierMaxPerPerson' };
+  }
+  // How many people it takes (migrations/025), on top of the event's own
+  // capacity: blank for no limit.
+  const limit = readMealLimit(entry.limit);
+  if (!limit.ok) {
+    return { ok: false, field: 'tierLimit' };
+  }
+  // Its own currency, blank for the event's.
+  const currency = readTierCurrency(entry.currency);
+  if (!currency.ok) {
+    return { ok: false, field: 'tierCurrency' };
   }
   let includes = null;
   if (typeof entry.includes === 'string' && TIER_ID.test(entry.includes)) {
@@ -1138,11 +1150,29 @@ function readTier(entry, timeZone = DEFAULT_TIMEZONE) {
       includes_previous: includesPrevious,
       previous_display: previousDisplay,
       max_per_person: most.value,
+      limit: limit.limit,
+      currency: currency.code,
       payment_methods: PAYMENT_METHODS.filter((method) => methods.includes(method)),
       payment_link: link.url,
       payment_qr_path: null,
     },
   };
+}
+
+// A tier's own currency from the form: blank for the event's (null), else
+// an ISO 4217 code, as the event's currency is checked.
+function readTierCurrency(value) {
+  if (value === undefined || value === null) {
+    return { ok: true, code: null };
+  }
+  const code = cleanText(value, 3).toUpperCase();
+  if (code === '') {
+    return { ok: true, code: null };
+  }
+  if (!/^[A-Z]{3}$/.test(code) || (CURRENCIES.size && !CURRENCIES.has(code))) {
+    return { ok: false };
+  }
+  return { ok: true, code };
 }
 
 // How many of a tier one person can buy: blank (or 1) for once, else 2 to
@@ -1268,7 +1298,21 @@ function readTiers(body, fields) {
   if (fields.price_type !== 'paid' || !fields.tiers_enabled || tiers.length === 0) {
     return null;
   }
-  const prices = tiers.map((tier) => tier.price);
+  // The range the cards show is in the event's currency, so it comes from
+  // the tiers sold in it; with none, the price is "to be announced".
+  const prices = tiers
+    .filter((tier) => {
+      if (tier.currency === null) {
+        return true;
+      }
+      return tier.currency === fields.currency;
+    })
+    .map((tier) => tier.price);
+  if (prices.length === 0) {
+    fields.price_min = null;
+    fields.price_max = null;
+    return null;
+  }
   fields.price_min = Math.min(...prices);
   fields.price_max = null;
   if (Math.max(...prices) > fields.price_min) {
@@ -1343,12 +1387,58 @@ export function storedTiers(row) {
       includes_previous: tier.includes_previous === true,
       previous_display: previousDisplay,
       max_per_person: Math.min(most, MAX_PER_PERSON),
+      limit: storedLimit(tier.limit),
+      currency: storedCurrency(tier.currency),
       payment_methods: methods,
       payment_link: link,
       payment_qr_path: qrPath,
     });
   }
   return settleIncludes(tiers);
+}
+
+// A tier's own currency as stored, or null for the event's.
+function storedCurrency(value) {
+  if (typeof value === 'string' && /^[A-Z]{3}$/.test(value)) {
+    return value;
+  }
+  return null;
+}
+
+// The currency a tier is sold in: its own, or the event's (SGD when the
+// event has none).
+export function tierCurrency(row, tier) {
+  if (tier && tier.currency) {
+    return tier.currency;
+  }
+  if (row && typeof row.currency === 'string' && row.currency) {
+    return row.currency;
+  }
+  return 'SGD';
+}
+
+// The places left in a tier with a limit (migrations/025), or null for one
+// without. row.tier_taken holds how many people hold each tier, by id
+// (events.js withTierCounts); without it, none are taken.
+export function tierLeft(row, tier) {
+  if (!tier || tier.limit === null || tier.limit === undefined) {
+    return null;
+  }
+  let taken = 0;
+  if (row && row.tier_taken && Number.isInteger(row.tier_taken[tier.id])) {
+    taken = row.tier_taken[tier.id];
+  }
+  return Math.max(0, tier.limit - taken);
+}
+
+// Whether a tier has no places left (migrations/025).
+export function tierFull(row, tier) {
+  return tierLeft(row, tier) === 0;
+}
+
+// Whether any tier of an event has a limit, so its holders need counting.
+export function tiersLimited(row) {
+  return storedTiers(row).some((tier) => tier.limit !== null);
 }
 
 // Whether a tier has stopped being sold (migrations/024): its closing time
@@ -1791,6 +1881,7 @@ export function needsCheckout(row) {
 export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerDiscount = false, ignoreClosed = false } = {}) {
   let tier = null;
   let price;
+  let currency = tierCurrency(row, null);
   const tiers = storedTiers(row);
   if (sellsTiers(row)) {
     if (!Number.isInteger(tierIndex) || tierIndex < 0 || tierIndex >= tiers.length) {
@@ -1804,22 +1895,28 @@ export function ticketPrice(row, { tierIndex = null, tierName = null, volunteerD
     }
     tier = tiers[tierIndex].name;
     price = tiers[tierIndex].price;
+    currency = tierCurrency(row, tiers[tierIndex]);
   } else if (hasSingleAmount(row)) {
     price = Number(row.price_min);
   } else {
     return { ok: false, error: 'payment_unavailable' };
   }
-  const discount = volunteerOff(row, price, volunteerDiscount);
+  const discount = volunteerOff(row, price, volunteerDiscount, currency);
   const amount = Math.round((price - discount) * 100) / 100;
-  return { ok: true, tier, price, amount, discount };
+  return { ok: true, tier, price, amount, discount, currency };
 }
 
-// The volunteer benefit on an amount: what it takes off, rounded to cents.
-function volunteerOff(row, price, volunteerDiscount) {
+// The volunteer benefit on an amount in currency: what it takes off,
+// rounded to cents. A benefit of a set amount is in the event's currency, so
+// it comes off only a price in that currency; a percentage comes off any.
+function volunteerOff(row, price, volunteerDiscount, currency = row.currency) {
   let discount = 0;
   if (volunteerDiscount && volunteerDiscountActive(row)) {
     const value = Number(row.volunteer_discount_value);
     if (row.volunteer_discount_type === 'amount') {
+      if (currency !== tierCurrency(row, null)) {
+        return 0;
+      }
       discount = Math.min(price, value);
     } else {
       discount = (price * Math.min(value, 100)) / 100;
@@ -1830,20 +1927,27 @@ function volunteerOff(row, price, volunteerDiscount) {
 
 // What a basket of tiers costs this person (migrations/022): items, from
 // the checkout page, a list of { tier (its place in the list), tierName
-// (so a list that changed meanwhile is caught), quantity }. Each tier at
-// most once in the list, and more than one of it only up to its
+// (so a list that changed meanwhile is caught), quantity }. Only one tier
+// (one_tier_only), unless allowMany (an upgrade of an older ticket holding
+// several). Each tier at most once in the list, and more than one of it only up to its
 // max_per_person. The volunteer benefit comes off the total once.
 //
 // -> { ok: true, tiers, items: [{ id, name, quantity, price }], text,
-// price, amount, discount } (text: the tiers in words, "Day pass × 2,
+// price, amount, discount, currency } (text: the tiers in words, "Day pass × 2,
 // Dinner", as kept in payment_tier), or { ok: false, error }.
-export function basketPrice(row, items, { volunteerDiscount = false, now = Date.now(), allowClosed = [] } = {}) {
+export function basketPrice(row, items, { volunteerDiscount = false, now = Date.now(), allowClosed = [], allowMany = false } = {}) {
   const tiers = storedTiers(row);
   if (!sellsTiers(row)) {
     return { ok: false, error: 'payment_unavailable' };
   }
   if (!Array.isArray(items) || items.length === 0) {
     return { ok: false, error: 'tier_required' };
+  }
+  // One tier per person at checkout (as many of it as the tier allows). A
+  // ticket bought with several tiers before that keeps them through an
+  // upgrade (allowMany).
+  if (items.length > 1 && !allowMany) {
+    return { ok: false, error: 'one_tier_only' };
   }
   if (items.length > tiers.length) {
     return { ok: false, error: 'bad_request' };
@@ -1870,6 +1974,11 @@ export function basketPrice(row, items, { volunteerDiscount = false, now = Date.
     if (tierClosed(tier, now) && !allowClosed.includes(tier.id)) {
       return { ok: false, error: 'tier_closed' };
     }
+    // Nor one with no places left (migrations/025), as far as the counts
+    // read with the event say; the database checks again as it sells it.
+    if (tierFull(row, tier) && !allowClosed.includes(tier.id)) {
+      return { ok: false, error: 'tier_full' };
+    }
     let quantity = 1;
     if (item.quantity !== undefined) {
       quantity = item.quantity;
@@ -1884,10 +1993,16 @@ export function basketPrice(row, items, { volunteerDiscount = false, now = Date.
   const place = (id) => tiers.findIndex((tier) => tier.id === id);
   picked.sort((first, second) => place(first.id) - place(second.id));
   chosen.sort((first, second) => place(first.id) - place(second.id));
+  // One order is paid in one currency (per-tier currencies).
+  const currencies = new Set(chosen.map((tier) => tierCurrency(row, tier)));
+  if (currencies.size > 1) {
+    return { ok: false, error: 'tiers_currency_mixed' };
+  }
+  const currency = tierCurrency(row, chosen[0]);
   const price = Math.round(picked.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
-  const discount = volunteerOff(row, price, volunteerDiscount);
+  const discount = volunteerOff(row, price, volunteerDiscount, currency);
   const amount = Math.round((price - discount) * 100) / 100;
-  return { ok: true, tiers: chosen, items: picked, text: basketText(picked), price, amount, discount };
+  return { ok: true, tiers: chosen, items: picked, text: basketText(picked), price, amount, discount, currency };
 }
 
 // A basket's tiers in words: "Day pass × 2, Dinner".
@@ -2452,7 +2567,11 @@ export function upgradeOptions(row, stored, { volunteerDiscount = false, now = D
   const heldIds = basket.map((item) => item.id);
   const options = [];
   storedTiers(row).forEach((tier, index) => {
-    if (heldIds.includes(tier.id) || tier.price <= from.price || tierClosed(tier, now)) {
+    if (heldIds.includes(tier.id) || tier.price <= from.price || tierClosed(tier, now) || tierFull(row, tier)) {
+      return;
+    }
+    // Only to a tier sold in the same currency, so what was paid counts.
+    if (tierCurrency(row, tier) !== tierCurrency(row, storedTiers(row)[from.tier])) {
       return;
     }
     const priced = upgradeBasket(row, stored, index, tier.name, { volunteerDiscount, now });
@@ -2484,11 +2603,15 @@ export function upgradeBasket(row, stored, index, tierName, { volunteerDiscount 
   if (target.price <= from.price || basket.some((item) => item.id === target.id)) {
     return { ok: false, error: 'upgrade_unavailable' };
   }
+  // Only within one currency: what was paid is credited as it stands.
+  if (tierCurrency(row, target) !== tierCurrency(row, tiers[from.tier])) {
+    return { ok: false, error: 'upgrade_currency' };
+  }
   const items = basket
     .filter((item) => item !== from)
     .map((item) => ({ tier: item.tier, tierName: item.tierName, quantity: item.quantity }));
   items.push({ tier: index, tierName, quantity: 1 });
-  const priced = basketPrice(row, items, { volunteerDiscount, now, allowClosed: basket.map((item) => item.id) });
+  const priced = basketPrice(row, items, { volunteerDiscount, now, allowClosed: basket.map((item) => item.id), allowMany: true });
   if (!priced.ok) {
     return priced;
   }
@@ -2498,5 +2621,5 @@ export function upgradeBasket(row, stored, index, tierName, { volunteerDiscount 
   }
   const amount = Math.round((priced.amount + donationOf(row, stored.registration)) * 100) / 100;
   const due = Math.max(0, Math.round((amount - paidSoFar(stored)) * 100) / 100);
-  return { ok: true, items: priced.items, text: priced.text, tiers: priced.tiers, amount, due, methods };
+  return { ok: true, items: priced.items, text: priced.text, tiers: priced.tiers, amount, due, methods, currency: priced.currency };
 }

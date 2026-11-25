@@ -10,6 +10,13 @@
 // (migrations/022), and then at most how many (blank for MAX_PER_PERSON).
 // Without that, each person buys it once at most.
 //
+// A card can be in its own currency (blank for the event's): the event and
+// checkout pages show its price in it, and its buyers pay in it.
+//
+// A card can also cap how many people the tier takes (migrations/025),
+// blank for no limit, on top of the event's own capacity. Once that many
+// people hold it, it is sold out.
+//
 // The server checks every field again (api/_lib/event-rules.js readTiers)
 // and drops a card left wholly blank.
 //
@@ -25,6 +32,7 @@ import { createElement, withBusy } from './ui.js';
 import { iconNode } from './icons.js';
 import { post } from './api.js';
 import { qrPicture } from './picture-file.js';
+import { currencyLabel, currencyCodeFrom } from './choices.js';
 
 const MAX_TIERS = 10;
 const MAX_PER_PERSON = 20;
@@ -218,6 +226,12 @@ function tierCard(values) {
         createElement('span', { i18n: 'manage.field.tierPrice' }),
         createElement('input', { type: 'number', 'data-key': 'price', min: 0, step: '0.01', inputmode: 'decimal' }),
       ]),
+      // Its own currency, blank for the event's (the Currency field above).
+      createElement('label', { class: 'field span-2' }, [
+        createElement('span', { i18n: 'manage.field.tierCurrency' }),
+        createElement('input', { type: 'text', 'data-key': 'currency', list: 'currencyList', maxlength: 80, autocomplete: 'off', spellcheck: 'false', 'data-i18n-attr': 'placeholder:manage.tier-currency-placeholder', placeholder: translate('manage.tier-currency-placeholder') }),
+        createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierCurrency' }),
+      ]),
       createElement('label', { class: 'field span-2' }, [
         createElement('span', { i18n: 'manage.field.tierBenefits' }),
         createElement('textarea', { 'data-key': 'benefits', rows: 3, maxlength: 4200 }),
@@ -240,6 +254,12 @@ function tierCard(values) {
         createElement('input', { type: 'number', 'data-key': 'maxPerPerson', min: 2, max: MAX_PER_PERSON, step: 1, inputmode: 'numeric', placeholder: String(MAX_PER_PERSON) }),
         createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierMaxPerPerson' }),
       ]),
+      // How many people it takes (migrations/025), blank for no limit.
+      createElement('label', { class: 'field span-2' }, [
+        createElement('span', { i18n: 'manage.field.tierLimit' }),
+        createElement('input', { type: 'number', 'data-key': 'limit', min: 1, step: 1, inputmode: 'numeric' }),
+        createElement('span', { class: 'field-hint', i18n: 'manage.hint.tierLimit' }),
+      ]),
       // When it stops being sold (migrations/024): its holders can then no
       // longer change their registration answers or upgrade from it.
       createElement('label', { class: 'field span-2' }, [
@@ -252,7 +272,8 @@ function tierCard(values) {
     createElement('input', { type: 'hidden', 'data-key': 'id' }),
   ]);
 
-  for (const key of ['name', 'price', 'benefits', 'closesLocal']) {
+  input(card, 'currency').value = currencyLabel(values.currency);
+  for (const key of ['name', 'price', 'benefits', 'limit', 'closesLocal']) {
     let value = values[key];
     if (value === null || value === undefined) {
       value = '';
@@ -377,6 +398,8 @@ export function readTiers() {
       includes: card.dataset.includes,
       previousDisplay: input(card, 'previousDisplay').value,
       maxPerPerson: maxPerPerson(card),
+      limit: input(card, 'limit').value,
+      currency: currencyCodeFrom(input(card, 'currency').value),
       paymentMethods: METHODS.filter((method) => input(card, `pay-${method}`).checked),
       paymentLink: input(card, 'paymentLink').value,
       closesLocal: input(card, 'closesLocal').value,

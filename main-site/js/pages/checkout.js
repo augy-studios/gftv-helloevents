@@ -55,7 +55,28 @@ let upgradeMethod = null;
 let proof = null;
 
 const eventHref = () => `/e/${encodeURIComponent(slug)}`;
-const money = (amount) => formatMoney(amount, checkout.currency);
+// The currency the order is in: the picked ticket's (each tier can have
+// its own), else the event's.
+function orderCurrency() {
+  if (picked) {
+    for (const place of picked.keys()) {
+      const ticket = checkout.tickets[place];
+      if (ticket && ticket.currency) {
+        return ticket.currency;
+      }
+    }
+  }
+  return checkout.currency;
+}
+const money = (amount) => formatMoney(amount, orderCurrency());
+// The currency of the ticket held, for its payment and upgrades.
+function heldCurrency() {
+  const payment = checkout.viewer.payment;
+  if (payment && payment.currency) {
+    return payment.currency;
+  }
+  return checkout.currency;
+}
 
 function setText(id, text) {
   byId(id).textContent = text;
@@ -99,9 +120,9 @@ function choiceCard({ name, value, checked, title, lines = [], aside = null, typ
 function priceAside(ticket) {
   const box = createElement('span', { class: 'choice-price' });
   if (ticket.amount < ticket.price) {
-    box.append(createElement('s', { class: 'muted small', text: tierPriceText(ticket.price, checkout.currency) }));
+    box.append(createElement('s', { class: 'muted small', text: tierPriceText(ticket.price, ticket.currency) }));
   }
-  box.append(createElement('strong', { text: tierPriceText(ticket.amount, checkout.currency) }));
+  box.append(createElement('strong', { text: tierPriceText(ticket.amount, ticket.currency) }));
   return box;
 }
 
@@ -113,30 +134,30 @@ function sellsTiers() {
   return checkout.tickets[0].index !== null;
 }
 
-// Whether a ticket can be picked: a way to pay it is set up, and it has not
-// closed (migrations/024).
+// Whether a ticket can be picked: a way to pay it is set up, it has not
+// closed (migrations/024), and it has places left (migrations/025).
 function onSale(ticket) {
-  if (ticket.closed) {
+  if (ticket.closed || ticket.full) {
     return false;
   }
   return ticket.methods.length > 0;
 }
 
-// The picks still possible: tickets on sale only, each at most its limit;
-// the first one on sale when nothing is picked yet. Without tiers, the one
-// ticket.
+// The pick still possible: one ticket on sale (one tier per person), at
+// most its limit; the first one on sale when nothing is picked yet.
+// Without tiers, the one ticket.
 function settlePicks() {
   const tickets = checkout.tickets;
   const kept = new Map();
   if (picked) {
     for (const [place, quantity] of picked) {
       const ticket = tickets[place];
-      if (ticket && onSale(ticket)) {
+      if (ticket && onSale(ticket) && kept.size === 0) {
         kept.set(place, Math.min(Math.max(1, quantity), ticket.maxPerPerson));
       }
     }
   }
-  if ((picked === null || !sellsTiers()) && kept.size === 0) {
+  if (kept.size === 0) {
     const first = tickets.findIndex(onSale);
     if (first >= 0) {
       kept.set(first, 1);
@@ -167,11 +188,7 @@ function renderTickets() {
   const tickets = checkout.tickets;
   settlePicks();
   const tiered = sellsTiers();
-  let role = 'radiogroup';
-  if (tiered) {
-    role = 'group';
-  }
-  byId('ticketList').setAttribute('role', role);
+  byId('ticketList').setAttribute('role', 'radiogroup');
   let hintHidden = true;
   if (tiered && tickets.length > 1) {
     hintHidden = false;
@@ -182,7 +199,13 @@ function renderTickets() {
     if (!title) {
       title = translate('checkout.ticket-single');
     }
-    const lines = [...ticket.benefits];
+    // Everything it includes of another tier, as the event page shows it:
+    // that tier named, or its benefits listed first.
+    const lines = [];
+    if (ticket.includesTier) {
+      lines.push(translate('event.tier-includes', { tier: ticket.includesTier }));
+    }
+    lines.push(...ticket.includedBenefits, ...ticket.benefits);
     if (ticket.maxPerPerson > 1) {
       lines.push(translate('event.tier-max', { count: ticket.maxPerPerson }));
     }
@@ -190,15 +213,18 @@ function renderTickets() {
     // be picked.
     if (ticket.closed) {
       lines.push(translate('event.tier-closed'));
+    } else if (ticket.full) {
+      lines.push(translate('event.tier-full'));
     } else if (ticket.methods.length === 0) {
       lines.push(translate('checkout.ticket-unavailable'));
+    } else if (Number.isInteger(ticket.left)) {
+      lines.push(translate('event.tier-left', { count: ticket.left }));
     }
-    let type = 'radio';
+    const type = 'radio';
     let aside = priceAside(ticket);
     if (tiered) {
-      type = 'checkbox';
       // The volunteer benefit comes off the order's total, below.
-      aside = createElement('span', { class: 'choice-price' }, [createElement('strong', { text: tierPriceText(ticket.price, checkout.currency) })]);
+      aside = createElement('span', { class: 'choice-price' }, [createElement('strong', { text: tierPriceText(ticket.price, ticket.currency) })]);
     }
     const card = choiceCard({ name: 'ticket', value: String(place), checked: picked.has(place), title, lines, aside, type });
     if (!onSale(ticket)) {
@@ -271,8 +297,12 @@ function ticketAmounts() {
   let discount = 0;
   const benefit = checkout.volunteerBenefit;
   if (benefit) {
+    // A set amount is in the event's currency, so it comes off only an
+    // order in that currency (as the server works it out).
     if (benefit.type === 'amount') {
-      discount = Math.min(price, benefit.value);
+      if (orderCurrency() === checkout.currency) {
+        discount = Math.min(price, benefit.value);
+      }
     } else {
       discount = (price * Math.min(benefit.value, 100)) / 100;
     }
@@ -334,11 +364,11 @@ function renderOrder() {
     if (quantity > 1) {
       label = translate('checkout.order-quantity', { name: ticket.name, count: quantity });
     }
-    pairs.push([label, tierPriceText(ticket.price * quantity, checkout.currency)]);
+    pairs.push([label, tierPriceText(ticket.price * quantity, orderCurrency())]);
   }
   const amounts = orderAmounts();
   if (!sellsTiers() || amounts.discount > 0) {
-    pairs.push([translate('checkout.order-price'), tierPriceText(amounts.price, checkout.currency)]);
+    pairs.push([translate('checkout.order-price'), tierPriceText(amounts.price, orderCurrency())]);
   }
   if (amounts.discount > 0) {
     pairs.push([translate('checkout.order-discount'), `-${money(amounts.discount)}`]);
@@ -346,7 +376,7 @@ function renderOrder() {
   if (amounts.donation > 0) {
     pairs.push([translate('checkout.order-donation'), money(amounts.donation)]);
   }
-  pairs.push([translate('checkout.order-total'), tierPriceText(amounts.amount, checkout.currency)]);
+  pairs.push([translate('checkout.order-total'), tierPriceText(amounts.amount, orderCurrency())]);
   pairs.push([translate('checkout.order-method'), translate(`payment.method.${pickedMethod}`)]);
   fillLines('orderLines', pairs);
 
@@ -390,7 +420,8 @@ function renderRegistration() {
     registrationDrawn = '';
     return;
   }
-  const drawFor = JSON.stringify([fields, checkout.registration.currency, asked.accountMissing, mine.personal, getLocale()]);
+  // A donation is in the order's currency.
+  const drawFor = JSON.stringify([fields, orderCurrency(), asked.accountMissing, mine.personal, getLocale()]);
   if (drawFor === registrationDrawn && registrationForm) {
     return;
   }
@@ -401,7 +432,7 @@ function renderRegistration() {
     photos: mine.photos,
     personal: mine.personal,
     accountMissing: asked.accountMissing,
-    currency: checkout.registration.currency,
+    currency: orderCurrency(),
     idPrefix: 'checkoutReg',
     slug,
     errorBox: byId('reserveError'),
@@ -577,8 +608,8 @@ function renderUpgrade(payment) {
     value: String(option.index),
     checked: option.index === upgradePick,
     title: option.name,
-    lines: [translate('registration.upgrade-total', { total: tierPriceText(option.total, checkout.currency) })],
-    aside: createElement('span', { class: 'choice-price' }, [createElement('strong', { text: translate('registration.upgrade-due', { due: tierPriceText(option.due, checkout.currency) }) })]),
+    lines: [translate('registration.upgrade-total', { total: tierPriceText(option.total, heldCurrency()) })],
+    aside: createElement('span', { class: 'choice-price' }, [createElement('strong', { text: translate('registration.upgrade-due', { due: tierPriceText(option.due, heldCurrency()) }) })]),
   })));
   // The ways to pay: the ticket's own ways (the server checks the new tiers
   // share them).
@@ -601,8 +632,8 @@ function renderUpgrade(payment) {
   })));
   const option = upgrade.options.find((each) => each.index === upgradePick);
   fillLines('upgradeLines', [
-    [translate('checkout.order-total'), tierPriceText(option.total, checkout.currency)],
-    [translate('checkout.order-due'), tierPriceText(option.due, checkout.currency)],
+    [translate('checkout.order-total'), tierPriceText(option.total, heldCurrency())],
+    [translate('checkout.order-due'), tierPriceText(option.due, heldCurrency())],
   ]);
 }
 
@@ -657,6 +688,11 @@ async function reserve() {
       byId('reserveError').textContent = registrationErrorText(error, checkout.registration.fields);
       return;
     }
+    // A tier sold out meanwhile (migrations/025): show the tickets as they
+    // now stand, with the reason.
+    if (error.code === 'tier_full') {
+      await load();
+    }
     throw error;
   }
   await load();
@@ -689,14 +725,9 @@ byId('ticketList').addEventListener('change', (changed) => {
     picked.set(place, Math.min(quantity, checkout.tickets[place].maxPerPerson));
     target.value = String(picked.get(place));
   } else {
+    // One tier per person: picking one replaces any other.
     const place = Number(target.value);
-    if (!sellsTiers()) {
-      picked = new Map([[place, 1]]);
-    } else if (target.checked) {
-      picked.set(place, 1);
-    } else {
-      picked.delete(place);
-    }
+    picked = new Map([[place, 1]]);
     renderTickets();
     const again = byId('ticketList').querySelector(`input[name="ticket"][value="${place}"]`);
     if (again) {
@@ -752,7 +783,16 @@ byId('upgradeMethodList').addEventListener('change', (changed) => {
 byId('upgradeBtn').addEventListener('click', () => {
   const option = checkout.viewer.upgrade.options.find((each) => each.index === upgradePick);
   withBusy(byId('upgradeBtn'), byId('upgradeError'), async () => {
-    const data = await post('/api/events/payment', { slug, action: 'upgrade', tier: option.index, tierName: option.name, method: upgradeMethod });
+    let data;
+    try {
+      data = await post('/api/events/payment', { slug, action: 'upgrade', tier: option.index, tierName: option.name, method: upgradeMethod });
+    } catch (error) {
+      // The tier sold out meanwhile (migrations/025): it drops off the list.
+      if (error.code === 'tier_full') {
+        await load();
+      }
+      throw error;
+    }
     checkout = data.checkout;
     proof = null;
     render();
@@ -778,6 +818,13 @@ byId('payProof').addEventListener('change', async () => {
 
 byId('reportForm').addEventListener('submit', (submitted) => {
   submitted.preventDefault();
+  // A screenshot is needed (the one sent before will do); the reference is
+  // optional.
+  if (!proof && !checkout.viewer.payment.hasProof) {
+    byId('reportError').textContent = translate('error.payment_proof_required');
+    byId('payProofPick').focus();
+    return;
+  }
   withBusy(byId('reportSubmit'), byId('reportError'), async () => {
     const body = { slug, action: 'report', reference: byId('payReference').value };
     if (proof) {

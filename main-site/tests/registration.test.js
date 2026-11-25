@@ -328,7 +328,7 @@ test('upgrading to a dearer tier keeps what was paid, and only the difference is
   assert.equal((await fox.call(detail, { query: { slug: 'mega-con' } })).json.event.viewer.canUpgrade, true);
 
   // Paid and confirmed, then upgraded.
-  await fox.call(payment, { method: 'POST', body: { slug: 'mega-con', action: 'report', reference: 'PAY-1' } });
+  await fox.call(payment, { method: 'POST', body: { slug: 'mega-con', action: 'report', reference: 'PAY-1', proof: (await webp(300, 600)).toString('base64') } });
   const pending = await fox.call(payment, { method: 'POST', body: { slug: 'mega-con', action: 'upgrade', tier: 1, tierName: 'Sponsor', method: 'link' } });
   assert.equal(pending.json.error, 'payment_pending_check', 'not while a reported payment waits for a check');
   await editor.call(manage, { method: 'POST', body: { action: 'payment-confirm', id: event.id, username: 'fox', staff: true, paid: true } });

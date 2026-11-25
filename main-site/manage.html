@@ -692,7 +692,10 @@
                     </fieldset>
 
                     <section class="attendees" id="attendeesBox" hidden aria-labelledby="attendeesTitle">
-                        <h3 id="attendeesTitle" class="section-label"></h3>
+                        <div class="row between">
+                            <h3 id="attendeesTitle" class="section-label"></h3>
+                            <button class="btn btn-small" type="button" id="attendeesCsv" hidden><span data-icon="download"></span><span data-i18n="manage.attendees-csv">Download CSV</span></button>
+                        </div>
                         <p class="muted small" id="attendeesMeals" hidden></p>
                         <p class="muted small" id="attendeesVolunteers" hidden></p>
                         <p class="muted small" id="attendeesFursuiters" hidden></p>
@@ -711,11 +714,11 @@
                         <p class="muted small" data-i18n="manage.editors-lede">People you add here can edit this event and manage its attendees, but cannot publish, cancel or delete it. They need two-step sign-in (an authenticator app or a passkey) turned on before it works.</p>
                         <ul class="item-list" id="eventEditorList"></ul>
                         <div class="row u-mt-1" id="eventEditorAdd">
-                            <label class="field grow">
-                                <span data-i18n="manage.field.editorUsername">Add an editor (active in the last 30 days)</span>
-                                <input id="eventEditorUsername" type="text" list="eventEditorCandidates" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Pick or type a username" data-i18n-attr="placeholder:manage.editor-placeholder">
-                            </label>
-                            <datalist id="eventEditorCandidates"></datalist>
+                            <div class="field grow editor-search">
+                                <label for="eventEditorUsername" data-i18n="manage.field.editorUsername">Add an editor</label>
+                                <input id="eventEditorUsername" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="eventEditorOptions" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Type a username or name" data-i18n-attr="placeholder:manage.editor-placeholder">
+                                <ul class="editor-options" id="eventEditorOptions" role="listbox" hidden></ul>
+                            </div>
                             <button class="btn" type="button" id="eventEditorAddBtn"><span data-icon="plus"></span><span data-i18n="manage.editor-add">Add</span></button>
                         </div>
                         <div class="callout danger" id="eventEditorError" role="alert"></div>

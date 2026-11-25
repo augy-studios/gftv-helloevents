@@ -3,7 +3,7 @@
 // a public request; the serializers then pick the fields each caller may see.
 
 import { database, TABLES } from './supabase.js';
-import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive, lepakOffered, searchGroups } from './event-rules.js';
+import { releasedFilter, isSlug, storedMeals, volunteerDiscountActive, lepakOffered, searchGroups, sellsTiers, tiersLimited } from './event-rules.js';
 import { CONTACT_PRESETS, storedContactFields } from '../../js/contact-fields.js';
 
 // "going" on cards and pages counts the people coming to the whole event,
@@ -97,6 +97,7 @@ export async function withMealCounts(row) {
   if (!row) {
     return row;
   }
+  await withTierCounts(row);
   row.meal_taken = {};
   row.lepak_taken = 0;
   if (lepakOffered(row)) {
@@ -125,6 +126,32 @@ export async function withMealCounts(row) {
   }
   for (const count of counts) {
     row.meal_taken[count.meal] = Number(count.taken);
+  }
+  return row;
+}
+
+// Adds to an event row how many people hold each of its ticket tiers
+// (row.tier_taken: { "t-abc123": 4 }, migrations/025), for the places left
+// in a tier with a limit. Nothing is asked for an event whose tiers have no
+// limits.
+export async function withTierCounts(row) {
+  if (!row) {
+    return row;
+  }
+  row.tier_taken = {};
+  if (!sellsTiers(row) || !tiersLimited(row)) {
+    return row;
+  }
+  const { data, error } = await database().rpc('gftvevents_tier_counts', { p_event_id: row.id });
+  if (error) {
+    throw error;
+  }
+  let counts = [];
+  if (Array.isArray(data)) {
+    counts = data;
+  }
+  for (const count of counts) {
+    row.tier_taken[count.tier] = Number(count.taken);
   }
   return row;
 }

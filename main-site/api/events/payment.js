@@ -5,11 +5,13 @@
 //
 // For someone holding a ticket from /checkout that is not confirmed paid yet.
 //
-// report: after paying by link or QR code, the payment's reference (as the
-// bank or app shows it) and, if they like, a screenshot of it (a WebP the
-// browser made, js/picture-file.js; payments.js checks and re-encodes it).
-// The payment then waits for an editor to check it ("submitted"). Reporting
-// again replaces the reference, and the screenshot when a new one is sent.
+// report: after paying by link or QR code, a screenshot of the payment (a
+// WebP the browser made, js/picture-file.js; payments.js checks and
+// re-encodes it), which is needed (payment_proof_required), and, if they
+// like, its reference (as the bank or app shows it). The payment then
+// waits for an editor to check it ("submitted"). Reporting again replaces
+// the reference, and the screenshot when a new one is sent (the one sent
+// before is kept otherwise).
 //
 // method: another of the ways the event offers. Paying on the day turns the
 // ticket into a plain RSVP; link or QR code waits for payment again. What
@@ -19,7 +21,8 @@
 // dearer one still sold (event-rules.js upgradeOptions), paid by method
 // (one the new tiers share). What was paid so far is kept as credit, and
 // only the difference is owed: the order waits for payment again (or is
-// paid on the day). A paid ticket can be upgraded; one whose reported
+// paid on the day). Not to a tier with no places left (migrations/025:
+// tier_full). A paid ticket can be upgraded; one whose reported
 // payment waits for a check cannot, nor once registration has closed for
 // the person (RSVPs closed, the event over, or their tier closed).
 //
@@ -29,7 +32,7 @@ import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
-import { attendance, withVolunteerSource, volunteerStanding } from '../_lib/events.js';
+import { attendance, withVolunteerSource, withTierCounts, volunteerStanding } from '../_lib/events.js';
 import { ticketOptions, readPaymentReference, registrationOpenFor, upgradeBasket, paidSoFar, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { preparePicture, storeProof, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { checkoutEvent, checkoutAnswer } from './checkout.js';
@@ -47,17 +50,26 @@ async function writePayment(eventId, userId, columns) {
   }
 }
 
-// "report": the reference, and maybe a screenshot.
+// "report": a screenshot of the payment (needed: it is what shows they
+// paid), and its reference if they like.
 async function report(request, response, event, user, stored, body) {
   if (!ONLINE_METHODS.includes(stored.payment_method)) {
     return fail(response, 400, 'payment_not_online');
   }
   const typed = readPaymentReference(body.reference);
-  if (!typed.ok || typed.reference === null) {
-    return fail(response, 400, 'payment_reference_required');
+  if (!typed.ok) {
+    return fail(response, 400, 'payment_reference_invalid');
+  }
+  let proofSent = false;
+  if (body.proof !== undefined && body.proof !== null) {
+    proofSent = true;
+  }
+  // Reporting again may keep the screenshot already sent.
+  if (!proofSent && !stored.payment_proof_path) {
+    return fail(response, 400, 'payment_proof_required');
   }
   let proofPath = stored.payment_proof_path;
-  if (body.proof !== undefined && body.proof !== null) {
+  if (proofSent) {
     const prepared = await preparePicture(body.proof, 'proof');
     if (!prepared.ok) {
       return fail(response, 400, prepared.error);
@@ -120,6 +132,7 @@ async function upgrade(request, response, event, user, stored, body) {
     return fail(response, 400, 'upgrade_unavailable');
   }
   await withVolunteerSource(event);
+  await withTierCounts(event);
   const standing = await volunteerStanding(event, user.id);
   const priced = upgradeBasket(event, stored, body.tier, body.tierName, { volunteerDiscount: standing.discount });
   if (!priced.ok) {
@@ -146,6 +159,7 @@ async function upgrade(request, response, event, user, stored, body) {
     payment_tier: priced.text,
     payment_items: priced.items,
     payment_amount: priced.amount,
+    payment_currency: priced.currency,
     payment_credit: creditKept,
     payment_reference: null,
     payment_proof_path: null,
@@ -154,6 +168,18 @@ async function upgrade(request, response, event, user, stored, body) {
   if (status !== 'paid') {
     columns.paid_at = null;
     columns.paid_by = null;
+  }
+  // The new tier takes its place first, under the event's lock, so it is
+  // held to its limit (migrations/025).
+  const { data: taken, error } = await database().rpc('gftvevents_take_tiers', { p_event_id: event.id, p_user_id: user.id, p_items: priced.items });
+  if (error) {
+    throw error;
+  }
+  if (String(taken) === 'tier_full') {
+    return fail(response, 409, 'tier_full');
+  }
+  if (String(taken) !== 'ok') {
+    return fail(response, 404, 'not_going');
   }
   await writePayment(event.id, user.id, columns);
   await deletePaymentFiles([stored.payment_proof_path]);

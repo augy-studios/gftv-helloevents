@@ -84,7 +84,7 @@
             <section class="glass-card page-card" id="orderBox" hidden>
                 <fieldset class="checkout-step" id="ticketStep">
                     <legend data-i18n="checkout.ticket-title">Your ticket</legend>
-                    <p class="small muted" id="ticketHint" hidden data-i18n="checkout.ticket-hint">Tick every ticket you would like. They are paid for together.</p>
+                    <p class="small muted" id="ticketHint" hidden data-i18n="checkout.ticket-hint">Pick one ticket.</p>
                     <div class="choice-list" id="ticketList" role="radiogroup" aria-label="Your ticket" data-i18n-attr="aria-label:checkout.ticket-title"></div>
                     <p class="callout ok small" id="discountNote" hidden data-i18n="checkout.discount-note">You volunteered at an earlier convention, so your benefit is taken off.</p>
                 </fieldset>
@@ -156,15 +156,15 @@
                     <form id="reportForm" class="u-mt-1" novalidate>
                         <h2 class="section-label" data-i18n="checkout.report-title">Done paying? Tell the organisers</h2>
                         <label class="field">
-                            <span data-i18n="checkout.reference">Payment reference</span>
-                            <input id="payReference" type="text" maxlength="120" autocomplete="off" required aria-describedby="payReferenceHint">
+                            <span data-i18n="checkout.reference">Payment reference (optional)</span>
+                            <input id="payReference" type="text" maxlength="120" autocomplete="off" aria-describedby="payReferenceHint">
                             <span class="field-hint" id="payReferenceHint" data-i18n="checkout.reference-hint">The transaction or reference number your bank or app shows.</span>
                         </label>
                         <div class="field">
-                            <span data-i18n="checkout.proof">Screenshot of the payment (optional)</span>
+                            <span data-i18n="checkout.proof">Screenshot of the payment</span>
                             <label class="btn file-btn" id="payProofPick"><span data-icon="image"></span><span data-i18n="checkout.proof-choose">Choose a screenshot</span><input type="file" id="payProof" accept="image/*" class="visually-hidden"></label>
                             <span class="small muted" id="payProofName"></span>
-                            <span class="field-hint" data-i18n="checkout.proof-hint">Only the organisers see it. It is deleted if you take back your RSVP.</span>
+                            <span class="field-hint" data-i18n="checkout.proof-hint">Needed, so the organisers can see you have paid. Only they see it, and it is deleted if you take back your RSVP.</span>
                         </div>
                         <div class="callout danger" id="reportError" role="alert"></div>
                         <div class="actions inline"><button class="btn btn-primary" type="submit" id="reportSubmit"><span data-icon="check"></span><span id="reportSubmitText"></span></button></div>

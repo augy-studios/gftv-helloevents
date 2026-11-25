@@ -96,4 +96,16 @@ test('an editor takes payment by QR code, a member pays and reports it, the edit
   await row.locator('.attendee-paid input').check();
   await expect(page.locator('#attendeesPayments')).toHaveText('Payments: 1 paid');
   await expect(row).toContainText('QR code · Paid');
+
+  // The list as a CSV file, with the payment columns.
+  const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#attendeesCsv').click()]);
+  expect(download.suggestedFilename()).toMatch(new RegExp(`^${event.slug}-attendees-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
+  const csv = (await (await import('node:fs/promises')).readFile(await download.path(), 'utf8')).replace(/^\uFEFF/, '');
+  const [heading, first] = csv.trim().split('\r\n');
+  expect(heading.split(',').slice(0, 6)).toEqual(['RSVP ID', 'Name', 'Username', 'Account', 'RSVP at (UTC)', 'Coming for']);
+  expect(heading).toContain('Payment status');
+  expect(first).toContain(MEMBER.username);
+  expect(first).toContain('PAYNOW 8812');
+  expect(first).toContain('Paid');
+  expect(first).toContain('/api/manage/payment-proof?id=');
 });

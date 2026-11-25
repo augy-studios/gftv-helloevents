@@ -59,18 +59,16 @@ test('a tier paid by its own QR code only, another on the day only', async ({ pa
   await page.locator('#rsvpCheckout').click();
   await page.waitForURL(/\/checkout\?slug=/);
   const methods = page.locator('#methodList .choice-title');
-  const ticket = (name) => page.locator('#ticketList').getByRole('checkbox', { name });
+  const ticket = (name) => page.locator('#ticketList').getByRole('radio', { name });
   await expect(ticket(/^Day pass/)).toBeChecked();
   await expect(methods).toHaveText(['QR code']);
-  // Both tickets: they share no way to pay, so they cannot go together.
+  // One ticket at a time: picking the Sponsor tier unpicks the Day pass, and
+  // the ways to pay follow it.
   await ticket(/^Sponsor/).check();
-  await expect(page.locator('#pickProblem')).toHaveText('These tickets are paid for in different ways, so they cannot be bought together. Pick tickets that can be paid for the same way.');
-  await expect(page.locator('#reserveBtn')).toBeDisabled();
-  await ticket(/^Day pass/).uncheck();
-  await expect(page.locator('#pickProblem')).toBeHidden();
+  await expect(ticket(/^Day pass/)).not.toBeChecked();
   await expect(methods).toHaveText(['Pay on the day']);
   await ticket(/^Day pass/).check();
-  await ticket(/^Sponsor/).uncheck();
+  await expect(ticket(/^Sponsor/)).not.toBeChecked();
   await expect(methods).toHaveText(['QR code']);
   await page.locator('#reserveBtn').click();
   // Its own QR code: the tall one.
@@ -80,9 +78,9 @@ test('a tier paid by its own QR code only, another on the day only', async ({ pa
   await expect(page.locator('#switchBox')).toBeHidden();
 });
 
-// Several tiers at once (migrations/022): an attendee pass once, and a day
-// pass the editor lets one person buy up to 3 of, paid for together.
-test('one person buys two tiers at once, more than one of a tier only where the editor allows it', async ({ page, context }) => {
+// One tier per person, more than one of it where the editor allows: a day
+// pass one person can buy up to 3 of.
+test('one person buys one tier, more than one of it only where the editor allows it', async ({ page, context }) => {
   await page.goto('/login?next=/manage');
   await signInAsStaff(page, STAFF.username);
   await page.waitForURL(`${serverOrigin()}/manage`);
@@ -111,7 +109,7 @@ test('one person buys two tiers at once, more than one of a tier only where the 
   await page.waitForURL(`${serverOrigin()}/e/${event.slug}`);
   await page.locator('#rsvpCheckout').click();
   await page.waitForURL(/\/checkout\?slug=/);
-  const ticket = (name) => page.locator('#ticketList').getByRole('checkbox', { name });
+  const ticket = (name) => page.locator('#ticketList').getByRole('radio', { name });
   // The attendee pass is bought once: no "How many" for it.
   await expect(ticket(/^Attendee/)).toBeChecked();
   await expect(page.locator('#ticketList .ticket-quantity')).toHaveCount(0);
@@ -124,10 +122,11 @@ test('one person buys two tiers at once, more than one of a tier only where the 
   await expect(quantity).toHaveValue('3');
   await quantity.fill('2');
   await quantity.press('Tab');
-  await expect(page.locator('#orderLines dt')).toHaveText(['Attendee', 'Day pass × 2', 'To pay', 'Paying by']);
-  await expect(page.locator('#orderLines dd').nth(2)).toHaveText('SGD 110.00');
+  await expect(ticket(/^Attendee/)).not.toBeChecked();
+  await expect(page.locator('#orderLines dt')).toHaveText(['Day pass × 2', 'To pay', 'Paying by']);
+  await expect(page.locator('#orderLines dd').nth(1)).toHaveText('SGD 50.00');
   await page.locator('#reserveBtn').click();
-  await expect(page.locator('#payLines dd').first()).toHaveText('Attendee, Day pass × 2');
-  await expect(page.locator('#payLines dd').nth(1)).toHaveText('SGD 110.00');
+  await expect(page.locator('#payLines dd').first()).toHaveText('Day pass × 2');
+  await expect(page.locator('#payLines dd').nth(1)).toHaveText('SGD 50.00');
   await expect(page.locator('#payLink')).toHaveAttribute('href', 'https://pay.example.org/lion-city');
 });

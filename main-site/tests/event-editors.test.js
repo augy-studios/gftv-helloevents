@@ -70,7 +70,7 @@ function addEvent(over = {}) {
   return row;
 }
 
-test('an admin adds an active account as an event editor, from the dropdown', async () => {
+test('an admin adds an active account as an event editor, searching as they type', async () => {
   const theirs = addEvent({ title: 'Their meet' });
   const boss = await staff('boss', { is_admin: true });
   await member('organiser');
@@ -87,10 +87,27 @@ test('an admin adds an active account as an event editor, from the dropdown', as
   assert.equal(offered.includes('olduser'), false, 'not active in the last 30 days');
   assert.equal(offered.includes('helper'), false, 'staff editors edit everything anyway');
 
+  // Typing searches every active account, however long since it signed in,
+  // usernames starting with the text first; staff editors are left out.
+  const search = async (text) => (await boss.call(editorsRoute, { query: { id: theirs.id, search: text } })).json.candidates.map((each) => each.username);
+  assert.deepEqual(await search('old'), ['olduser']);
+  assert.deepEqual(await search('USER'), ['olduser']);
+  assert.deepEqual(await search('helper'), []);
+  assert.deepEqual(await search('e'), ['organiser', 'olduser'].sort());
+  assert.deepEqual(await search('o,r(g)*'), [], 'filter characters are taken out');
+  accountOf('olduser').status = 'disabled';
+  assert.deepEqual(await search('old'), [], 'only active accounts');
+  accountOf('olduser').status = 'active';
+
   const added = await boss.call(editorsRoute, { method: 'POST', body: { id: theirs.id, action: 'add', username: 'organiser' } });
   assert.deepEqual(added.json.editors, [{ username: 'organiser', displayName: 'organiser', staff: false, twoStep: false }]);
   assert.equal(added.json.candidates.some((each) => each.username === 'organiser'), false);
-  assert.equal((await boss.call(editorsRoute, { method: 'POST', body: { id: theirs.id, action: 'add', username: 'olduser' } })).json.error, 'editor_not_found');
+  assert.deepEqual(await search('org'), [], 'already an editor');
+  // An account not active lately can still be added by its username.
+  const older = await boss.call(editorsRoute, { method: 'POST', body: { id: theirs.id, action: 'add', username: 'olduser' } });
+  assert.deepEqual(older.json.editors.map((each) => each.username), ['organiser', 'olduser']);
+  assert.equal((await boss.call(editorsRoute, { method: 'POST', body: { id: theirs.id, action: 'add', username: 'nobody' } })).json.error, 'editor_not_found');
+  await boss.call(editorsRoute, { method: 'POST', body: { id: theirs.id, action: 'remove', username: 'olduser', staff: false } });
 
   // Only admins choose them.
   const helper = await staff('helper2', { is_editor: true });

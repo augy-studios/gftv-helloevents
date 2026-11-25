@@ -45,7 +45,7 @@
 // as `answerField: row.database_column`, through one of the small helpers
 // below when the column needs a default.
 
-import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, fursuiterTickShown, tierClosed, registrationOpenFor, upgradeOptions, paidSoFar, donationOf, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath, sellsTiers, tieredRegistrationFields, heldRegistrationFields, questionTierPlaces } from './event-rules.js';
+import { isOver, isReleased, datesAnnounced, utcToWall, storedLocations, storedMeals, storedTiers, takesVolunteers, volunteerDiscountActive, storedTimetable, itemTimes, LINK_LABELS, paymentOptions, needsCheckout, paymentProblems, ticketPrice, PAYMENT_METHODS, lepakOffered, lepakLabel, lepakLimit, asksFursuiters, fursuiterTickShown, tierClosed, tierLeft, tierCurrency, registrationOpenFor, upgradeOptions, paidSoFar, donationOf, tierOptions, heldTiers, ticketOptions, includedTiers, tierLink, tierQrPath, sellsTiers, tieredRegistrationFields, heldRegistrationFields, questionTierPlaces } from './event-rules.js';
 import { roleOf, canManage, avatarSource } from './users.js';
 import { sha256 } from './crypto.js';
 import { coverUrl } from './covers.js';
@@ -659,14 +659,32 @@ export function offeredMeals(row, chosen) {
     .filter((id) => chosen.includes(id));
 }
 
+// What a tier includes of other tiers (migrations/022), as the editor chose
+// to show it: those tiers' benefits in full (includedBenefits, furthest
+// first), or the name of the tier it includes (includesTier). tiers:
+// storedTiers(row).
+function includedView(tiers, tier) {
+  const chain = includedTiers(tiers, tier);
+  if (chain.length > 0 && tier.previous_display === 'full') {
+    return { includedBenefits: [...chain].reverse().flatMap((each) => each.benefits), includesTier: null };
+  }
+  if (chain.length > 0) {
+    return { includedBenefits: [], includesTier: chain[0].name };
+  }
+  return { includedBenefits: [], includesTier: null };
+}
+
 // The ticket tiers on the event page, in order, while they are on (a paid
 // event only; none otherwise). Each is its name, its price (null while the
 // price is hidden: the page then shows the tiers without prices), its own
 // benefits, and, when it includes another tier (any of them,
 // migrations/022), either those benefits in full (includedBenefits,
 // everything that tier gives, and what it includes in turn, furthest first)
-// or that tier's name (includesTier), as the editor chose; and how many of
-// it one person can buy (maxPerPerson, 1 for once).
+// or that tier's name (includesTier), as the editor chose; how many of
+// it one person can buy (maxPerPerson, 1 for once); and how many people it
+// takes and the places left (limit and left, both null with no limit,
+// migrations/025; row.tier_taken from events.js withTierCounts), and
+// whether it is sold out (full).
 function tiersView(row) {
   if (row.tiers_enabled !== true || row.price_type !== 'paid') {
     return [];
@@ -674,14 +692,7 @@ function tiersView(row) {
   const tiers = storedTiers(row);
   const priceShown = row.price_hidden !== true;
   return tiers.map((tier) => {
-    const chain = includedTiers(tiers, tier);
-    let includedBenefits = [];
-    let includesTier = null;
-    if (chain.length > 0 && tier.previous_display === 'full') {
-      includedBenefits = [...chain].reverse().flatMap((each) => each.benefits);
-    } else if (chain.length > 0) {
-      includesTier = chain[0].name;
-    }
+    const { includedBenefits, includesTier } = includedView(tiers, tier);
     let price = null;
     if (priceShown) {
       price = tier.price;
@@ -689,7 +700,8 @@ function tiersView(row) {
     // How this tier can be paid for (migrations/016), when it says.
     const methods = tierOptions(row, tier);
     // When it stops being sold, and whether it has (migrations/024).
-    return { name: tier.name, price, benefits: tier.benefits, includedBenefits, includesTier, maxPerPerson: tier.max_per_person, methods, closesAt: missingToNull(tier.closes_at), closed: tierClosed(tier) };
+    const left = tierLeft(row, tier);
+    return { name: tier.name, price, currency: tierCurrency(row, tier), benefits: tier.benefits, includedBenefits, includesTier, maxPerPerson: tier.max_per_person, methods, closesAt: missingToNull(tier.closes_at), closed: tierClosed(tier), limit: tier.limit, left, full: left === 0 };
   });
 }
 
@@ -825,6 +837,8 @@ function managedTier(tier, row) {
     includes: emptyToBlank(tier.includes),
     previousDisplay: tier.previous_display,
     maxPerPerson: tier.max_per_person,
+    limit: emptyToBlank(tier.limit),
+    currency: emptyToBlank(tier.currency),
     paymentMethods: tier.payment_methods,
     paymentLink: emptyToBlank(tier.payment_link),
     paymentQrUrl: emptyToBlank(qrUrl({ slug: row.slug, payment_qr_path: tier.payment_qr_path })),
@@ -1294,16 +1308,24 @@ function checkoutTickets(row, volunteerDiscount) {
       if (tier.payment_qr_path) {
         qrTo = tier.id;
       }
+      const left = tierLeft(row, tier);
+      // What it includes of another tier, as the event page shows it.
+      const { includedBenefits, includesTier } = includedView(tiers, tier);
       return {
         index,
         name: tier.name,
         benefits: tier.benefits,
+        includedBenefits,
+        includesTier,
         price: priced.price,
         amount: priced.amount,
+        currency: priced.currency,
         maxPerPerson: tier.max_per_person,
         methods: tierOptions(row, tier),
         payTo: { link: linkTo, qr: qrTo },
         closed: tierClosed(tier),
+        left,
+        full: left === 0,
       };
     });
   }
@@ -1311,7 +1333,7 @@ function checkoutTickets(row, volunteerDiscount) {
   if (!priced.ok) {
     return [];
   }
-  return [{ index: null, name: null, benefits: [], price: priced.price, amount: priced.amount, maxPerPerson: 1, methods: paymentOptions(row), payTo: { link: 'event', qr: 'event' }, closed: false }];
+  return [{ index: null, name: null, benefits: [], includedBenefits: [], includesTier: null, price: priced.price, amount: priced.amount, currency: priced.currency, maxPerPerson: 1, methods: paymentOptions(row), payTo: { link: 'event', qr: 'event' }, closed: false, left: null, full: false }];
 }
 
 // The tiers someone bought, as kept at checkout (migrations/022): each

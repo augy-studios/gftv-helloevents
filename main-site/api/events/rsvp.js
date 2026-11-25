@@ -23,10 +23,10 @@
 // payment: for an event that takes payment online (migrations/016,
 // event-rules.js needsCheckout), what the checkout page sends to get a
 // ticket for the whole event: the method picked (one the event offers) and,
-// for an event with ticket tiers, the tiers bought (migrations/022): items,
-// each { tier: its place in the list, tierName, quantity }, every tier at
-// most once, more than one of it only as far as the tier allows
-// (event-rules.js basketPrice). The method must suit them all together
+// for an event with ticket tiers, the tier bought: items, one { tier: its
+// place in the list, tierName, quantity }, more than one of it only as far
+// as the tier allows (event-rules.js basketPrice). One tier per person:
+// more than one is refused with one_tier_only. The method must suit them all together
 // (basketOptions). A page from before sends { tier, tierName } for one.
 // A ticket paid by link or QR code takes a space at once and waits for
 // payment ("awaiting"); one paid on the day is a plain RSVP. The amount is
@@ -53,7 +53,8 @@
 // the fursuiter flag too. Refused with registration_required or
 // registration_invalid, and the question's id.
 // Joining goes through the gftvevents_rsvp database function, which locks the
-// event row, so two people cannot both take the last space. Only released,
+// event row, so two people cannot both take the last space (or a tier's
+// last place, migrations/025: refused with tier_full). Only released,
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
@@ -86,6 +87,7 @@ const RESULTS = {
   rsvp_closed: [409, 'rsvp_closed'],
   event_full: [409, 'event_full'],
   meal_full: [409, 'meal_full'],
+  tier_full: [409, 'tier_full'],
   lepak_full: [409, 'lepak_full'],
   lepak_not_offered: [400, 'lepak_not_offered'],
   event_over: [409, 'event_over'],
@@ -198,7 +200,8 @@ async function checkoutTicket(event, userId, payment, donation = 0) {
       payment_tier: tierText,
       payment_items: items,
       payment_amount: amount,
-      payment_currency: event.currency,
+      // The tier's own currency, or the event's (per-tier currencies).
+      payment_currency: priced.currency,
     },
   };
 }
@@ -433,7 +436,13 @@ export default route('events/rsvp', async (request, response) => {
         return fail(response, 400, ticket.error);
       }
     }
-    const { data, error } = await database().rpc('gftvevents_rsvp', { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals, p_lepak: lepak });
+    // The tiers bought go in with the place, so the database can hold each
+    // tier to its limit (migrations/025) under the same lock.
+    const rsvpArgs = { p_event_id: event.id, p_user_id: session.user.id, p_meals: meals, p_lepak: lepak };
+    if (ticket && Array.isArray(ticket.columns.payment_items)) {
+      rsvpArgs.p_items = ticket.columns.payment_items;
+    }
+    const { data, error } = await database().rpc('gftvevents_rsvp', rsvpArgs);
     if (error) {
       throw error;
     }
