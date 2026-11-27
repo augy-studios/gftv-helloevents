@@ -3,9 +3,10 @@
 // q: words to find in an event's title, summary, venue, city, country or
 // organiser, each of them somewhere (event-rules.js searchWords).
 //
-// The public event feed. No sign-in needed and nothing personal in it, so
-// the CDN may cache it for a minute. Released events only, as cards
-// (serialize.js publicEventCard).
+// The public event feed. No sign-in needed and nothing personal in it.
+// Released events only, as cards (serialize.js publicEventCard). Not cached
+// (http.js send's no-store), so an edit or a cancellation shows on the home
+// page at once instead of minutes later.
 
 import { route, guard, ok, query } from '../_lib/http.js';
 import { releasedFeed, FEED_PAGE } from '../_lib/events.js';
@@ -42,7 +43,6 @@ export default route('events/feed', async (request, response) => {
   const words = searchWords(query(request, 'q'));
   const rows = await releasedFeed({ when, kind, offset, words });
   const now = Date.now();
-  response.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
   // A full page may have more after it; a shorter one is the last.
   let nextOffset = null;
   if (rows.length === FEED_PAGE) {

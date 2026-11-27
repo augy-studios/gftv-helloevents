@@ -5,7 +5,8 @@
 //
 // For someone holding a ticket from /checkout that is not confirmed paid yet.
 //
-// report: after paying by link or QR code, a screenshot of the payment (a
+// report: after paying by link or QR code (the admins' chats are told,
+// staff-alerts.js), a screenshot of the payment (a
 // WebP the browser made, js/picture-file.js; payments.js checks and
 // re-encodes it), which is needed (payment_proof_required), and, if they
 // like, its reference (as the bank or app shows it). The payment then
@@ -36,6 +37,8 @@ import { attendance, withVolunteerSource, withTierCounts, volunteerStanding } fr
 import { ticketOptions, readPaymentReference, registrationOpenFor, upgradeBasket, paidSoFar, ONLINE_METHODS } from '../_lib/event-rules.js';
 import { preparePicture, storeProof, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { checkoutEvent, checkoutAnswer } from './checkout.js';
+import { background } from '../_lib/notify.js';
+import { alertPaymentReported } from '../_lib/staff-alerts.js';
 
 const MAX_BODY_BYTES = Math.ceil((MAX_PROOF_BYTES * 4) / 3) + 4096;
 
@@ -93,6 +96,11 @@ async function report(request, response, event, user, stored, body) {
     await deletePaymentFiles([stored.payment_proof_path]);
   }
   await audit(request, { action: 'payment.reported', actorId: user.id, eventId: event.id, details: { proof: Boolean(proofPath) } });
+  // The admins' chats, to check it; once, not again for a report replaced
+  // while it waits.
+  if (stored.payment_status !== 'submitted') {
+    background(alertPaymentReported(event, user.id));
+  }
   return ok(response, { checkout: await checkoutAnswer(event, user) });
 }
 

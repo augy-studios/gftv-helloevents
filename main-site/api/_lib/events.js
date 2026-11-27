@@ -23,7 +23,7 @@ export const DETAIL_COLUMNS =
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
   'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
   'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label, contact_fields, contact_rule, ' +
-  'fursuiters_asked, registration_enabled, registration_fields';
+  'fursuiters_asked, registration_enabled, registration_fields, organiser_chat_ids';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.

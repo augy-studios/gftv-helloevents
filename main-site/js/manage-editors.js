@@ -1,5 +1,7 @@
-// The edit form's Editors tab (migrations/018), for admins only: the
-// event's own editors, and adding one (api/manage/event-editors.js). The
+// The edit form's Organisers tab, for admins only: the event's own editors
+// (migrations/018), and adding one, and its organisers' Telegram chats
+// (migrations/026), saved and tested with their own buttons
+// (api/manage/event-editors.js). The
 // username box is a dropdown: as the admin types, it lists the registered
 // accounts whose username or display name holds the text (any active
 // account); left empty, the accounts active in the last 30 days. Arrow keys
@@ -8,7 +10,7 @@
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { api, post } from './api.js';
-import { createElement, withBusy } from './ui.js';
+import { createElement, withBusy, errorText } from './ui.js';
 import { iconNode } from './icons.js';
 
 const byId = (id) => document.getElementById(id);
@@ -52,6 +54,9 @@ function editorRow(editor) {
 
 function render(data) {
   candidates = data.candidates;
+  if (Array.isArray(data.organiserChats)) {
+    byId('organiserChats').value = data.organiserChats.join('\n');
+  }
   let rows = data.editors.map(editorRow);
   if (rows.length === 0) {
     rows = [createElement('li', { class: 'muted small', text: translate('manage.editors-none') })];
@@ -159,10 +164,73 @@ async function change(button, body) {
   });
 }
 
-// The open event's editors, again (after another event opens).
+// A refused chat id names the value, which errorText does not know.
+function chatsErrorText(error) {
+  if (error && error.code === 'chat_id_invalid' && error.detail && typeof error.detail.value === 'string') {
+    return translate('error.chat_id_invalid', { value: error.detail.value });
+  }
+  return errorText(error);
+}
+
+// A Telegram chat id, as the server takes it (api/_lib/staff-alerts.js).
+const CHAT_ID = /^-?\d{1,20}$/;
+const MAX_CHATS = 10;
+
+// What is wrong with the chats typed, before asking the server: the error
+// as the server would answer it, or null.
+function chatsProblem(text) {
+  const parts = text.split(/[\s,;]+/).filter(Boolean);
+  const bad = parts.find((part) => !CHAT_ID.test(part));
+  if (bad) {
+    return { code: 'chat_id_invalid', detail: { value: bad.slice(0, 40) } };
+  }
+  if (new Set(parts).size > MAX_CHATS) {
+    return { code: 'too_many_chats' };
+  }
+  return null;
+}
+
+// Saves the organisers' chats, or sends each a test message.
+async function chatsAction(button, body) {
+  const status = byId('organiserChatsStatus');
+  const errorBox = byId('organiserChatsError');
+  status.textContent = '';
+  status.className = 'field-status';
+  errorBox.textContent = '';
+  if (body.action === 'chats') {
+    const problem = chatsProblem(body.chats);
+    if (problem) {
+      errorBox.textContent = chatsErrorText(problem);
+      return;
+    }
+  }
+  await withBusy(button, errorBox, async () => {
+    try {
+      const data = await post('/api/manage/event-editors', { id: currentEvent().id, ...body });
+      if (body.action === 'chats') {
+        render(data);
+        status.textContent = translate('manage.organiser-chats-saved');
+        status.classList.add('ok');
+      } else if (data.failed.length === 0) {
+        status.textContent = translate('manage.organiser-chats-tested');
+        status.classList.add('ok');
+      } else {
+        errorBox.textContent = translate('manage.organiser-chats-unreached', { chats: data.failed.join(', ') });
+      }
+    } catch (error) {
+      errorBox.textContent = chatsErrorText(error);
+    }
+  });
+}
+
+// The open event's editors and chats, again (after another event opens).
 export async function loadEditors() {
   const event = currentEvent();
   byId('eventEditorError').textContent = '';
+  byId('organiserChatsError').textContent = '';
+  byId('organiserChatsStatus').textContent = '';
+  byId('organiserChats').value = '';
+  byId('organiserChatsBox').hidden = !event;
   byId('eventEditorAdd').hidden = !event;
   if (!event) {
     byId('eventEditorList').replaceChildren(createElement('li', { class: 'muted small', text: translate('manage.editors-save-first') }));
@@ -178,6 +246,8 @@ export async function loadEditors() {
 // getEvent: the event open in the form ({ id }), or null for a new one.
 export function startEditors({ getEvent }) {
   currentEvent = getEvent;
+  byId('organiserChatsSave').addEventListener('click', () => chatsAction(byId('organiserChatsSave'), { action: 'chats', chats: byId('organiserChats').value }));
+  byId('organiserChatsTest').addEventListener('click', () => chatsAction(byId('organiserChatsTest'), { action: 'test-chats' }));
   const add = () => {
     const username = box().value.trim();
     if (!username) {

@@ -116,14 +116,20 @@ export function eventNoticeMessage(notice) {
   return { markdown: markdown.join('\n'), fallback: fallback.join('\n') };
 }
 
-// A reminder before an event, for someone going (notify.js reminderNotice):
+// A full notice for someone going: a reminder before an event, a change of
+// when or where, or joining (notify.js reminderNotice, updateNotice,
+// joinNotice):
 //
-//   ## Starting in 1 hour
+//   ## Starting in 1 hour       (or "Meeting location changed", "You're going")
 //   **Title**
-//   | | Detail |      When, Ends, Coming for, Online link
+//   ## What changed             (a change only)
+//   ### Meeting location changed
+//   | | Before | Now |          Venue, Address, City, Country, Map
+//   ## Event details            (a change only)
+//   | | Detail |                When, Ends, Coming for, Online link
 //   ## Where
 //   ### Event location
-//   | | Detail |      Venue, Address, City, Country, Map
+//   | | Detail |                Venue, Address, City, Country, Map
 //   ### Meeting location
 //   ...
 //   ## Meals held elsewhere (or "Your meals", for someone coming just for
@@ -133,10 +139,37 @@ export function eventNoticeMessage(notice) {
 //
 // notice: { heading, title, url, details: [[label, value]], places and
 // mealPlaces: [{ heading, rows: [[label, value]] }], online (an online-only
-// event, with no places), mealsHeading }.
-export function reminderMessage(notice) {
-  const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`, '', richTable(['Detail'], notice.details)];
-  const fallback = [notice.heading, '', notice.title, '', ...notice.details.map(([label, value]) => `${label}: ${value}`)];
+// event, with no places), mealsHeading, and for a change, changes:
+// [{ heading, before, after }] (before and after: [[label, value]] rows, or
+// null for something added or removed) }.
+export function fullNoticeMessage(notice) {
+  const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`];
+  const fallback = [notice.heading, '', notice.title];
+
+  let changes = [];
+  if (Array.isArray(notice.changes)) {
+    changes = notice.changes;
+  }
+  if (changes.length) {
+    markdown.push('', '## What changed');
+    fallback.push('', 'WHAT CHANGED');
+    for (const change of changes) {
+      markdown.push('', `### ${escapeMd(change.heading)}`);
+      fallback.push('', change.heading);
+      const rows = beforeAndNow(change.before, change.after);
+      if (rows.length) {
+        markdown.push('', richTable(['Before', 'Now'], rows));
+        fallback.push(...rows.map(([label, was, now]) => `${label}: ${was} → ${now}`));
+      }
+    }
+    markdown.push('', '## Event details');
+    fallback.push('', 'EVENT DETAILS');
+  }
+  markdown.push('', richTable(['Detail'], notice.details));
+  if (!changes.length) {
+    fallback.push('');
+  }
+  fallback.push(...notice.details.map(([label, value]) => `${label}: ${value}`));
 
   // One section of places: its heading, then each place's own heading and
   // details.
@@ -158,6 +191,54 @@ export function reminderMessage(notice) {
     section(notice.mealsHeading, notice.mealPlaces);
   }
 
+  markdown.push('', escapeMd(notice.url));
+  fallback.push('', notice.url);
+  return { markdown: markdown.join('\n'), fallback: fallback.join('\n') };
+}
+
+// A change's rows side by side, [label, before, now]: each label whose value
+// differs (the rest are in the event's own tables below), a missing value
+// shown as "—"; empty when neither has any.
+function beforeAndNow(before, after) {
+  const rowsOrNone = (rows) => {
+    if (Array.isArray(rows)) {
+      return rows;
+    }
+    return [];
+  };
+  const was = new Map(rowsOrNone(before));
+  const now = new Map(rowsOrNone(after));
+  const shown = (values, label) => {
+    if (values.has(label)) {
+      return values.get(label);
+    }
+    return '—';
+  };
+  const labels = [...new Set([...now.keys(), ...was.keys()])];
+  return labels
+    .map((label) => [label, shown(was, label), shown(now, label)])
+    .filter(([, before, after]) => before !== after);
+}
+
+// An alert for the admins' or an event's organisers' chats
+// (staff-alerts.js):
+//
+//   ## New attendee        (or "Payment reported", "New event published")
+//   **Event title**
+//   | | Detail |           Name, Username, RSVP ID, Coming for, Ticket, ...
+//   ## Contact details     (when they gave any)
+//   | | Detail |
+//   the event page link
+//
+// notice: { heading, title, details: [[label, value]], contact:
+// [[label, value]], url }.
+export function staffAlertMessage(notice) {
+  const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`, '', richTable(['Detail'], notice.details)];
+  const fallback = [notice.heading, '', notice.title, '', ...notice.details.map(([label, value]) => `${label}: ${value}`)];
+  if (notice.contact.length) {
+    markdown.push('', '## Contact details', '', richTable(['Detail'], notice.contact));
+    fallback.push('', 'CONTACT DETAILS', ...notice.contact.map(([label, value]) => `${label}: ${value}`));
+  }
   markdown.push('', escapeMd(notice.url));
   fallback.push('', notice.url);
   return { markdown: markdown.join('\n'), fallback: fallback.join('\n') };

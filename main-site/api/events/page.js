@@ -183,9 +183,8 @@ export default route('events/page', async (request, response) => {
   }
   response.statusCode = 200;
   response.setHeader('Content-Type', 'text/html; charset=utf-8');
-  // The same for everyone: a minute at the CDN, then served stale while it
-  // refreshes, so an edit reaches new previews within a few minutes.
-  response.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=600');
+  // Never cached, so an edit reaches link previews and the page at once.
+  response.setHeader('Cache-Control', 'no-store');
   response.setHeader('X-Content-Type-Options', 'nosniff');
   if (request.method === 'HEAD') {
     response.end();

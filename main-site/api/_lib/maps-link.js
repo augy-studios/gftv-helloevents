@@ -11,6 +11,14 @@
 // are in Malaysia and Indonesia too, so the city, country and street come
 // from OpenStreetMap's Nominatim instead: by the coordinates where the link
 // has them, otherwise by the name and address it carries.
+//
+// Nominatim often finds nothing for a shop's name with its full address and
+// unit ("Takagi Ramen @ Dhoby Ghaut Exchange, 11 Orchard Rd, B1-11,
+// Singapore 238826"), which is what the Google Maps app's share links carry.
+// So a search that finds nothing is tried again with less: the address
+// without units, then its last part (the postcode), then the name. And when
+// nothing is found at all, the name and street address Google gave are still
+// filled in, with the city and country left for the editor.
 
 import { siteUrl } from './env.js';
 
@@ -24,6 +32,15 @@ const MAX_HOPS = 5;
 const FETCH_TIMEOUT_MS = 8000;
 const LAT_LNG = /^\s*(?:loc:\s*)?(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/;
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
+// Nominatim's usage policy: at most one request a second.
+let searchGapMs = 1000;
+// A unit in an address: "#B1-03", "B1-11", "#02-15 Paragon".
+const UNIT = /^#|^[A-Z]?\d{1,3}-\d{1,4}[A-Z]?$/i;
+
+// Tests set this to 0, so retried searches do not wait.
+export function useTestSearchGap(ms) {
+  searchGapMs = ms;
+}
 
 // A link that cannot be placed. code is the error code the route answers
 // with, and the edit form shows error.<code>.
@@ -277,6 +294,38 @@ function streetOf(address) {
   return [street, address.postcode].filter(Boolean).join(', ');
 }
 
+// What to search Nominatim for, best first: the whole text Google gave, the
+// street address without its units, the address's last part (often
+// "Singapore 238826": the postcode), and the name. No repeats, no blanks.
+function searchesFor(text, name) {
+  const address = partsOf(addressOf(text, name));
+  const withoutUnits = address.filter((part) => !UNIT.test(part));
+  const searches = [text, withoutUnits.join(', '), withoutUnits[withoutUnits.length - 1], name];
+  const seen = new Set();
+  return searches.filter((search) => {
+    if (!search || seen.has(search.toLowerCase())) {
+      return false;
+    }
+    seen.add(search.toLowerCase());
+    return true;
+  });
+}
+
+// The first Nominatim search that finds anything, one a second; null if
+// none does.
+async function firstHit(searches) {
+  for (const [index, search] of searches.entries()) {
+    if (index > 0 && searchGapMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, searchGapMs));
+    }
+    const hits = await nominatim('/search', { q: search, limit: '1' });
+    if (Array.isArray(hits) && hits.length && !hits[0].error) {
+      return hits[0];
+    }
+  }
+  return null;
+}
+
 // The place for the edit form, from a link findMapsLink() found:
 // { venueName, venueAddress, city, country, mapsUrl }, every field a string
 // ('' where it is not known; country a two-letter code). Throws
@@ -308,14 +357,26 @@ export async function placeFromMapsLink({ href, rest }) {
     if (!searchText) {
       searchText = name;
     }
-    const hits = await nominatim('/search', { q: searchText, limit: '1' });
-    if (Array.isArray(hits) && hits.length) {
-      found = hits[0];
-    }
+    found = await firstHit(searchesFor(searchText, name));
   } else {
     throw new MapsLinkError('maps_link_unreadable');
   }
-  if (!found || found.error) {
+  if (found && found.error) {
+    found = null;
+  }
+
+  // The address Google gives with the name, from the search text or the
+  // /place/ name ("ION Orchard, 2 Orchard Turn").
+  let venueAddress = addressOf(text, name);
+  if (!venueAddress && read.name) {
+    venueAddress = addressOf(read.name, name);
+  }
+  if (!found) {
+    // Nothing found: still what Google gave, when it gave a name and an
+    // address; with only a name, the editor fills in the place by hand.
+    if (name && venueAddress) {
+      return { venueName: name, venueAddress, city: '', country: '', mapsUrl: href };
+    }
     throw new MapsLinkError('maps_lookup_failed');
   }
 
@@ -326,12 +387,7 @@ export async function placeFromMapsLink({ href, rest }) {
   if (!name && found.name) {
     name = found.name;
   }
-  // The address Google gives with the name, from the search text or the
-  // /place/ name ("ION Orchard, 2 Orchard Turn"), else Nominatim's street.
-  let venueAddress = addressOf(text, name);
-  if (!venueAddress && read.name) {
-    venueAddress = addressOf(read.name, name);
-  }
+  // Else Nominatim's street.
   if (!venueAddress) {
     venueAddress = streetOf(address);
   }

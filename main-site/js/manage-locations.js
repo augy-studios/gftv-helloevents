@@ -4,7 +4,9 @@
 //
 // Pasting a Google Maps link into a card fills in its venue, street address,
 // city and country (api/manage/place.js reads the link); the editor checks
-// them before saving. The server checks every field again
+// them before saving. Once filled in, two buttons copy the street address,
+// or the full address (venue, street, city, country), to paste elsewhere.
+// The server checks every field again
 // (api/_lib/event-rules.js readLocations), and the first location labelled
 // as the event's is the one the feed cards show.
 //
@@ -13,7 +15,7 @@
 
 import { t as translate } from '../assets/i18n/i18n.js';
 import { post } from './api.js';
-import { createElement, withBusy } from './ui.js';
+import { createElement, withBusy, copyText } from './ui.js';
 import { iconNode } from './icons.js';
 import { fillCountrySelect } from './choices.js';
 
@@ -56,6 +58,41 @@ function syncCustomLabel(card) {
   card.querySelector('[data-field="customLabel"]').hidden = input(card, 'label').value !== 'custom';
 }
 
+// The full address on one line: venue, street address, city and country.
+// The city and country are left out when the street address (or the city)
+// already says them, as a Google Maps street address often ends with them.
+// The venue's name is not looked in: "Kuala Lumpur Convention Centre" still
+// gets ", Kuala Lumpur".
+function fullAddress(card) {
+  const country = input(card, 'country');
+  let countryName = '';
+  if (country.value) {
+    countryName = country.selectedOptions[0].textContent;
+  }
+  const venue = input(card, 'venueName').value.trim();
+  const place = [];
+  for (const part of [input(card, 'venueAddress').value, input(card, 'city').value, countryName]) {
+    const text = part.trim();
+    if (text && !place.join(', ').toLowerCase().includes(text.toLowerCase())) {
+      place.push(text);
+    }
+  }
+  if (venue && !place.join(', ').toLowerCase().startsWith(venue.toLowerCase())) {
+    place.unshift(venue);
+  }
+  return place.join(', ');
+}
+
+// Shows the copy buttons once Google Maps filled in the card (or a saved card
+// has its link), while it has a street address.
+function syncCopy(card) {
+  let show = false;
+  if (card.dataset.mapsFilled === 'yes' && input(card, 'mapsUrl').value.trim() !== '') {
+    show = input(card, 'venueAddress').value.trim() !== '';
+  }
+  card.querySelector('.location-copy').hidden = !show;
+}
+
 // Reads the Google Maps link in a card and fills in the card from it. Fields
 // the link says nothing about are left as they were.
 async function fillFromLink(card) {
@@ -68,6 +105,8 @@ async function fillFromLink(card) {
     return;
   }
   card.dataset.lookedUp = link;
+  card.dataset.mapsFilled = '';
+  syncCopy(card);
   await withBusy(card.querySelector('.location-fill'), card.querySelector('.location-error'), async () => {
     const { place } = await post('/api/manage/place', { link });
     for (const key of ['venueName', 'venueAddress', 'city']) {
@@ -80,6 +119,8 @@ async function fillFromLink(card) {
     }
     linkInput.value = place.mapsUrl;
     card.dataset.lookedUp = place.mapsUrl;
+    card.dataset.mapsFilled = 'yes';
+    syncCopy(card);
     status.textContent = translate('manage.location-filled');
     status.classList.add('ok');
     announceChange(card);
@@ -128,6 +169,15 @@ export function createLocationList({ list, addButton, emptyNote = null, labels, 
       createElement('span', { class: 'btn-label', i18n: 'security.remove' }),
     ]);
 
+    const copyAddressButton = createElement('button', { class: 'btn btn-small btn-quiet location-copy-address', type: 'button' }, [
+      iconNode('copy'),
+      createElement('span', { i18n: 'manage.copy-address' }),
+    ]);
+    const copyFullButton = createElement('button', { class: 'btn btn-small btn-quiet location-copy-full', type: 'button' }, [
+      iconNode('copy'),
+      createElement('span', { i18n: 'manage.copy-full-address' }),
+    ]);
+
     const card = createElement('div', { class: 'location-card' }, [
       createElement('div', { class: 'row between' }, [createElement('h3', { class: 'section-label location-title' }), removeButton]),
       createElement('div', { class: 'form-grid' }, [
@@ -156,6 +206,7 @@ export function createLocationList({ list, addButton, emptyNote = null, labels, 
         textField('venueName', 'manage.field.venueName', { maxLength: 160 }),
         textField('city', 'manage.field.city', { maxLength: 80 }),
         textField('venueAddress', 'manage.field.venueAddress', { maxLength: 300, wide: true }),
+        createElement('div', { class: 'row span-2 location-copy', hidden: true }, [copyAddressButton, copyFullButton]),
         createElement('label', { class: 'field' }, [createElement('span', { i18n: 'manage.field.country' }), countrySelect]),
       ]),
     ]);
@@ -174,10 +225,18 @@ export function createLocationList({ list, addButton, emptyNote = null, labels, 
     }
     fillCountrySelect(countrySelect, values.country);
     card.dataset.lookedUp = input(card, 'mapsUrl').value;
+    if (card.dataset.lookedUp) {
+      card.dataset.mapsFilled = 'yes';
+    }
     syncCustomLabel(card);
+    syncCopy(card);
 
     labelSelect.addEventListener('change', () => syncCustomLabel(card));
     fillButton.addEventListener('click', () => fillFromLink(card));
+    copyAddressButton.addEventListener('click', () => copyText(input(card, 'venueAddress').value.trim()));
+    copyFullButton.addEventListener('click', () => copyText(fullAddress(card)));
+    input(card, 'venueAddress').addEventListener('input', () => syncCopy(card));
+    input(card, 'mapsUrl').addEventListener('input', () => syncCopy(card));
     const linkInput = input(card, 'mapsUrl');
     // A link pasted or typed in is read straight away; Fill in reads it again.
     linkInput.addEventListener('paste', () => setTimeout(() => fillFromLink(card), 0));

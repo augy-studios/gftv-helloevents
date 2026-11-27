@@ -92,8 +92,10 @@ async function unlinkChat(chat, reply) {
   await reply(answer);
 }
 
-// Checks the secret, ignores anything but a text message in a private chat,
-// and answers /start, /unlink, or anything else with the help message.
+// Checks the secret, answers /chatid in any chat with that chat's id (to
+// put in ADMIN_CHAT_IDS or an event's organiser chats, migrations/026),
+// ignores anything else but a text message in a private chat, and answers
+// /start, /unlink, or anything else with the help message.
 export default route('telegram/webhook', async (request, response) => {
   if (request.method !== 'POST') {
     return send(response, 405, { ok: false });
@@ -114,6 +116,11 @@ export default route('telegram/webhook', async (request, response) => {
     if (typeof message.text === 'string') {
       text = message.text.trim();
     }
+  }
+  if (chat && /^\/chatid(?:@\w+)?$/.test(text) && ['private', 'group', 'supergroup'].includes(chat.type)) {
+    await sendTelegram(chat.id, `This chat's ID is ${chat.id}. Give it to an admin to receive event alerts here.`)
+      .catch((cause) => console.warn('[helloevents] telegram reply:', errorDetail(cause)));
+    return send(response, 200, { ok: true });
   }
   if (!chat || chat.type !== 'private' || !text) {
     return send(response, 200, { ok: true });

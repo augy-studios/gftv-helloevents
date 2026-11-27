@@ -56,7 +56,7 @@ test('a released event page carries its own preview tags, with its cover as a JP
   const answer = await browser().call(page, { query: { slug: 'harbour-meet' } });
   assert.equal(answer.status, 200);
   assert.match(answer.headers['content-type'], /text\/html/);
-  assert.match(answer.headers['cache-control'], /s-maxage=60/);
+  assert.equal(answer.headers['cache-control'], 'no-store');
   const html = answer.body;
   assert.match(html, /<title>Harbour Meet \| GFTV HelloEvents<\/title>/);
   assert.equal(meta(html, 'property', 'og:title'), 'Harbour Meet');

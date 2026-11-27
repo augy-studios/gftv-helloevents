@@ -121,7 +121,7 @@
                     <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-timetable" data-tab="timetable" aria-controls="epanel-timetable" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="manage.etab.timetable">Timetable</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
-                    <button class="tab" type="button" role="tab" id="etab-editors" data-tab="editors" aria-controls="epanel-editors" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="manage.etab.editors">Editors</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-editors" data-tab="editors" aria-controls="epanel-editors" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="manage.etab.editors">Organisers</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                 </div>
 
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-basics" aria-labelledby="etab-basics">
@@ -706,8 +706,10 @@
                     </section>
                 </div>
 
-                <!-- The event's own editors (migrations/018, js/manage-editors.js):
-                     admins only. Not part of the form's saves. -->
+                <!-- Organisers: the event's own editors (migrations/018) and its
+                     organisers' Telegram chats (migrations/026),
+                     js/manage-editors.js. Admins only. Not part of the form's
+                     saves. -->
                 <div class="tab-panel editor-panel" role="tabpanel" id="epanel-editors" aria-labelledby="etab-editors" hidden>
                     <fieldset>
                         <legend data-i18n="manage.section.editors">Editors of this event</legend>
@@ -722,6 +724,21 @@
                             <button class="btn" type="button" id="eventEditorAddBtn"><span data-icon="plus"></span><span data-i18n="manage.editor-add">Add</span></button>
                         </div>
                         <div class="callout danger" id="eventEditorError" role="alert"></div>
+                    </fieldset>
+                    <fieldset id="organiserChatsBox">
+                        <legend data-i18n="manage.section.organiser-chats">Organiser alerts on Telegram</legend>
+                        <p class="muted small" data-i18n="manage.organiser-chats-lede">The bot tells these Telegram chats about each new attendee, once they have given every detail this event asks for (with their contact details), and about each payment once it is confirmed. Add a person's chat ID, or a group's (it starts with -). To get it, send /chatid to the bot in that chat: add the bot to a group first, and a person must press Start in the bot once.</p>
+                        <label class="field">
+                            <span data-i18n="manage.field.organiserChats">Organiser chat IDs</span>
+                            <textarea id="organiserChats" rows="3" spellcheck="false" autocomplete="off" placeholder="123456789, -1001234567890"></textarea>
+                            <span class="field-hint" data-i18n="manage.hint.organiserChats">Up to 10, separated by commas, spaces or new lines.</span>
+                        </label>
+                        <div class="row">
+                            <button class="btn" type="button" id="organiserChatsSave"><span data-icon="check"></span><span data-i18n="manage.organiser-chats-save">Save chats</span></button>
+                            <button class="btn btn-quiet" type="button" id="organiserChatsTest"><span data-icon="send"></span><span data-i18n="manage.organiser-chats-test">Send a test</span></button>
+                        </div>
+                        <p class="field-status" id="organiserChatsStatus" role="status"></p>
+                        <div class="callout danger" id="organiserChatsError" role="alert"></div>
                     </fieldset>
                 </div>
 

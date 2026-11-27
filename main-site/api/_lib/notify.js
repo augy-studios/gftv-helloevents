@@ -4,16 +4,18 @@
 //   updates    an event you are going to changes when or where it happens,
 //              its timetable changes, or it is cancelled (sent shortly after
 //              an editor saves the change, once for a run of saves:
-//              queueEventChange below)
+//              queueEventChange below). A change of when or where names
+//              each thing that changed ("Meeting location changed"), with
+//              how it was and how it is now (updateNotice)
 //   reminders  before an event you are going to, at the times the account
 //              picked: 1, 2 or 3 hours, a day, a week (cron/notify.js, every
 //              ten minutes; each time once per RSVP: sendReminders)
 //   newEvents  a new event is announced, off by default (cron/notify.js,
 //              once per event, when it is released)
 //
-// Plus one that is not a choice, as it answers something the person did:
-// an editor confirmed the payment for their ticket (migrations/016,
-// sendPaymentConfirmed).
+// Plus two that are not a choice, as they answer something the person did:
+// they joined an event (sendJoined), and an editor confirmed the payment for
+// their ticket (migrations/016, sendPaymentConfirmed).
 //
 // Each goes to the account's browsers by Web Push (push.js) and, when the
 // account switched "also send to Telegram" on and has a linked chat, to the
@@ -24,19 +26,19 @@
 // place name and the page link. Never an online link or an attendees-only
 // address; those stay on the event page for people going.
 //
-// The one exception is a reminder's Telegram message, which goes only to
-// someone going, in their own linked chat: it carries what the event page
-// shows them as someone going, every place with its street address and map
-// link (the meeting point, a meal held somewhere else), and the online link.
-// Its push notification, which can show on a locked screen, stays to the
-// public when and where.
+// The exception is the Telegram message of a reminder, a change of when or
+// where, and joining, which go only to someone going, in their own linked
+// chat: it carries what the event page shows them as someone going, every
+// place with its street address and map link (the meeting point, a meal held
+// somewhere else), and the online link. Their push notifications, which can
+// show on a locked screen, stay to the public venue names and cities.
 
 import { waitUntil } from '@vercel/functions';
 import { database, TABLES } from './supabase.js';
 import { siteUrl } from './env.js';
 import { pushToAccount } from './push.js';
 import { sendRichTelegram, telegramConfigured } from './telegram.js';
-import { eventNoticeMessage, reminderMessage } from './telegram-messages.js';
+import { eventNoticeMessage, fullNoticeMessage } from './telegram-messages.js';
 import { reminderHoursFrom } from './users.js';
 import { isReleased, datesAnnounced, storedLocations, storedMeals, storedTimetable } from './event-rules.js';
 import { whenText, endText, placeText, countryText, untilText, startDateText, startTimeText } from './event-text.js';
@@ -98,10 +100,6 @@ export function noticeFor(kind, row) {
     const message = 'This event will not go ahead.';
     return { ...notice, heading: 'Event cancelled', lines: [message], intro: message, tag: `event-${row.slug}` };
   }
-  if (kind === 'updated') {
-    const message = 'The time or place changed. Now:';
-    return { ...notice, heading: 'Event updated', lines: [message, ...lines], intro: message, tag: `event-${row.slug}` };
-  }
   if (kind === 'timetable') {
     const message = 'The timetable changed. See the event page for the latest.';
     return { ...notice, heading: 'Timetable updated', lines: [message], intro: message, tag: `event-${row.slug}` };
@@ -118,6 +116,20 @@ export function noticeFor(kind, row) {
 // their notice choices, as they are waiting for it; an account that is not
 // active hears nothing. row: the event, with what noticeFor reads.
 export async function sendPaymentConfirmed(row, accountId) {
+  return deliverToOne(accountId, noticeFor('paid', row));
+}
+
+// Tells one person they are now going to an event, with everything they
+// need (joinNotice), whatever their notice choices, like a payment
+// confirmed. row: the event, with what reminderNotice reads; meals: the
+// meals they are coming for (empty for the whole event).
+export async function sendJoined(row, accountId, meals = []) {
+  return deliverToOne(accountId, joinNotice(row, meals));
+}
+
+// One account's notice, by push and (when it asked) Telegram; nothing for
+// an account that is not active.
+async function deliverToOne(accountId, notice) {
   const { data, error } = await database()
     .from(TABLES.accounts)
     .select('id, status, notify_telegram')
@@ -129,7 +141,7 @@ export async function sendPaymentConfirmed(row, accountId) {
   if (!data || data.status !== 'active') {
     return 0;
   }
-  return deliver([data], noticeFor('paid', row));
+  return deliver([data], notice);
 }
 
 // The linked Telegram chat of each account that has one, as a Map of
@@ -161,7 +173,8 @@ export async function deliver(accounts, notice) {
       let reachedAccount = (await pushToAccount(account.id, payload)) > 0;
       const chat = chats.get(account.id);
       if (chat) {
-        // A reminder brings its own, fuller message (reminderNotice).
+        // A reminder, a change or joining brings its own, fuller message
+        // (fullNoticeMessage).
         let message = notice.rich;
         if (!message) {
           message = eventNoticeMessage(notice);
@@ -313,6 +326,11 @@ export function changeKind(before, after) {
     'venue_name', 'venue_address', 'city', 'country', 'is_online',
   ];
   let moved = fields.some((field) => fieldChanged(field, before, after));
+  // The online link, for an online event; a notice_base kept before the
+  // link was kept in it has no online_url, and is taken as unchanged.
+  if (after.is_online === true && 'online_url' in before && fieldChanged('online_url', before, after)) {
+    moved = true;
+  }
   if (locationsChanged(before, after) || mealPlacesChanged(before, after)) {
     moved = true;
   }
@@ -340,7 +358,7 @@ export const changeNotice = { waitMs: 45_000, graceMs: 1_000 };
 // The columns changeKind reads, as kept in notice_base.
 const NOTICE_BASE_COLUMNS = [
   'status', 'publish_at', 'starts_at', 'ends_at', 'start_time_tbc', 'end_time_tbc', 'timezone', 'dates_hidden',
-  'venue_name', 'venue_address', 'city', 'country', 'is_online', 'locations', 'meal_options',
+  'venue_name', 'venue_address', 'city', 'country', 'is_online', 'online_url', 'locations', 'meal_options',
   'timetable_view', 'timetable_rooms', 'timetable_items',
 ];
 
@@ -414,6 +432,9 @@ export async function flushEventChange(eventId, now = Date.now()) {
     return 0;
   }
   const accounts = await attendeeAccounts(eventId, 'notify_updates');
+  if (kind === 'updated') {
+    return deliver(accounts, updateNotice(row.notice_base, row));
+  }
   return deliver(accounts, noticeFor(kind, row));
 }
 
@@ -517,29 +538,24 @@ function placeRows(location) {
   return rows;
 }
 
-// The reminder for someone going to an event (row: the event, with its
-// locations and meals), coming for the whole event (chosen empty) or just
-// for those meals. It is a notice (heading, title, lines, url, tag) whose
-// push notification says only when and where, plus details, places and meal
-// places for its Telegram message (rich, reminderMessage): when it starts
-// and ends, what they are coming for, the online link, every place of the
-// event with its address and map link, and each meal held somewhere else
-// (just their meals, when they are coming only for those).
-export function reminderNotice(row, chosen = [], now = Date.now()) {
-  const url = `${siteUrl()}/e/${row.slug}`;
+// What a full notice's Telegram message shows of an event (row: the event,
+// with its locations and meals), for someone coming for the whole event
+// (chosen empty) or just for those meals: details (when it starts and ends,
+// what they are coming for unless comingFor is false, the online link),
+// places (every place of the event with its address and map link), online
+// (an online-only event, with no places), and mealPlaces under mealsHeading
+// (each meal held somewhere else; just their meals, when they are coming
+// only for those).
+function eventTables(row, chosen = [], { comingFor = true } = {}) {
   const meals = storedMeals(row);
   let picked = [];
   if (Array.isArray(chosen)) {
     picked = meals.filter((meal) => chosen.includes(meal.id));
   }
-  const details = [['When', whenText(row)]];
-  const ends = endText(row);
-  if (ends) {
-    details.push(['Ends', ends]);
-  }
-  if (picked.length) {
+  const details = whenRows(row);
+  if (comingFor && picked.length) {
     details.push(['Coming for', `${picked.map(mealName).join(', ')} only`]);
-  } else if (meals.length) {
+  } else if (comingFor && meals.length) {
     details.push(['Coming for', 'The whole event']);
   }
   if (row.is_online && row.online_url) {
@@ -556,22 +572,195 @@ export function reminderNotice(row, chosen = [], now = Date.now()) {
     heading: placeHeading(location, meal),
     rows: placeRows(location),
   })));
+  let online = false;
+  if (row.is_online === true && places.length === 0) {
+    online = true;
+  }
+  return { details, places, online, mealsHeading, mealPlaces };
+}
+
+// When an event starts and ends, as [label, value] rows.
+function whenRows(row) {
+  const rows = [['When', whenText(row)]];
+  const ends = endText(row);
+  if (ends) {
+    rows.push(['Ends', ends]);
+  }
+  return rows;
+}
+
+// The reminder for someone going to an event, coming for the whole event
+// (chosen empty) or just for those meals. It is a notice (heading, title,
+// lines, url, tag) whose push notification says only when and where, plus
+// eventTables for its Telegram message (rich).
+export function reminderNotice(row, chosen = [], now = Date.now()) {
   const notice = {
     heading: `Starting in ${untilText(Date.parse(row.starts_at) - now)}`,
     title: row.title,
     lines: [whenText(row), placeText(row)].filter(Boolean),
-    url,
+    url: `${siteUrl()}/e/${row.slug}`,
     tag: `reminder-${row.slug}`,
-    details,
-    places,
-    online: false,
-    mealsHeading,
-    mealPlaces,
+    ...eventTables(row, chosen),
   };
-  if (row.is_online === true && places.length === 0) {
-    notice.online = true;
+  notice.rich = fullNoticeMessage(notice);
+  return notice;
+}
+
+// The notice for someone who has just joined an event, like a reminder: the
+// push says when and where, and the Telegram message has every place, the
+// meals they are coming for, and the online link.
+export function joinNotice(row, chosen = []) {
+  const notice = {
+    heading: "You're going",
+    title: row.title,
+    lines: [whenText(row), placeText(row)].filter(Boolean),
+    url: `${siteUrl()}/e/${row.slug}`,
+    tag: `going-${row.slug}`,
+    ...eventTables(row, chosen),
+  };
+  notice.rich = fullNoticeMessage(notice);
+  return notice;
+}
+
+// A place in a push notification, which can show on a locked screen: its
+// public venue name and city, never its street address.
+function publicPlace(location) {
+  const parts = [location.venue_name, location.city].filter(Boolean);
+  if (parts.length === 0) {
+    return 'to be announced';
   }
-  notice.rich = reminderMessage(notice);
+  return parts.join(', ');
+}
+
+// Places by what they are, so two versions can be matched up: "event",
+// "meeting", "custom:Tea room", and a second of the same kind "meeting#2".
+function placesByKind(locations) {
+  const byKind = new Map();
+  for (const location of locations) {
+    let kind = location.label;
+    if (location.label === 'custom') {
+      kind = `custom:${location.custom_label}`;
+    }
+    let key = kind;
+    let count = 1;
+    while (byKind.has(key)) {
+      count += 1;
+      key = `${kind}#${count}`;
+    }
+    byKind.set(key, location);
+  }
+  return byKind;
+}
+
+// What a place is called in a change: "Meeting location", "Tea room",
+// "Dinner location", "Dinner · Meeting location".
+function changedPlaceName(location, meal) {
+  if (meal && location.label === 'meal') {
+    return `${mealName(meal)} location`;
+  }
+  return placeHeading(location, meal);
+}
+
+// The changes between two lists of places (the event's, or one meal's):
+// each one changed, added or removed, by name.
+function placeChanges(beforeList, afterList, meal = null) {
+  const old = placesByKind(beforeList);
+  const now = placesByKind(afterList);
+  const changes = [];
+  for (const [key, location] of now) {
+    const name = changedPlaceName(location, meal);
+    if (!old.has(key)) {
+      changes.push({ heading: `${name} added`, before: null, after: placeRows(location), summary: `${name} added: ${publicPlace(location)}` });
+    } else if (JSON.stringify(old.get(key)) !== JSON.stringify(location)) {
+      changes.push({ heading: `${name} changed`, before: placeRows(old.get(key)), after: placeRows(location), summary: `${name} changed: ${publicPlace(location)}` });
+    }
+  }
+  for (const [key, location] of old) {
+    if (!now.has(key)) {
+      const name = changedPlaceName(location, meal);
+      changes.push({ heading: `${name} removed`, before: placeRows(location), after: null, summary: `${name} removed` });
+    }
+  }
+  return changes;
+}
+
+// Each thing about when or where that changed between two versions of an
+// event, in the order the event page shows them: { heading ("Meeting
+// location changed"), before and after ([label, value] rows, null for one
+// added or removed), summary (for the push: public names only) }.
+export function describeChanges(before, after) {
+  const changes = [];
+  const whenBefore = whenRows(before);
+  const whenAfter = whenRows(after);
+  if (JSON.stringify(whenBefore) !== JSON.stringify(whenAfter)) {
+    let summary = `Now ${whenText(after)}`;
+    const ends = endText(after);
+    if (ends) {
+      summary = `${summary} to ${ends}`;
+    }
+    changes.push({ heading: 'Date and time changed', before: whenBefore, after: whenAfter, summary });
+  }
+  if ((before.is_online === true) !== (after.is_online === true)) {
+    let heading = 'No longer online';
+    if (after.is_online === true) {
+      heading = 'Now online';
+    }
+    changes.push({ heading, before: null, after: null, summary: heading });
+  } else if (after.is_online === true && 'online_url' in before && fieldChanged('online_url', before, after)) {
+    const linkRow = (row) => {
+      let link = 'None';
+      if (row.online_url) {
+        link = row.online_url;
+      }
+      return [['Online link', link]];
+    };
+    changes.push({ heading: 'Online link changed', before: linkRow(before), after: linkRow(after), summary: 'Online link changed. See the event page.' });
+  }
+  changes.push(...placeChanges(storedLocations(before), storedLocations(after)));
+  if ('meal_options' in before && 'meal_options' in after) {
+    const oldMeals = new Map(storedMeals(before).map((meal) => [meal.id, meal]));
+    for (const meal of storedMeals(after)) {
+      const was = oldMeals.get(meal.id);
+      if (!was) {
+        continue;
+      }
+      if (was.locations.length && !meal.locations.length) {
+        const heading = `${mealName(meal)} now at the event's location`;
+        changes.push({ heading, before: placeRows(was.locations[0]), after: [['Place', "Same as the event's"]], summary: heading });
+      } else {
+        changes.push(...placeChanges(was.locations, meal.locations, meal));
+      }
+    }
+  }
+  return changes;
+}
+
+// The notice for a change of when or where (changeKind "updated"), from how
+// the event was (before: its notice_base) and how it is (row). The heading
+// names the change when there is one ("Meeting location changed"; "Event
+// updated" for several), and the push lists each with public names only.
+// The Telegram message (rich) has each change's before and now, then the
+// event's details and every place, like a reminder.
+export function updateNotice(before, row) {
+  const changes = describeChanges(before, row);
+  let heading = 'Event updated';
+  if (changes.length === 1) {
+    heading = changes[0].heading;
+  }
+  let lines = changes.map((change) => change.summary);
+  if (lines.length === 0) {
+    lines = ['The time or place changed. See the event page.'];
+  }
+  const notice = {
+    heading,
+    title: row.title,
+    lines,
+    url: `${siteUrl()}/e/${row.slug}`,
+    tag: `event-${row.slug}`,
+    changes,
+    ...eventTables(row, [], { comingFor: false }),
+  };
+  notice.rich = fullNoticeMessage(notice);
   return notice;
 }
 

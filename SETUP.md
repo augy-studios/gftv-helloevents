@@ -22,11 +22,22 @@ value only where a step says so.
 - **Event notices**, for members who tick "Also send these to my linked
   Telegram chat" on their account page: changes of time or place, reminders
   and, if they asked, new events.
+- **Alerts for admins and organisers** (migrations/026). The admins' chats,
+  listed in `ADMIN_CHAT_IDS` (section 2), hear about each new attendee, each
+  payment reported (to be checked) and confirmed, and each new event once it
+  is published. An event's organisers' chats, which an admin adds on the
+  event's **Organisers** tab in Manage, hear about its new attendees (once
+  each has given every detail the event asks for, with their contact
+  details) and its payments once confirmed. A chat can be a person's or a
+  group's.
 - **Commands** in a private chat with the bot: `/start` (linking, from the
-  account page), `/unlink`, and anything else gets a help message.
+  account page), `/unlink`, and anything else gets a help message. `/chatid`,
+  in a private chat or a group, answers with that chat's ID, to put in
+  `ADMIN_CHAT_IDS` or an event's organiser chats.
 
-It only ever talks in private chats. It does not use groups, inline mode or
-the Telegram Login Widget.
+Codes and members' notices only ever go to private chats. In a group, the bot
+answers `/chatid` and nothing else, and only sends the alerts above. It does
+not use inline mode or the Telegram Login Widget.
 
 Telegram is optional. Without it the site works, the Telegram options do not
 appear, and members reset a password with a backup code or a code from an
@@ -58,7 +69,7 @@ bot first:
 | `/setabouttext` | `Codes and event notices for events.globalfurry.tv` |
 | `/setuserpic` | the picture `main-site/GHE-512.png` from this repository |
 | `/setcommands` | the three lines below, as one message |
-| `/setjoingroups` | choose **Disable** |
+| `/setjoingroups` | choose **Enable**, so the bot can be added to admins' and organisers' group chats for alerts. (Choose **Disable** if no alerts go to groups.) |
 
 The command list for `/setcommands`, exactly what the bot handles
 (`main-site/api/telegram/webhook.js`):
@@ -77,8 +88,8 @@ message; `/start` with a link token is what linking sends.
 - `/setdomain`: only for the Telegram Login Widget. This site links accounts
   with a `t.me` link instead, so no domain is needed.
 - `/setinline`: inline mode is not used. Leave it off.
-- `/setprivacy`: privacy mode only matters in groups, and with joining groups
-  disabled the bot is never in one. Leave it as it is.
+- `/setprivacy`: leave privacy mode **on** (the default). In a group, the bot
+  then sees only commands meant for it, such as `/chatid`, never the chat.
 
 ## 2. Put the three Telegram values in Vercel
 
@@ -91,6 +102,7 @@ the webhook can point at one deploy only):
 | `TELEGRAM_BOT_TOKEN` | the token from BotFather. Tick **Sensitive**. |
 | `TELEGRAM_BOT_USERNAME` | the username, without the `@`, for example `gftvhelloevents_bot` |
 | `TELEGRAM_WEBHOOK_SECRET` | a new random value, made as below. Tick **Sensitive**. |
+| `ADMIN_CHAT_IDS` | optional: the admins' chats for alerts, separated by commas, for example `123456789, -1001234567890`. A person's ID (they must press **Start** in the bot once), or a group's (it starts with `-`; add the bot to the group first). Send `/chatid` to the bot in the chat to get its ID. Redeploy after changing it. |
 
 Make the webhook secret on your own machine (it is any 1 to 256 characters
 from `A-Z a-z 0-9 _ -`; hex is safe):
@@ -157,9 +169,13 @@ When done, close the terminal, or run `unset BOT_TOKEN HOOK_SECRET`.
    sends with a new password. You are signed in with the new password.
 4. **A notice (optional).** On the account page, under **Notifications**, tick
    "Also send these to my linked Telegram chat" and press **Send a test**.
-5. **Unlink.** Send `/unlink` to the bot: it answers "Unlinked", and the
+5. **Alerts (optional).** Add the bot to a group, send `/chatid` there, and
+   put the ID it answers in `ADMIN_CHAT_IDS` (redeploy), or on an event's
+   **Organisers** tab in Manage, where **Send a test** checks the bot can
+   reach each chat.
+6. **Unlink.** Send `/unlink` to the bot: it answers "Unlinked", and the
    account page shows "Not linked".
-6. Delete the test account afterwards from its account page.
+7. Delete the test account afterwards from its account page.
 
 The code and help messages are Telegram rich messages (Bot API 10.1, sent with
 `sendRichMessage`). There is nothing to switch on for them in BotFather. If

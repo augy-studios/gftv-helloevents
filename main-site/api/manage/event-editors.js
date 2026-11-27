@@ -1,10 +1,21 @@
-// An event's own editors (migrations/018), for the Editors tab of the edit
-// form on /manage. Admins only.
+// An event's own editors (migrations/018) and its organisers' Telegram
+// chats (migrations/026), for the Organisers tab of the edit form on
+// /manage. Admins only.
 //
-// GET  ?id=<event id>                                 -> { editors, candidates }
+// GET  ?id=<event id>                                 -> { editors, candidates, organiserChats }
 // GET  ?id=<event id>&search=<typed text>              -> { candidates }
-// POST { id, action: "add", username, staff? }         -> { editors, candidates }
-// POST { id, action: "remove", username, staff }       -> { editors, candidates }
+// POST { id, action: "add", username, staff? }         -> { editors, candidates, organiserChats }
+// POST { id, action: "remove", username, staff }       -> { editors, candidates, organiserChats }
+// POST { id, action: "chats", chats }                  -> { editors, candidates, organiserChats }
+// POST { id, action: "test-chats" }                    -> { failed }
+//
+// chats: the organisers' chat ids, as text (separated by commas, spaces or
+// new lines) or a list: a person's id, or a group's (starting with -), at
+// most MAX_ORGANISER_CHATS. Anything else is refused with chat_id_invalid
+// (and the value), more with too_many_chats. The bot then tells them about
+// the event's new attendees and confirmed payments (staff-alerts.js).
+// test-chats: a short message to each saved chat; failed lists those the
+// bot could not reach (not in the group, or the person never pressed Start).
 //
 // editors: each editor's username, display name, staff or not, and whether
 // their rights are working (twoStep: two-step sign-in is on; without it
@@ -27,6 +38,7 @@ import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { canManage, normaliseAccount } from '../_lib/users.js';
 import { hasTwoStep } from '../_lib/event-editors.js';
+import { parseChatIds, organiserChatIds, testOrganiserChats, MAX_ORGANISER_CHATS } from '../_lib/staff-alerts.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_DAYS = 30;
@@ -172,7 +184,7 @@ function ranked(accounts, typed) {
     .map((each) => personOf(each.account));
 }
 
-async function answer(response, eventId) {
+async function answer(response, eventId, event) {
   const editors = await editorAccounts(eventId);
   const editorIds = new Set(editors.map((account) => account.id));
   const shown = [];
@@ -180,7 +192,30 @@ async function answer(response, eventId) {
     shown.push({ ...personOf(account), twoStep: await hasTwoStep(account) });
   }
   const candidates = (await candidateAccounts(editorIds)).map(personOf);
-  return ok(response, { editors: shown, candidates });
+  return ok(response, { editors: shown, candidates, organiserChats: organiserChatIds(event) });
+}
+
+// The chat ids an admin typed: { ok: true, chats } or { ok: false, error,
+// value }.
+function readChats(input) {
+  let parts = [];
+  if (Array.isArray(input)) {
+    parts = input.map((part) => String(part).trim()).filter(Boolean);
+  } else if (typeof input === 'string') {
+    parts = input.split(/[\s,;]+/).filter(Boolean);
+  } else {
+    return { ok: false, error: 'bad_request', value: null };
+  }
+  for (const part of parts) {
+    if (parseChatIds([part]).length === 0) {
+      return { ok: false, error: 'chat_id_invalid', value: part.slice(0, 40) };
+    }
+  }
+  const chats = parseChatIds(parts);
+  if (chats.length > MAX_ORGANISER_CHATS) {
+    return { ok: false, error: 'too_many_chats', value: null };
+  }
+  return { ok: true, chats };
 }
 
 // The account an admin named, among those that could be added (add) or
@@ -236,7 +271,7 @@ export default route('manage/event-editors', async (request, response) => {
     return fail(response, 400, 'bad_request');
   }
   eventId = eventId.toLowerCase();
-  const { data: event, error } = await database().from(TABLES.events).select('id').eq('id', eventId).maybeSingle();
+  const { data: event, error } = await database().from(TABLES.events).select('id, slug, title, organiser_chat_ids').eq('id', eventId).maybeSingle();
   if (error) {
     throw error;
   }
@@ -249,8 +284,37 @@ export default route('manage/event-editors', async (request, response) => {
     return ok(response, { candidates: ranked(await searchAccounts(editorIds, typed), typed) });
   }
   if (request.method === 'GET') {
-    await answer(response, eventId);
+    await answer(response, eventId, event);
     return;
+  }
+  if (body.action === 'chats') {
+    const read = readChats(body.chats);
+    if (!read.ok) {
+      const extra = {};
+      if (read.value) {
+        extra.value = read.value;
+      }
+      return fail(response, 400, read.error, extra);
+    }
+    const { data: saved, error: saveError } = await database()
+      .from(TABLES.events)
+      .update({ organiser_chat_ids: read.chats })
+      .eq('id', eventId)
+      .select('id, slug, title, organiser_chat_ids')
+      .single();
+    if (saveError) {
+      throw saveError;
+    }
+    await audit(request, { action: 'event.organiser_chats_changed', actorId: session.user.id, eventId, details: { count: read.chats.length } });
+    await answer(response, eventId, saved);
+    return;
+  }
+  if (body.action === 'test-chats') {
+    const chats = organiserChatIds(event);
+    if (chats.length === 0) {
+      return fail(response, 400, 'no_chats');
+    }
+    return ok(response, { failed: await testOrganiserChats(event, chats) });
   }
 
   const editors = await editorAccounts(eventId);
@@ -283,5 +347,5 @@ export default route('manage/event-editors', async (request, response) => {
   } else {
     return fail(response, 400, 'bad_request');
   }
-  await answer(response, eventId);
+  await answer(response, eventId, event);
 });

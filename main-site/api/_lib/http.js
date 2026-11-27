@@ -27,7 +27,8 @@ export function errorDetail(cause) {
 export function send(response, status, body) {
   response.statusCode = status;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
-  // no-store unless the route chose its own caching (the public event feed).
+  // no-store unless the route chose its own caching (only files whose address
+  // changes with their content are cached).
   if (!response.getHeader('Cache-Control')) {
     response.setHeader('Cache-Control', 'no-store');
   }

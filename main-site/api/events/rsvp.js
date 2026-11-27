@@ -58,6 +58,12 @@
 // open, not-yet-over events can be joined; anything else answers the same
 // way as a missing event.
 //
+// Joining sends the person a "You're going" notice (notify.js sendJoined)
+// with every place of the event, by push and, if they asked, Telegram. The
+// admins' and the event's organisers' chats hear about the new attendee
+// (staff-alerts.js; the organisers once their details are complete, which
+// may be a later change).
+//
 // -> { event } as the person now sees it (event.viewer.going says whether
 // they are going, event.viewer.meals what for, event.viewer.rsvpNumber
 // their RSVP ID for the event: the next number up when they join, kept
@@ -74,6 +80,8 @@ import { publicEventDetail } from '../_lib/serialize.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, registrationPhotoExists, registrationPhotoPath } from '../_lib/payments.js';
+import { background, sendJoined } from '../_lib/notify.js';
+import { alertNewAttendee, alertAttendeeCompleted } from '../_lib/staff-alerts.js';
 import { readRegistrationAnswers, missingAccountDetails, registrationAsksFursuiting, photoNames } from '../../js/registration-fields.js';
 import { storedContactFields, storedContactRule, readContactAnswers } from '../../js/contact-fields.js';
 
@@ -490,6 +498,13 @@ export default route('events/rsvp', async (request, response) => {
         details.payment = { method: ticket.columns.payment_method, tier: ticket.columns.payment_tier, items: ticket.columns.payment_items, amount: ticket.columns.payment_amount };
       }
       await audit(request, { action: 'rsvp.going', actorId: session.user.id, eventId: event.id, details });
+      // "You're going", with every place and the meals they are coming for.
+      background(sendJoined(event, session.user.id, meals));
+      // The admins' and organisers' chats (staff-alerts.js).
+      background(alertNewAttendee(event, session.user.id));
+    } else if (contactSent !== null || registrationSent !== null) {
+      // Details given now may complete them, for the organisers.
+      background(alertAttendeeCompleted(event, session.user.id));
     }
     if (result === 'changed') {
       await audit(request, { action: 'rsvp.meals_changed', actorId: session.user.id, eventId: event.id, details: { meals, lepak } });
@@ -549,6 +564,7 @@ export default route('events/rsvp', async (request, response) => {
       await writeRegistration(event, session.user.id, answers, before.registration);
       await audit(request, { action: 'rsvp.registration_changed', actorId: session.user.id, eventId: event.id, details: { questions: Object.keys(body.registration) } });
     }
+    background(alertAttendeeCompleted(event, session.user.id));
   } else {
     return fail(response, 400, 'bad_request');
   }

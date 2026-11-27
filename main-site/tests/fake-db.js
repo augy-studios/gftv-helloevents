@@ -29,7 +29,7 @@ const DEFAULTS = {
     capacity: null, rsvp_open: true, staff_notes: null, created_by: null, updated_by: null, updated_at: now(),
     description_zh: null, start_time_tbc: false, end_time_tbc: false, locations: [],
     cover_image_url: null, cover_image_path: null, announced_at: null,
-    notice_base: null, notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
+    notice_base: null, notice_due_at: null, organiser_chat_ids: [], admin_told_at: null, admin_notice_due_at: null, meal_options: [], tiers_enabled: false, ticket_tiers: [],
     volunteers_wanted: false, fursuiters_asked: false, volunteer_discount_enabled: false, volunteer_discount_from: null, volunteer_discount_type: 'percent', volunteer_discount_value: null,
     timetable_view: 'timeline', timetable_rooms: [], timetable_items: [],
     external_url_label: 'tickets_website', external_url_custom_label: null, cross_border: false,
@@ -41,7 +41,7 @@ const DEFAULTS = {
   gftvevents_attendees: () => ({
     meals: [], reminders_sent: [], volunteer: false, fursuiter: false, lepak: false, contact: {}, registration: {}, payment_credit: null,
     payment_method: null, payment_status: 'none', payment_tier: null, payment_items: null, payment_amount: null, payment_currency: null,
-    payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null,
+    payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null, organisers_told_at: null,
   }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),
   gftvevents_event_editors: () => ({ added_by: null, created_at: now() }),

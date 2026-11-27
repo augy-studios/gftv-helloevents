@@ -466,4 +466,51 @@ test('an admin asked to delete an event can set it to Cancelled instead', async 
   await page.goto(`/e/${event.slug}`);
   await expect(page.locator('#eventView')).toBeVisible();
   await expect(page.locator('#eventChips')).toContainText('Cancelled');
+
+  // The home feed's card shows it too, right after the kind.
+  await page.goto('/');
+  const card = page.locator('#feed a.event-card', { hasText: event.title });
+  await expect(card.locator('.chip')).toHaveText(['Convention', 'Cancelled']);
+  await expect(card.locator('.chip-danger')).toHaveText('Cancelled');
+});
+
+test('once Google Maps fills in a location, the editor can copy its street or full address', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  // The link lookup, answered here (the e2e server reaches no other site).
+  await page.route('**/api/manage/place', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ place: {
+      venueName: 'Suntec Convention Centre',
+      venueAddress: '1 Raffles Blvd, Singapore 039593',
+      city: 'Singapore',
+      country: 'SG',
+      mapsUrl: 'https://maps.app.goo.gl/suntec',
+    } }),
+  }));
+  await openManage(page);
+  await page.locator('#newEvent').click();
+  await openSection(page, 'When and where');
+  const card = page.locator('#locationList .location-card').first();
+  const copyAddress = card.getByRole('button', { name: 'Copy address' });
+  const copyFull = card.getByRole('button', { name: 'Copy full address' });
+
+  // Typed in by hand: no copy buttons.
+  await locationField(page, 0, 'venueAddress').fill('somewhere');
+  await expect(copyAddress).toBeHidden();
+
+  await locationField(page, 0, 'mapsUrl').fill('https://maps.app.goo.gl/suntec');
+  await card.locator('.location-fill').click();
+  await expect(locationField(page, 0, 'venueAddress')).toHaveValue('1 Raffles Blvd, Singapore 039593');
+  await expect(copyAddress).toBeVisible();
+  await expect(copyFull).toBeVisible();
+
+  await copyAddress.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1 Raffles Blvd, Singapore 039593');
+  // The city is already in the street address, so it is not said twice.
+  await copyFull.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Suntec Convention Centre, 1 Raffles Blvd, Singapore 039593');
+
+  // No street address, nothing to copy.
+  await locationField(page, 0, 'venueAddress').fill('');
+  await expect(copyAddress).toBeHidden();
 });

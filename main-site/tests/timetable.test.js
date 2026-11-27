@@ -254,6 +254,8 @@ test('people going hear once when the timetable changes', async () => {
     body: { action: 'subscribe', subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/otter', keys: { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', auth: 'tBHItJI5svbpez7KI4CCXg' } } },
   });
   await otter.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true } });
+  await settle();
+  pushes = [];
 
   await editor.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...event, timetableView: 'grid' } } });
   await settle();

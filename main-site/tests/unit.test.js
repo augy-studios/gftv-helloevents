@@ -840,7 +840,7 @@ test('only a change of time or place, or a cancellation, of a released event is 
 
 test('a notice carries public fields only', () => {
   const r = row({ is_online: true, online_url: 'https://meet.example.com/secret', venue_address: '1 Secret Road', address_attendees_only: true });
-  for (const kind of ['updated', 'cancelled', 'new']) {
+  for (const kind of ['cancelled', 'new', 'paid']) {
     const n = notify.noticeFor(kind, r);
     const text = JSON.stringify(n);
     assert.equal(text.includes('meet.example.com'), false, kind);
@@ -871,6 +871,65 @@ test('a Telegram event notice puts the date, time and place on lines of their ow
   assert.ok(plain.markdown.includes('**Time:** To be confirmed'));
   const tba = notify.noticeFor('new', row({ dates_hidden: true }));
   assert.deepEqual(tba.details.map(([label]) => label), ['Date', 'Location']);
+});
+
+test('a change notice names what changed, before and now, and keeps the push to public names', () => {
+  const hall = { label: 'event', venue_name: 'Hall', venue_address: '1 Secret Road', city: 'Singapore', country: 'SG' };
+  const before = row({
+    is_online: false, address_attendees_only: true,
+    locations: [hall, { label: 'meeting', venue_name: 'Exit A', venue_address: '2 Hidden Lane', city: 'Singapore', country: 'SG' }],
+    meal_options: [{ id: 'dinner', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat' }] }],
+  });
+  const meetingMoved = { ...before, locations: [hall, { label: 'meeting', venue_name: 'Exit B', venue_address: '3 Hidden Lane', city: 'Singapore', country: 'SG' }] };
+  const notice = notify.updateNotice(before, meetingMoved);
+  assert.equal(notice.heading, 'Meeting location changed');
+  assert.deepEqual(notice.lines, ['Meeting location changed: Exit B, Singapore']);
+  assert.equal(JSON.stringify(notice.lines).includes('Hidden Lane'), false, 'no street address in the push');
+  const { markdown, fallback } = notice.rich;
+  for (const part of ['## Meeting location changed', '### Meeting location changed', '| Venue | Exit A | Exit B |', '| Address | 2 Hidden Lane | 3 Hidden Lane |',
+    '## Where', '### Event location', '| Address | 1 Secret Road |', '### Meeting location', '## Meals held elsewhere', '### Dinner']) {
+    assert.ok(markdown.includes(part), `${part} in\n${markdown}`);
+  }
+  assert.equal(markdown.includes('Coming for'), false, 'everyone going gets the same change notice');
+  assert.ok(fallback.includes('Venue: Exit A → Exit B'));
+
+  // Added, removed, a meal moved and back, the time, and online.
+  const heads = (after, from = before) => notify.describeChanges(from, after).map((change) => change.heading);
+  assert.deepEqual(heads({ ...before, locations: [hall] }), ['Meeting location removed']);
+  assert.deepEqual(heads({ ...before, locations: [...before.locations, { label: 'custom', custom_label: 'Afterparty', venue_name: 'Bar' }] }), ['Afterparty added']);
+  assert.deepEqual(heads({ ...before, meal_options: [{ id: 'dinner', label: null, locations: [{ label: 'meal', venue_name: 'Maxwell' }] }] }), ['Dinner location changed']);
+  assert.deepEqual(heads({ ...before, meal_options: [{ id: 'dinner', label: null, locations: [] }] }), ["Dinner now at the event's location"]);
+  assert.deepEqual(heads({ ...before, starts_at: '2026-11-14T07:00:00.000Z' }), ['Date and time changed']);
+  assert.deepEqual(heads({ ...before, is_online: true }), ['Now online']);
+  const online = { ...before, is_online: true, online_url: 'https://meet.example.com/a' };
+  const relinked = notify.describeChanges(online, { ...online, online_url: 'https://meet.example.com/b' });
+  assert.deepEqual(relinked.map((change) => change.heading), ['Online link changed']);
+  assert.equal(relinked[0].summary.includes('meet.example.com'), false);
+
+  // Several at once: "Event updated", each one listed.
+  const both = notify.updateNotice(before, { ...meetingMoved, starts_at: '2026-11-14T07:00:00.000Z' });
+  assert.equal(both.heading, 'Event updated');
+  assert.equal(both.lines.length, 2);
+  assert.match(both.lines[1], /^Meeting location changed/);
+});
+
+test('joining brings every place, the meals someone is coming for and the online link, with the push kept public', () => {
+  const event = row({
+    is_online: true, online_url: 'https://meet.example.com/secret', address_attendees_only: true,
+    locations: [
+      { label: 'event', venue_name: 'Hall', venue_address: '1 Secret Road', city: 'Singapore', country: 'SG' },
+      { label: 'meeting', venue_name: 'Exit B', city: 'Singapore', country: 'SG' },
+    ],
+    meal_options: [{ id: 'dinner', label: null, locations: [{ label: 'meal', venue_name: 'Lau Pa Sat' }] }],
+  });
+  const notice = notify.joinNotice(event, ['dinner']);
+  assert.equal(notice.heading, "You're going");
+  assert.equal(JSON.stringify(notice.lines).includes('Secret Road'), false);
+  assert.equal(JSON.stringify(notice.lines).includes('meet.example.com'), false);
+  for (const part of ["## You're going", '| Coming for | Dinner only |', '| Online link | https://meet.example.com/secret |',
+    '### Event location', '| Address | 1 Secret Road |', '### Meeting location', '| Venue | Exit B |', '## Your meals', '### Dinner']) {
+    assert.ok(notice.rich.markdown.includes(part), `${part} in\n${notice.rich.markdown}`);
+  }
 });
 
 test('a reminder goes at the closest time picked that has come, once, and not to someone who has just said they are going', () => {

@@ -377,6 +377,9 @@ test('changing when or where an event happens tells the people going, by push an
   await quiet.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription('https://fcm.googleapis.com/fcm/send/quiet') } });
   await quiet.call(notifications, { method: 'POST', body: { action: 'prefs', updates: false } });
   await quiet.call(rsvp, { method: 'POST', body: { slug: 'moving-meet', going: true } });
+  // Their "You're going" notices, before any change.
+  await settle();
+  pushes = [];
 
   const ed = await staff('editor', { is_editor: true });
   const current = (await ed.call(manage, { query: { id: event.id } })).json.event;
@@ -389,14 +392,23 @@ test('changing when or where an event happens tells the people going, by push an
   await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', locations: moved } } });
   await settle();
   assert.equal(pushes.length, 1, 'only the person who wants updates');
-  assert.equal(pushes[0].payload.title, 'Event updated: Moving Meet');
+  // It names what changed, and the push, which can show on a locked screen,
+  // keeps to the public venue name.
+  assert.equal(pushes[0].payload.title, 'Event location changed: Moving Meet');
+  assert.equal(pushes[0].payload.body, 'Event location changed: New Hall');
   assert.equal(pushes[0].payload.url, 'https://events.globalfurry.tv/e/moving-meet');
-  const all = JSON.stringify(pushes) + JSON.stringify(sent);
-  assert.equal(all.includes('meet.example.com'), false);
-  assert.equal(all.includes('Secret Road'), false);
+  assert.equal(JSON.stringify(pushes).includes('meet.example.com'), false);
+  assert.equal(JSON.stringify(pushes).includes('Secret Road'), false);
+  // Telegram, in the chat of someone going: before and now, then every
+  // place with its address, and the online link, like a reminder.
   const tgNotice = sent.find((s) => s.url.endsWith('/sendRichMessage'));
   assert.equal(tgNotice.body.chat_id, 777);
-  assert.match(tgNotice.body.rich_message.markdown, /## Event updated/);
+  const markdown = tgNotice.body.rich_message.markdown;
+  for (const part of ['## Event location changed', '## What changed', '### Event location changed', '|  | Before | Now |', '| Venue | Old Hall | New Hall |',
+    '## Event details', '| Online link | https://meet.example.com/secret |', '## Where', '### Event location', '| Address | 1 Secret Road |']) {
+    assert.ok(markdown.includes(part), `${part} in\n${markdown}`);
+  }
+  assert.equal(markdown.includes('| Address | 1 Secret Road | 1 Secret Road |'), false, 'only what changed, side by side');
 
   pushes = [];
   await ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, title: 'Moving Meet', locations: moved, status: 'cancelled' } } });
@@ -405,11 +417,43 @@ test('changing when or where an event happens tells the people going, by push an
   assert.equal(pushes[0].payload.title, 'Event cancelled: Moving Meet');
 });
 
+test('joining sends a "You are going" notice with every place, whatever the notice choices', async () => {
+  addEvent({
+    slug: 'joined-meet', title: 'Joined Meet', description: 'A meet.', description_zh: '聚会。', venue_name: 'Hall', venue_address: '1 Secret Road', address_attendees_only: true,
+    locations: [
+      { label: 'event', venue_name: 'Hall', venue_address: '1 Secret Road', city: 'Singapore', country: 'SG' },
+      { label: 'meeting', venue_name: 'Exit B', city: 'Singapore', country: 'SG' },
+    ],
+  });
+  const m = await member();
+  await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
+  await linkTelegram(m);
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true, updates: false, reminderHours: [] } });
+  sent = [];
+  pushes = [];
+  await m.call(rsvp, { method: 'POST', body: { slug: 'joined-meet', going: true } });
+  await settle();
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].payload.title, "You're going: Joined Meet");
+  assert.equal(JSON.stringify(pushes).includes('Secret Road'), false);
+  const markdown = sent.find((s) => s.url.endsWith('/sendRichMessage')).body.rich_message.markdown;
+  for (const part of ["## You're going", '### Event location', '| Address | 1 Secret Road |', '### Meeting location', '| Venue | Exit B |']) {
+    assert.ok(markdown.includes(part), `${part} in\n${markdown}`);
+  }
+  // Changing what they are coming for is not joining again.
+  pushes = [];
+  await m.call(rsvp, { method: 'POST', body: { slug: 'joined-meet', going: true } });
+  await settle();
+  assert.equal(pushes.length, 0);
+});
+
 test('autosaving one change field by field tells the people going once, and a change put back tells nobody', async () => {
   const event = addEvent({ slug: 'autosaved-meet', description: 'A meet.', description_zh: '聚会。', venue_name: 'Old Hall' });
   const m = await member();
   await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
   await m.call(rsvp, { method: 'POST', body: { slug: 'autosaved-meet', going: true } });
+  await settle();
+  pushes = [];
   const ed = await staff('editor', { is_editor: true });
   const current = (await ed.call(manage, { query: { id: event.id } })).json.event;
   const save = (changes) => ed.call(manage, { method: 'POST', body: { action: 'update', id: event.id, event: { ...current, ...changes } } });
@@ -427,8 +471,10 @@ test('autosaving one change field by field tells the people going once, and a ch
     assert.equal(pushes.length, 0, 'nothing before the wait is over');
     await settle();
     assert.equal(pushes.length, 1);
+    // Two changes: each named in the push.
     assert.equal(pushes[0].payload.title, 'Event updated: Autosaved Meet');
-    assert.match(pushes[0].payload.body, /New Hall/);
+    assert.match(pushes[0].payload.body, /^Date and time changed|^Now /);
+    assert.match(pushes[0].payload.body, /Event location changed: New Hall/);
     const row = db.table('gftvevents_events').find((r) => r.id === event.id);
     assert.equal(row.notice_base, null);
     assert.equal(row.notice_due_at, null);
@@ -450,6 +496,8 @@ test('the hourly cron sends a queued change notice that was left over', async ()
   const m = await member();
   await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
   await m.call(rsvp, { method: 'POST', body: { slug: 'left-over-meet', going: true } });
+  await settle();
+  pushes = [];
   const row = db.table('gftvevents_events').find((r) => r.id === event.id);
   // As a save leaves it when its background send was stopped.
   row.notice_base = { ...row, venue_name: 'Older Hall' };
@@ -457,7 +505,7 @@ test('the hourly cron sends a queued change notice that was left over', async ()
   const run = await browser().call(cronNotify, { headers: { authorization: 'Bearer cron-test' } });
   assert.equal(run.json.changed, 1);
   assert.equal(pushes.length, 1);
-  assert.equal(pushes[0].payload.title, 'Event updated: ' + row.title);
+  assert.equal(pushes[0].payload.title, 'Event location changed: ' + row.title);
   assert.equal(await flushDueChanges(), 0, 'sent once');
 });
 
@@ -532,6 +580,9 @@ test('the cron reminds people going at the times they picked, once each, with ev
     }
   }
   await late.call(rsvp, { method: 'POST', body: { slug: 'harbour-meet', going: true } });
+  // Their "You're going" notices, before the cron.
+  await settle();
+  pushes = [];
   sent = [];
 
   assert.equal((await browser().call(cronNotify, { headers: {} })).status, 401);

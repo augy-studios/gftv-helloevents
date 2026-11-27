@@ -1,7 +1,8 @@
 // Editors of one event (migrations/018): an admin adds a member (who has
-// two-step sign-in, by passkey) from the event's Editors tab; the member then
-// finds that event alone on /manage, with no New event, no staff tools, and
-// the Status left to staff.
+// two-step sign-in, by passkey) from the event's Organisers tab; the member
+// then finds that event alone on /manage, with no New event, no staff tools,
+// and the Status left to staff. And the organisers' Telegram chats
+// (migrations/026) on the same tab.
 
 import { test, expect, serverOrigin, signInAsStaff, signInWithBackupCode, openSection } from './fixtures.js';
 import { ADMIN, EVENTS, PASSKEY_MEMBER, BACKUP_CODES } from './seed.js';
@@ -15,14 +16,14 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await page.waitForURL(`${serverOrigin()}/account`);
   await expect(page.locator('header [data-when="manager"]')).toBeHidden();
 
-  // The admin: the event's Editors tab, picked from the active accounts.
+  // The admin: the event's Organisers tab, picked from the active accounts.
   await context.clearCookies();
   await page.goto('/login?next=/manage');
   await signInAsStaff(page, ADMIN.username);
   await page.waitForURL(`${serverOrigin()}/manage`);
   await page.goto(`/manage?slug=${event.slug}#editor`);
   await expect(page.locator('#autosaveStatus')).toHaveText('All changes saved');
-  await openSection(page, 'Editors');
+  await openSection(page, 'Organisers');
   await expect(page.locator('#eventEditorList')).toContainText('No editors of this event yet.');
   // Typing part of their name lists them; picking one fills the box.
   await page.locator('#eventEditorUsername').fill(PASSKEY_MEMBER.displayName.slice(0, 5));
@@ -57,4 +58,36 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await page.locator('#f-summary').fill('Three days of fun, run by our organisers.');
   await page.locator('#f-summary').blur();
   await expect(page.locator('#autosaveStatus')).toHaveText('All changes saved');
+});
+
+test('an admin sets the organiser chats of an event, checked as they are saved, and tests them', async ({ page }) => {
+  await page.goto('/login?next=/manage');
+  await signInAsStaff(page, ADMIN.username);
+  await page.waitForURL(`${serverOrigin()}/manage`);
+  await page.goto(`/manage?slug=${event.slug}#editor`);
+  await expect(page.locator('#autosaveStatus')).toHaveText('All changes saved');
+  await openSection(page, 'Organisers');
+  const chats = page.locator('#organiserChats');
+  await expect(chats).toHaveValue('');
+
+  // Not a chat id: refused, naming it.
+  await chats.fill('123456789, @organisers');
+  await page.locator('#organiserChatsSave').click();
+  await expect(page.locator('#organiserChatsError')).toHaveText('"@organisers" is not a Telegram chat ID. Use the number /chatid gives: a person\'s, or a group\'s, which starts with -.');
+
+  // A person's id and a group's, once each.
+  await chats.fill('123456789\n-1001234567890, 123456789');
+  await page.locator('#organiserChatsSave').click();
+  await expect(page.locator('#organiserChatsStatus')).toHaveText('Saved.');
+  await expect(page.locator('#organiserChatsError')).toBeHidden();
+  await expect(chats).toHaveValue('123456789\n-1001234567890');
+
+  // Kept: back after a reload.
+  await page.reload();
+  await openSection(page, 'Organisers');
+  await expect(chats).toHaveValue('123456789\n-1001234567890');
+
+  // The test message: this server has no bot, so neither chat is reached.
+  await page.locator('#organiserChatsTest').click();
+  await expect(page.locator('#organiserChatsError')).toHaveText('Could not reach: 123456789, -1001234567890. Check that the bot is in the group, or that the person pressed Start in the bot.');
 });

@@ -1687,6 +1687,7 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .location-card .form-grid { margin-top: 0.6rem; }
 .location-card .row .grow { flex: 1 1 14rem; min-width: 0; }
 .location-card .location-error:empty, .location-status:empty { display: none; }
+.location-card .location-copy { gap: 0.25rem; margin: -0.25rem 0 0.5rem; }
 
 /* manage: the event link, with the site's address in front */
 .slug-input { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }

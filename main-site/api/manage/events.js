@@ -44,6 +44,7 @@ import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, proofPaths, registrationPhotoPaths } from '../_lib/payments.js';
 import { editableEventIds } from '../_lib/event-editors.js';
 import { background, queueEventChange, sendEventChangeWhenDue, sendPaymentConfirmed } from '../_lib/notify.js';
+import { alertPaymentConfirmed, queueAdminEventNotice, sendAdminEventWhenDue } from '../_lib/staff-alerts.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -217,6 +218,9 @@ function slugGiven(event) {
 // title that another event already uses gets a number on the end instead;
 // one the caller chose is refused (slug_taken).
 async function createEvent(request, response, fields, user, { numberSlug }) {
+  // Made published at once: the admins hear about it once the editor stops
+  // saving (staff-alerts.js).
+  const adminNotice = queueAdminEventNotice(fields);
   let attempt = 1;
   let data;
   let error;
@@ -227,7 +231,7 @@ async function createEvent(request, response, fields, user, { numberSlug }) {
     }
     ({ data, error } = await database()
       .from(TABLES.events)
-      .insert({ ...fields, slug, created_by: user.id })
+      .insert({ ...fields, ...adminNotice, slug, created_by: user.id })
       .select(MANAGE_COLUMNS)
       .single());
     if (!error || error.code !== '23505' || !numberSlug) {
@@ -239,6 +243,9 @@ async function createEvent(request, response, fields, user, { numberSlug }) {
     return answerSaveError(response, error);
   }
   await audit(request, { action: 'event.created', actorId: user.id, eventId: data.id, details: { status: data.status } });
+  if (adminNotice.admin_notice_due_at) {
+    background(sendAdminEventWhenDue(data.id));
+  }
   await withDescriptionPictures(data);
   return ok(response, { event: managedEvent(data) });
 }
@@ -250,7 +257,7 @@ async function updateEvent(request, response, body, fields, user) {
   if (!isUuid(body.id)) {
     return fail(response, 400, 'bad_request');
   }
-  const before = await loadEvent(body.id, `${MANAGE_COLUMNS}, notice_base`);
+  const before = await loadEvent(body.id, `${MANAGE_COLUMNS}, notice_base, admin_told_at`);
   if (!before) {
     return fail(response, 404, 'not_found');
   }
@@ -273,6 +280,9 @@ async function updateEvent(request, response, body, fields, user) {
     changes.slug = before.slug;
   }
   Object.assign(changes, queueEventChange(before, changes));
+  // The admins hear about a newly published event once the editor stops
+  // saving (staff-alerts.js).
+  Object.assign(changes, queueAdminEventNotice({ ...before, ...changes }));
   const { data, error } = await database()
     .from(TABLES.events)
     .update(changes)
@@ -291,6 +301,9 @@ async function updateEvent(request, response, body, fields, user) {
   await audit(request, { action: 'event.updated', actorId: user.id, eventId: data.id, details: { status: data.status } });
   if (changes.notice_due_at) {
     background(sendEventChangeWhenDue(data.id));
+  }
+  if (changes.admin_notice_due_at) {
+    background(sendAdminEventWhenDue(data.id));
   }
   await withDescriptionPictures(data);
   return ok(response, { event: managedEvent(data) });
@@ -572,6 +585,7 @@ async function confirmPayment(request, response, body, user) {
   await audit(request, { action, actorId: user.id, eventId: body.id, details: { username } });
   if (body.paid && stored.payment_status !== 'paid') {
     background(sendPaymentConfirmed(event, match.user_id));
+    background(alertPaymentConfirmed(event, match.user_id));
   }
   return ok(response, { attendees: await loadAttendees(event) });
 }

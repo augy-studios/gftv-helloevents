@@ -19,6 +19,8 @@ const login = await route('auth/login');
 const verify = await route('auth/verify');
 const signup = await route('auth/signup');
 const place = await route('manage/place');
+const { useTestSearchGap } = await import('../api/_lib/maps-link.js');
+useTestSearchGap(0);
 
 const SHARED_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 const PASSWORD = 'correct horse battery';
@@ -141,4 +143,54 @@ test('a lookup that fails says so, for the editor to fill in the place by hand',
   const r = await ed.call(place, { method: 'POST', body: { link: ION_PIN } });
   assert.equal(r.status, 422);
   assert.equal(r.json.error, 'maps_lookup_failed');
+});
+
+// What the Google Maps app shares: a short link to maps.google.com with the
+// place's name, street address and unit as text, and no pin.
+const APP_SHARE = 'https://maps.google.com?q=Takagi+Ramen+@+Dhoby+Ghaut+Exchange,+11+Orchard+Rd,+B1-11,+Singapore+238826&ftid=0x31da19a7:0x5e1&entry=gps';
+
+test('a search that finds nothing is tried again with less: the address without units, then the postcode', async () => {
+  answers['https://maps.app.goo.gl/'] = redirectTo(APP_SHARE);
+  answers['https://nominatim.openstreetmap.org/search'] = (url) => {
+    if (new URL(url).searchParams.get('q') === '11 Orchard Rd, Singapore 238826') {
+      return json([{ name: 'UOB', address: { house_number: '11', road: 'Orchard Road', city: 'Singapore', country_code: 'sg' } }])();
+    }
+    return json([])();
+  };
+  const ed = await staff('editor', { is_editor: true });
+  const r = await ed.call(place, { method: 'POST', body: { link: 'https://maps.app.goo.gl/JEabc' } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.place, {
+    venueName: 'Takagi Ramen @ Dhoby Ghaut Exchange',
+    venueAddress: '11 Orchard Rd, B1-11, Singapore 238826',
+    city: 'Singapore',
+    country: 'SG',
+    mapsUrl: 'https://maps.app.goo.gl/JEabc',
+  });
+  const searched = requests.filter((request) => request.url.includes('/search')).map((request) => new URL(request.url).searchParams.get('q'));
+  assert.deepEqual(searched, [
+    'Takagi Ramen @ Dhoby Ghaut Exchange, 11 Orchard Rd, B1-11, Singapore 238826',
+    '11 Orchard Rd, Singapore 238826',
+  ]);
+});
+
+test('when no search finds the place, the name and street address Google gave are still filled in', async () => {
+  answers['https://nominatim.openstreetmap.org/search'] = json([]);
+  const ed = await staff('editor', { is_editor: true });
+  const r = await ed.call(place, { method: 'POST', body: { link: APP_SHARE } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.deepEqual(r.json.place, {
+    venueName: 'Takagi Ramen @ Dhoby Ghaut Exchange',
+    venueAddress: '11 Orchard Rd, B1-11, Singapore 238826',
+    city: '',
+    country: '',
+    mapsUrl: APP_SHARE,
+  });
+  const searched = requests.map((request) => new URL(request.url).searchParams.get('q'));
+  assert.deepEqual(searched, [
+    'Takagi Ramen @ Dhoby Ghaut Exchange, 11 Orchard Rd, B1-11, Singapore 238826',
+    '11 Orchard Rd, Singapore 238826',
+    'Singapore 238826',
+    'Takagi Ramen @ Dhoby Ghaut Exchange',
+  ]);
 });

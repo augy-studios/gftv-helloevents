@@ -192,7 +192,8 @@ test('the feed shows released events only, with hidden prices and dates kept bac
   assert.equal(JSON.stringify(upcoming.json).includes('98765'), false, 'hidden price amount');
   assert.equal(JSON.stringify(upcoming.json).includes('XTS'), false, 'hidden price currency');
   assert.deepEqual(leaks(upcoming.json), []);
-  assert.match(upcoming.headers['cache-control'], /s-maxage=60/);
+  // Never cached, so an edit or a cancellation shows on the home page at once.
+  assert.equal(upcoming.headers['cache-control'], 'no-store');
 
   const tba = await b.call(feed, { query: { when: 'tba' } });
   assert.deepEqual(tba.json.events.map((e) => e.slug), ['tba-one']);

@@ -339,7 +339,7 @@ the functions with the service role key. No Supabase Auth, no request signing.
   they gave. Only the event's editors see them, on the attendee list, a phone number, email or
   Telegram username as a link.
 - **Editors of one event** (migrations/018). An admin adds any active account as an editor of a
-  specific event, from that event's Editors tab (admins only). The username box is a dropdown:
+  specific event, from that event's Organisers tab (admins only). The username box is a dropdown:
   as the admin types, it lists the accounts whose username or display name holds the text
   (`GET /api/manage/event-editors?id=&search=`), and left empty, those active in the last 30
   days. An event editor
@@ -348,6 +348,18 @@ the functions with the service role key. No Supabase Auth, no request signing.
   or delete events. Their rights work only while two-step sign-in (an authenticator app or a
   passkey) is on; the tab warns until it is. They preview their unreleased event and get "Edit this
   event" on it.
+- **Alerts for admins and organisers** (migrations/026, `api/_lib/staff-alerts.js`). The bot
+  sends Telegram alerts to the admins' chats, `ADMIN_CHAT_IDS` (a person's or a group's chat ids,
+  separated by commas or spaces): each new attendee as they join, each payment reported (to be
+  checked) and confirmed, and each new event once it is published, sent once the editor stops
+  saving (the same 45-second wait as change notices) or at its release time when that is later
+  (the cron sends any left over). On the same Organisers tab, an admin lists an event's organisers'
+  chats (up to 10; **Send a test** checks each): they hear about the event's new attendees once each
+  has given every detail it asks for (contact details by its rule, the registration form's answers;
+  at once, or when they finish them later; once per attendee), and its payments once confirmed. An
+  alert carries the person's name, username, RSVP ID, what they are coming for, their ticket and
+  payment, their contact details and how many are going, never an email or form answers. `/chatid`
+  to the bot, in a group or a private chat, answers with that chat's id.
 - **Event list by status.** `/manage`'s event list has Published (released or scheduled), Drafts and
   Cancelled, each with its count and pages; going back from the form opens the status of the event
   that was open.
@@ -437,11 +449,16 @@ the functions with the service role key. No Supabase Auth, no request signing.
 - **Notifications**, chosen on the account page: changes of time or place or timetable (or a cancellation) of
   events you are going to, reminders before them, and, off by default, new events. They go by
   Web Push to the browsers you switch on (subscriptions stored in Upstash Redis) and, if you choose,
-  to your linked Telegram chat. A notice carries only what the public event page shows. Reminders
-  and new-event notices come from the cron `/api/cron/notify`, every ten minutes. Because the edit
-  form autosaves field by field, change notices are batched: they go out about 45 seconds after the
-  editor's last save, once, comparing the event with how it was before the first change
-  (migrations/006); the cron sends any left over.
+  to your linked Telegram chat. A push notification, which can show on a locked screen, carries only
+  what the public event page shows. Reminders and new-event notices come from the cron
+  `/api/cron/notify`, every ten minutes. Because the edit form autosaves field by field, change
+  notices are batched: they go out about 45 seconds after the editor's last save, once, comparing
+  the event with how it was before the first change (migrations/006); the cron sends any left over.
+  A change of when or where names each thing that changed ("Meeting location changed", "Dinner
+  location added", "Date and time changed"); its Telegram message shows each one's before and now,
+  then every place of the event in tables like a reminder's. Joining an event sends a "You're
+  going" notice the same way (whatever the notice choices, like a payment confirmed), with every
+  place and the meals the person is coming for.
 - **Reminders** (migrations/011). Each account ticks any of 1 hour, 2 hours, 3 hours, 1 day and
   1 week before (a day before to start with). Each time goes at most once per RSVP, within five
   minutes of it; if two have come at once (a cron that was down), only the closer one goes. A time
@@ -495,7 +512,9 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    pages, RSVPs, checkout, the edit form and the attendee list read the event and attendee ones.
    Run `025_tier_limits.sql` before deploying limits on people per tier: it replaces the RSVP
    function (a checkout sends the tiers it buys) and adds the functions that count and check
-   each tier's places, which the event pages, checkout and upgrades call.
+   each tier's places, which the event pages, checkout and upgrades call. Run
+   `026_staff_alerts.sql` before deploying admin and organiser alerts: the event pages, RSVPs,
+   payments, the edit form and the cron read its columns.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview
