@@ -28,7 +28,7 @@
         "api/me/helloid.js": {
             "maxDuration": 60,
             "memory": 3009,
-            "includeFiles": "{node_modules/@vladmandic/human/dist/human.node-wasm.js,node_modules/@vladmandic/human/models/{blazeface,facemesh,faceres,antispoof,liveness}.*,node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm,node_modules/@tesseract.js-data/eng/4.0.0_best_int/**,node_modules/tesseract.js-core/**,node_modules/tesseract.js/src/**,node_modules/mrz/lib/**}"
+            "includeFiles": "node_modules/{@vladmandic/human/{dist/human.node-wasm.js,models/*},@tensorflow/tfjs-backend-wasm/dist/*.wasm,@tesseract.js-data/eng/4.0.0_best_int/*,tesseract.js-core/*,tesseract.js/src/**,mrz/lib/**}"
         }
     },
     "crons": [
