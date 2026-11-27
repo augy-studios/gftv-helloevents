@@ -1,4 +1,4 @@
-// ESLint 9 flat config: `npm run lint`.
+// ESLint 10 flat config: `npm run lint`.
 //
 // It enforces Augy's code style decisions for help desk #18 (decisions 5 and
 // 7): no ternaries, braces on every if / else / for / while, names of at
@@ -65,6 +65,12 @@ const styleRules = {
     },
     ...logicalAsValue,
   ],
+
+  // ESLint 10's recommended set adds no-useless-assignment, which flags the
+  // pattern decision 5 asks for: a value set first, then changed in an `if`
+  // or a `try` (`let zones = []; try { zones = ... }`), in place of `||` or
+  // `??`. The two rules cannot both hold, so this one is off.
+  'no-useless-assignment': 'off',
 };
 
 export default [
