@@ -40,6 +40,9 @@ test('a member signs in from an event page, RSVPs, sees the address, and cancels
   // And on the account page's My events.
   await page.goto('/account');
   await expect(page.locator('#rsvpUpcoming .event-card', { hasText: event.title }).locator('.chip-rsvp-number')).toHaveText('RSVP #2');
+  // And on the feed's card.
+  await page.goto('/');
+  await expect(page.locator('#feed .event-card', { hasText: event.title }).locator('.chip-rsvp-number')).toHaveText('RSVP #2');
   await page.goto(`/e/${event.slug}`);
   await expect(button).toHaveText('I can no longer go');
   await expect(going).toHaveText('2 of 20 spaces taken');

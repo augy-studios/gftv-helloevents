@@ -60,13 +60,14 @@ export async function sendToChats(chatIds, message) {
   return failed;
 }
 
-// The admins' one-line notice of a verification: "otter has HelloID".
+// The admins' one-line notice of a verification: "otter has verified using
+// HelloID".
 export function idVerifiedText(username, way) {
   let wayName = String(way);
   if (ID_WAY_NAMES[way]) {
     wayName = ID_WAY_NAMES[way];
   }
-  return `${username} has ${wayName}`;
+  return `${username} has verified using ${wayName}`;
 }
 
 // An account has just passed an ID check with this way (helloid, didit,

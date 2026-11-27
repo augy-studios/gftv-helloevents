@@ -181,7 +181,7 @@ const DETAIL = [
   ...nest('contact', [...listOf('fields', ['id', 'type', 'label']), 'rule']),
   ...nest('registration', ['fields', 'currency']),
   ...nest('viewer', [
-    'signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry',
+    'signedIn', 'going', 'lepak', 'rsvpNumber', 'ticketName', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry',
     // migrations/027: an ID check to pass first, their check-in QR code,
     // when they were checked in, and the organisers' entry code for them.
     'needsIdCheck', 'checkinCode', 'checkedInAt', 'entry',
@@ -482,7 +482,7 @@ test('event cards, the event page and an RSVP carry only what those pages show',
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, contact: { phone: '+65 9123 4567' } } }), nest('event', DETAIL));
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: true, meals: ['lunch'] } }), nest('event', DETAIL));
   assertKeys(await b.call(detail, { query: { slug: 'paid-meet' } }), ['preview', ...nest('event', DETAIL)]);
-  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber', 'paymentStatus'])]);
+  assertKeys(await b.call(rsvps), ['past', ...listOf('upcoming', [...nest('event', CARD), 'rsvpNumber', 'ticketName', 'paymentStatus'])]);
   assertKeys(await b.call(rsvp, { method: 'POST', body: { slug: 'paid-meet', going: false } }), nest('event', DETAIL));
 });
 

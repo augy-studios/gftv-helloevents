@@ -31,7 +31,8 @@ test('the account page shows the profile, RSVPs, and when each passkey was last 
 
   // Notifications: the stored choices, and push offered on this device.
   await page.getByRole('tab', { name: 'Notifications' }).click();
-  await expect(page).toHaveURL(/\/account#notifications$/);
+  // The address bar keeps no #tab on this page.
+  await expect(page).toHaveURL(/\/account$/);
   await expect(page.locator('#panel-going')).toBeHidden();
   await expect(page.locator('#prefUpdates')).toBeChecked();
   // Reminders: a day before to start with; more than one time can be picked,

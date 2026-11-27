@@ -4,6 +4,7 @@ import { session } from '../app.js';
 import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
 import { api, post } from '../api.js';
 import { createElement, errorText, withBusy, copyText, formatDate } from '../ui.js';
+import { numberChip } from '../cards.js';
 import { iconNode, icon } from '../icons.js';
 import { whenText, placeText, priceText, spacesText, locationText, locationLabel, mealLocationLabel, mealsText, mealPlacesText, tierPriceText, formatMoney } from '../format.js';
 import { startLangSwitch, preferredDescriptionLang, rememberDescriptionLang } from '../lang-switch.js';
@@ -457,12 +458,14 @@ function renderRsvp() {
     statusText = translate('event.you-are-going-for', { meals: mealsText(event.meals, event.viewer.meals) });
   }
   byId('rsvpStatusText').textContent = statusText;
-  // Their RSVP ID for this event (migrations/013), to give at the door.
+  // Their RSVP ID for this event (migrations/013), to give at the door: by
+  // their tier's name for a paid tier, coloured by their payment.
   const number = event.viewer.rsvpNumber;
   byId('rsvpNumber').hidden = true;
+  byId('rsvpNumber').replaceChildren();
   if (going && number !== null) {
     byId('rsvpNumber').hidden = false;
-    byId('rsvpNumber').textContent = translate('event.rsvp-number', { number });
+    byId('rsvpNumber').append(numberChip({ rsvpNumber: number, ticketName: event.viewer.ticketName, paymentStatus: event.viewer.payment.status }, { long: true }));
   }
   renderMealChoice();
   renderVolunteer();

@@ -11,6 +11,7 @@
 import { t as translate } from '../assets/i18n/i18n.js';
 import { post } from './api.js';
 import { createElement, errorText, formatDate } from './ui.js';
+import { numberChip } from './cards.js';
 import { iconNode } from './icons.js';
 import { qrSvg } from './qr.js';
 
@@ -60,7 +61,7 @@ function checkinCard(pass) {
   const children = [
     createElement('h3', { class: 'section-label', text: translate('pass.checkin-title') }),
     createElement('div', { class: 'qr-code pass-qr' }),
-    createElement('p', { class: 'rsvp-number', text: translate('event.rsvp-number', { number: pass.rsvpNumber }) }),
+    createElement('p', { class: 'rsvp-number' }, [numberChip(pass, { long: true })]),
   ];
   children[1].innerHTML = qrSvg(pass.checkinCode, translate('pass.checkin-label'));
   if (pass.checkedInAt) {
@@ -105,7 +106,7 @@ export async function renderPass(event) {
     return;
   }
   const before = storedPass(event.slug);
-  const pass = { title: event.title, rsvpNumber: viewer.rsvpNumber, checkinCode: viewer.checkinCode, checkedInAt: viewer.checkedInAt, entry: null };
+  const pass = { title: event.title, rsvpNumber: viewer.rsvpNumber, ticketName: viewer.ticketName, paymentStatus: viewer.payment.status, checkinCode: viewer.checkinCode, checkedInAt: viewer.checkedInAt, entry: null };
   if (viewer.entry) {
     pass.entry = { state: viewer.entry.state, from: viewer.entry.from, url: viewer.entry.url, picture: null };
     if (viewer.entry.state === 'ready') {

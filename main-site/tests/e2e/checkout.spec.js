@@ -83,7 +83,10 @@ test('an editor takes payment by QR code, a member pays and reports it, the edit
   await page.goto(`/e/${event.slug}`);
   await expect(page.locator('#rsvpPaymentText')).toHaveText('Payment sent. The organisers will check it.');
   await page.goto('/account');
-  await expect(page.locator('#rsvpUpcoming .event-card', { hasText: event.title }).locator('.chip-warn')).toHaveText('Payment being checked');
+  const myCard = page.locator('#rsvpUpcoming .event-card', { hasText: event.title });
+  await expect(myCard.locator('.chip-warn')).toHaveText('Payment being checked');
+  // The number's pill is blue while the organisers check the payment.
+  await expect(myCard.locator('.chip-rsvp-number')).toHaveClass(/chip-info/);
 
   // The editor: the payment to check, its screenshot, and Paid.
   await context.clearCookies();

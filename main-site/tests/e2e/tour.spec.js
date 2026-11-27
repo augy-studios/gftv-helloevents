@@ -162,6 +162,11 @@ test('someone who has seen every older tour is still shown the new personal deta
   await expect(dots(page)).toHaveCount(3);
   await finish(page);
   expect(await seen(page)).toContain('account.personal');
+  // Then ID verification (and sticker packs, where the site has them), new
+  // to them too.
+  await expect(text(page)).toHaveText("Some events ask you to verify your ID before you RSVP. Verify once here, with HelloID (GFTV's own, and free) or another way, and it counts for every event that accepts that way.");
+  await finish(page);
+  expect(await seen(page)).toContain('account.profile-extras');
   await page.reload();
   await page.waitForTimeout(1500);
   await expect(tour(page)).toHaveCount(0);

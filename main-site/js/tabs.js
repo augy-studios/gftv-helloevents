@@ -10,8 +10,46 @@
 //
 // useHash: false leaves the address alone, for tabs inside a tab (the edit
 // form's sections inside /manage#editor).
+//
+// hideHash: a link with a tab's name (/account#profile) still opens that
+// tab, but the name is taken off the address bar at once and never written
+// there; the open tab is kept for this browser tab (sessionStorage) instead,
+// so a reload opens it again.
 
-export function startTabs(tablist, { onSelect, useHash = true } = {}) {
+// The tab kept for this page with hideHash, or null.
+function keptTab(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function keepTab(key, name) {
+  try {
+    sessionStorage.setItem(key, name);
+  } catch {
+    // Storage blocked: a reload opens the first tab.
+  }
+}
+
+// Takes the #name off the address, leaving the path and the query.
+function dropHash() {
+  if (location.hash) {
+    history.replaceState(history.state, '', location.pathname + location.search);
+  }
+}
+
+export function startTabs(tablist, { onSelect, useHash = true, hideHash = false } = {}) {
+  const storageKey = `tabs:${location.pathname}:${tablist.id}`;
+  // With hideHash, the tab the address named on arrival, until it opens.
+  let linked = null;
+  if (useHash && hideHash) {
+    if (location.hash.length > 1) {
+      linked = location.hash.slice(1);
+    }
+    dropHash();
+  }
   const tabs = () => [...tablist.querySelectorAll('[role="tab"]')];
   const shown = () => tabs().filter((tab) => !tab.hidden);
   const panelOf = (tab) => document.getElementById(tab.getAttribute('aria-controls'));
@@ -29,8 +67,11 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
     if (focus) {
       tab.focus();
     }
-    if (remember && useHash) {
+    if (remember && useHash && !hideHash) {
       history.replaceState(null, '', `#${tab.dataset.tab}`);
+    }
+    if (useHash && hideHash) {
+      keepTab(storageKey, tab.dataset.tab);
     }
     if (onSelect) {
       onSelect(tab.dataset.tab);
@@ -46,6 +87,7 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
   tablist.addEventListener('click', (event) => {
     const tab = event.target.closest('[role="tab"]');
     if (tab) {
+      linked = null;
       select(tab);
     }
   });
@@ -67,6 +109,7 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
     }
     if (next) {
       event.preventDefault();
+      linked = null;
       select(next, { focus: true });
     }
   });
@@ -77,7 +120,14 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
     const visible = shown();
     tablist.hidden = visible.length < 2;
     let wanted;
-    if (useHash) {
+    if (useHash && hideHash) {
+      wanted = byName(linked);
+      if (wanted) {
+        linked = null;
+      } else {
+        wanted = byName(keptTab(storageKey));
+      }
+    } else if (useHash) {
       wanted = byName(location.hash.slice(1));
     }
     if (!wanted) {
@@ -95,7 +145,11 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
   if (useHash) {
     window.addEventListener('hashchange', () => {
       const tab = byName(location.hash.slice(1));
+      if (hideHash) {
+        dropHash();
+      }
       if (tab) {
+        linked = null;
         select(tab, { remember: false });
       }
     });

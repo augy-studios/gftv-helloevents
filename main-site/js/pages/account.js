@@ -1,7 +1,8 @@
 // The account page: who you are at the top, then tabs for the events you
 // are going to, notifications, the ways in (second factors), and, for public
-// accounts, a Profile tab to rename or delete the account. The open tab is
-// kept in the address (/account#security).
+// accounts, a Profile tab to rename or delete the account. A link can name
+// the tab to open (/account#security); the name is then taken off the
+// address bar, and the open tab is kept for a reload (js/tabs.js hideHash).
 
 import { session } from '../app.js';
 import { t as translate, onChange, getLocale } from '../../assets/i18n/i18n.js';
@@ -29,7 +30,7 @@ let totpSetup = null; // the set-up token while an authenticator is being added
 let emailSetup = null; // the set-up token while the email address is being confirmed
 // The action waiting on the password dialog.
 let pendingAction = null;
-startTabs(byId('accountTabs'));
+startTabs(byId('accountTabs'), { hideHash: true });
 
 function renderProfile() {
   byId('displayName').textContent = currentUser.displayName;
@@ -132,10 +133,10 @@ function neededDetails() {
 }
 
 function renderRsvps() {
-  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, paymentStatus: rsvp.paymentStatus })));
+  byId('rsvpUpcoming').replaceChildren(...rsvps.upcoming.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, ticketName: rsvp.ticketName, paymentStatus: rsvp.paymentStatus })));
   byId('rsvpEmpty').hidden = rsvps.upcoming.length > 0;
   byId('pastBox').hidden = rsvps.past.length === 0;
-  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, paymentStatus: rsvp.paymentStatus })));
+  byId('rsvpPast').replaceChildren(...rsvps.past.filter((rsvp) => rsvp.event).map((rsvp) => eventCard(rsvp.event, { rsvpNumber: rsvp.rsvpNumber, ticketName: rsvp.ticketName, paymentStatus: rsvp.paymentStatus })));
 }
 
 // The reminder times' tick boxes, each with its hours before the start.

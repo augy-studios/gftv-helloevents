@@ -25,7 +25,7 @@ value only where a step says so.
 - **Alerts for admins and organisers** (migrations/026). The admins' chats,
   listed in `ADMIN_CHAT_IDS` (section 2), hear about each new attendee, each
   payment reported (to be checked) and confirmed, each new event once it
-  is published, and each passed ID check ("otter has HelloID"). An event's organisers' chats, which an admin adds on the
+  is published, and each passed ID check ("otter has verified using HelloID"). An event's organisers' chats, which an admin adds on the
   event's **Organisers** tab in Manage, hear about its new attendees (once
   each has given every detail the event asks for, with their contact
   details) and its payments once confirmed. A chat can be a person's or a

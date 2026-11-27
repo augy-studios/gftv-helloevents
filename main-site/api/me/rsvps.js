@@ -1,4 +1,4 @@
-// GET /api/me/rsvps -> { upcoming: [{ event, rsvpNumber }], past: [{ event, rsvpNumber }] }
+// GET /api/me/rsvps -> { upcoming: [{ event, rsvpNumber, ticketName, paymentStatus }], past: [...] }
 //
 // The signed-in person's RSVPs, as event cards: upcoming ones by start time,
 // past ones newest RSVP first. An event that has since been moved back to
@@ -25,7 +25,7 @@ export default route('me/rsvps', async (request, response) => {
 
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`rsvp_number, payment_status, event:${TABLES.events} ( ${CARD_COLUMNS} )`)
+    .select(`rsvp_number, payment_status, payment_tier, payment_items, event:${TABLES.events} ( ${CARD_COLUMNS}, tiers_enabled, ticket_tiers )`)
     .eq('user_id', session.user.id)
     .order('created_at', { ascending: false })
     .limit(200);

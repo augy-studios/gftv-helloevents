@@ -69,6 +69,7 @@
   --danger-on: #ffffff;
   --ok: #177038;
   --warn: #8a5200;
+  --info: #1d5fa8;
 }
 
 :root[data-color-theme="classic"][data-mode="dark"] {
@@ -95,6 +96,7 @@
   --danger-on: #1a0f0e;
   --ok: #6ee7a0;
   --warn: #fbbf24;
+  --info: #8cc4ff;
 }
 
 :root[data-color-theme="hello"][data-mode="light"] {
@@ -121,6 +123,7 @@
   --danger-on: #ffffff;
   --ok: #177038;
   --warn: #8a5200;
+  --info: #1d5fa8;
 }
 
 :root[data-color-theme="hello"][data-mode="dark"] {
@@ -147,6 +150,7 @@
   --danger-on: #1a0f0e;
   --ok: #6ee7a0;
   --warn: #fbbf24;
+  --info: #8cc4ff;
 }
 
 /* derived, resolves per combination */
@@ -156,6 +160,7 @@
   --callout-danger-bg: color-mix(in srgb, var(--danger) 14%, transparent);
   --callout-ok-bg: color-mix(in srgb, var(--ok) 14%, transparent);
   --callout-warn-bg: color-mix(in srgb, var(--warn) 14%, transparent);
+  --callout-info-bg: color-mix(in srgb, var(--info) 14%, transparent);
   --focus-ring: var(--brand-dark);
   /* Timetable rooms (js/timetable.js): six hues taken from the theme's own
      colours, so every colour theme and mode gets a matching set, plus a
@@ -1262,6 +1267,8 @@ main.wide > .page-card { margin-inline: auto; }
 .rsvp-status svg { width: 18px; height: 18px; }
 /* Someone's RSVP ID for the event (migrations/013). */
 .rsvp-number { font-size: 0.9375rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* the number pill at its long size, on the event page and the pass */
+.rsvp-number .chip { font-size: 0.875rem; white-space: normal; }
 .chip-rsvp-number { font-variant-numeric: tabular-nums; }
 .rsvp .small:empty { display: none; }
 /* The choice of the whole event or only some of its meals. */
@@ -1787,6 +1794,8 @@ details > summary { cursor: pointer; font-weight: 600; color: var(--brand-text);
 .pay-qr img { max-width: min(100%, 18rem); max-height: 24rem; height: auto; padding: 0.6rem; border-radius: var(--radius-sm); background: var(--qr-bg); }
 .rsvp-payment p { margin: 0; }
 .chip-warn { background: var(--callout-warn-bg); color: var(--warn); border-color: transparent; }
+.chip-ok { background: var(--callout-ok-bg); color: var(--ok); border-color: transparent; }
+.chip-info { background: var(--callout-info-bg); color: var(--info); border-color: transparent; }
 
 /* the edit form's Payment section and the attendee list's payments */
 .payment-methods { display: grid; gap: 0.15rem; margin-bottom: 0.75rem; }
@@ -2224,7 +2233,20 @@ html.touring { overflow: hidden; }
 .finding-true svg { color: var(--ok); }
 .finding-false svg { color: var(--danger); }
 .id-review-actions { flex-wrap: wrap; gap: 0.5rem; }
-.id-review-actions input { flex: 1 1 12rem; min-width: 0; }
+.id-review-actions input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.55rem 0.8rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--surface-active);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--motion) ease, background-color var(--motion) ease;
+}
+.id-review-actions input::placeholder { color: var(--text-muted-strong); opacity: 1; }
+.id-review-actions input:focus { border-color: var(--focus-ring); }
 @media (max-width: 560px) {
   .id-review-photos { grid-template-columns: 1fr; }
 }
@@ -2288,6 +2310,7 @@ html.touring { overflow: hidden; }
 .helloid-flash { position: fixed; inset: 0; z-index: 100; background: #ffffff; }
 
 /* Check-in (/checkin) */
+.checkin-head { margin-bottom: 1.25rem; }
 .checkin-head h1 { margin: 0; }
 .checkin-count { margin: 0.25rem 0 0; font-size: 1.5rem; font-weight: 700; }
 #checkinNet.is-offline { color: var(--warn); font-weight: 600; }

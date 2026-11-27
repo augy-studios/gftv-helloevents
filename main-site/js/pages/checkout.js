@@ -591,7 +591,11 @@ function renderPayBox() {
   const number = checkout.viewer.rsvpNumber;
   byId('payNumber').hidden = number === null;
   if (number !== null) {
-    setText('payNumber', translate('event.rsvp-number', { number }));
+    let numberText = translate('event.rsvp-number', { number });
+    if (checkout.viewer.ticketName) {
+      numberText = translate('event.tier-number', { number, tier: checkout.viewer.ticketName });
+    }
+    setText('payNumber', numberText);
   }
   const pairs = [];
   if (payment.tier) {

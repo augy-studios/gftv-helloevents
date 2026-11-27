@@ -414,7 +414,7 @@ the functions with the service role key. No Supabase Auth, no request signing.
   separated by commas or spaces): each new attendee as they join, each payment reported (to be
   checked) and confirmed, and each new event once it is published, sent once the editor stops
   saving (the same 45-second wait as change notices) or at its release time when that is later
-  (the cron sends any left over), and each passed ID check as one line, "otter has HelloID" (or
+  (the cron sends any left over), and each passed ID check as one line, "otter has verified using HelloID" (or
   Didit, Veriff), whether the checks or an admin approved it (`api/_lib/admin-chats.js`). On the same Organisers tab, an admin lists an event's organisers'
   chats (up to 10; **Send a test** checks each): they hear about the event's new attendees once each
   has given every detail it asks for (contact details by its rule, the registration form's answers;

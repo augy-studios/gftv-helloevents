@@ -481,6 +481,31 @@ function paymentStatusOf(row) {
   return 'none';
 }
 
+// The name of the ticket tier someone going holds at a paid event selling
+// tiers, for their number ("VIP #12" in place of "RSVP #12"): the dearest
+// tier they hold, or the tier text kept at checkout when its tier has since
+// been renamed; null at an event not selling tiers, or with no tier held.
+// event: the event's row; stored: their attendee row's payment columns.
+export function ticketTierName(event, stored) {
+  if (!event || !stored || !sellsTiers(event)) {
+    return null;
+  }
+  const held = heldTiers(event, stored);
+  if (held.length > 0) {
+    let dearest = held[0];
+    for (const tier of held) {
+      if (Number(tier.price) > Number(dearest.price)) {
+        dearest = tier;
+      }
+    }
+    return dearest.name;
+  }
+  if (typeof stored.payment_tier === 'string' && stored.payment_tier.trim() !== '') {
+    return stored.payment_tier.trim();
+  }
+  return null;
+}
+
 // The payment methods ticked on an event, in their fixed order.
 function storedPaymentMethods(row) {
   if (!Array.isArray(row.payment_methods)) {
@@ -1041,6 +1066,10 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (viewer.going === true && Number.isInteger(viewer.rsvpNumber)) {
     rsvpNumber = viewer.rsvpNumber;
   }
+  let ticketName = null;
+  if (viewer.going === true) {
+    ticketName = ticketTierName(row, viewer.payment);
+  }
   let volunteerDiscount = false;
   if (viewer.discount === true && volunteerDiscountActive(row)) {
     volunteerDiscount = true;
@@ -1125,6 +1154,8 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       lepak: myLepak,
       payment: myPayment,
       rsvpNumber,
+      // The tier their number goes by, or null for a plain RSVP ID.
+      ticketName,
       meals: myMeals,
       canManage: viewer.canManage === true,
       volunteer,
@@ -1157,15 +1188,16 @@ function canUpgradeNow(row, viewer, volunteerDiscount, now) {
   return upgrade.options.length > 0;
 }
 
-// One of my RSVPs, for the account page: the event's card and my RSVP ID
-// for it (migrations/013). The page shows no RSVP date, so none is sent.
+// One of my RSVPs, for the account page and the feed: the event's card, my
+// RSVP ID for it (migrations/013), the tier it goes by (ticketTierName) and
+// where my payment stands. The page shows no RSVP date, so none is sent.
 export function myRsvpView(row, now = Date.now()) {
   const event = row.event;
   let card = null;
   if (event) {
     card = publicEventCard(event, now);
   }
-  return { event: card, rsvpNumber: missingToNull(row.rsvp_number), paymentStatus: paymentStatusOf(row) };
+  return { event: card, rsvpNumber: missingToNull(row.rsvp_number), ticketName: ticketTierName(event, row), paymentStatus: paymentStatusOf(row) };
 }
 
 // An editor's list row: what the list on /manage shows (title, status, kind,
@@ -1516,6 +1548,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     needsIdCheck = true;
   }
   let rsvpNumber = null;
+  let ticketName = null;
   let volunteer = false;
   let fursuiter = false;
   // Going without a ticket: just for meals, or lepak (migrations/017).
@@ -1524,6 +1557,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     if (Number.isInteger(viewer.rsvpNumber)) {
       rsvpNumber = viewer.rsvpNumber;
     }
+    ticketName = ticketTierName(row, viewer.payment);
     volunteer = viewer.volunteer === true;
     fursuiter = viewer.fursuiter === true;
     if ((Array.isArray(viewer.meals) && viewer.meals.length > 0) || viewer.lepak === true) {
@@ -1562,6 +1596,7 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
       going: viewer.going === true,
       withoutTicket,
       rsvpNumber,
+      ticketName,
       volunteer,
       fursuiter,
       payment: mine,

@@ -168,6 +168,16 @@ export const TOURS = [
       { el: '#backupNew', i18n: 'tour.account.security-backup' },
     ],
   },
+  // Email codes (migrations/028), a tour of its own so people who saw the
+  // Security tab before see it too; only where the site sends email.
+  {
+    id: 'account.security-email',
+    page: 'account',
+    needs: '#emailBox',
+    steps: [
+      { el: '#emailBox', i18n: 'tour.account.security-email' },
+    ],
+  },
   {
     id: 'account.profile',
     page: 'account',
@@ -187,6 +197,17 @@ export const TOURS = [
       { el: '.field:has(#legalNameInput)', i18n: 'tour.account.personal-name' },
       { el: ['#personalLocked', '#countrySubmit'], i18n: 'tour.account.personal-locked' },
       { el: '.field:has(#emergencyNameInput)', i18n: 'tour.account.personal-emergency' },
+    ],
+  },
+  // ID verification (migrations/027) and Telegram sticker packs, a tour of
+  // their own for the same reason.
+  {
+    id: 'account.profile-extras',
+    page: 'account',
+    needs: '#panel-profile',
+    steps: [
+      { el: '#idBox', i18n: 'tour.account.profile-idcheck' },
+      { el: '#stickerBox', i18n: 'tour.account.profile-stickers' },
     ],
   },
 

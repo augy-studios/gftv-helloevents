@@ -155,7 +155,11 @@ export function renderRegistrationCard(box, event, onEvent) {
     parts.push(questionRow(event, badgeField, redraw, onEvent, errorBox));
   }
   if (viewer.rsvpNumber !== null) {
-    parts.push(createElement('p', { class: 'reg-badge-number', text: translate('registration.badge-number', { number: viewer.rsvpNumber }) }));
+    let badgeNumber = translate('registration.badge-number', { number: viewer.rsvpNumber });
+    if (viewer.ticketName) {
+      badgeNumber = translate('registration.badge-number-tier', { number: viewer.rsvpNumber, tier: viewer.ticketName });
+    }
+    parts.push(createElement('p', { class: 'reg-badge-number', text: badgeNumber }));
   }
   const accountRows = accountDetailRows(fields, mine.personal, mine.accountMissing);
   parts.push(...accountRows);

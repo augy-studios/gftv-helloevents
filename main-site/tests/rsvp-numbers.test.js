@@ -114,3 +114,18 @@ test('editors see everyone\'s number, the person sees their own, nobody else see
   const editorView = await editor.call(detail, { query: { slug: 'riverside-meet' } });
   assert.equal(editorView.json.event.viewer.rsvpNumber, null, 'an editor not going has none of their own');
 });
+
+// At a paid event selling tiers, someone's number goes by the tier they
+// hold ("Sponsor #3"); anywhere else it stays an RSVP ID.
+test('a ticket tier names the number at a paid event selling tiers, and only there', async () => {
+  const { ticketTierName } = await import('../api/_lib/serialize.js');
+  const event = { price_type: 'paid', tiers_enabled: true, ticket_tiers: [{ id: 't-dayticket', name: 'Day', price: 40 }, { id: 't-sponsor1', name: 'Sponsor', price: 120 }] };
+  assert.equal(ticketTierName(event, { payment_tier: 'Day' }), 'Day');
+  assert.equal(ticketTierName(event, { payment_items: [{ id: 't-dayticket', quantity: 1 }, { id: 't-sponsor1', quantity: 1 }] }), 'Sponsor');
+  // A tier renamed since keeps the name it was bought under.
+  assert.equal(ticketTierName(event, { payment_tier: 'Old name' }), 'Old name');
+  assert.equal(ticketTierName(event, { payment_tier: null }), null);
+  assert.equal(ticketTierName(event, null), null);
+  assert.equal(ticketTierName({ ...event, tiers_enabled: false }, { payment_tier: 'Day' }), null);
+  assert.equal(ticketTierName({ ...event, price_type: 'free' }, { payment_tier: 'Day' }), null);
+});

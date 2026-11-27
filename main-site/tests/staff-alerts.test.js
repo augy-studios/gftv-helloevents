@@ -251,9 +251,9 @@ test('a passed ID check tells the admins "username has way", however it was appr
   const helloidChecks = await import('../api/_lib/helloid-checks.js');
   const idChecks = await import('../api/_lib/id-checks.js');
   const { idVerifiedText } = await import('../api/_lib/admin-chats.js');
-  assert.equal(idVerifiedText('otter', 'helloid'), 'otter has HelloID');
-  assert.equal(idVerifiedText('otter', 'didit'), 'otter has Didit');
-  assert.equal(idVerifiedText('otter', 'veriff'), 'otter has Veriff');
+  assert.equal(idVerifiedText('otter', 'helloid'), 'otter has verified using HelloID');
+  assert.equal(idVerifiedText('otter', 'didit'), 'otter has verified using Didit');
+  assert.equal(idVerifiedText('otter', 'veriff'), 'otter has verified using Veriff');
 
   const plainSent = () => sent.filter((s) => s.url.endsWith('/sendMessage')).map((s) => `${s.body.chat_id}: ${s.body.text}`).sort();
   const account = (username) => db.table('gftvevents_accounts').find((row) => row.username === username);
@@ -262,7 +262,7 @@ test('a passed ID check tells the admins "username has way", however it was appr
   await member('otter');
   sent = [];
   await helloidChecks.saveHelloid(account('otter').id, { status: 'approved', decided_auto: true, verified_name: 'Otter Tan', verified_birth: '2000-01-02' });
-  assert.deepEqual(plainSent(), ['-100111: otter has HelloID', '222: otter has HelloID']);
+  assert.deepEqual(plainSent(), ['-100111: otter has verified using HelloID', '222: otter has verified using HelloID']);
 
   // HelloID waiting for the admins: nothing until one approves it.
   await member('fox');
@@ -273,7 +273,7 @@ test('a passed ID check tells the admins "username has way", however it was appr
   assert.deepEqual(plainSent(), [], 'not for a decline');
   const again = await helloidChecks.saveHelloid(account('fox').id, { status: 'pending', verified_name: 'Fox', verified_birth: '2001-01-01' });
   await helloidChecks.decideHelloid(again, { approved: true, reviewerId: crypto.randomUUID(), reason: null });
-  assert.deepEqual(plainSent(), ['-100111: fox has HelloID', '222: fox has HelloID']);
+  assert.deepEqual(plainSent(), ['-100111: fox has verified using HelloID', '222: fox has verified using HelloID']);
 
   // An outside provider's approval, read once: a second read tells nobody.
   process.env.DIDIT_API_KEY = 'didit-key';
@@ -298,5 +298,5 @@ test('a passed ID check tells the admins "username has way", however it was appr
     delete process.env.DIDIT_API_KEY;
     delete process.env.DIDIT_WORKFLOW_ID;
   }
-  assert.deepEqual(plainSent(), ['-100111: wolf has Didit', '222: wolf has Didit']);
+  assert.deepEqual(plainSent(), ['-100111: wolf has verified using Didit', '222: wolf has verified using Didit']);
 });

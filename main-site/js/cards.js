@@ -39,16 +39,42 @@ function metaItem(iconName, text) {
   return createElement('li', {}, [iconNode(iconName), createElement('span', { text })]);
 }
 
+// The pill with someone's number for an event: "VIP #12" for a paid tier
+// (ticketName), else "RSVP #12" (migrations/013), or the long form ("Your
+// VIP number: #12") on the event page. Coloured by their payment
+// (migrations/016): yellow while it is still to make, blue while the
+// organisers check it, green once it is confirmed.
+export function numberChip({ rsvpNumber, ticketName = null, paymentStatus = 'none' }, { long = false } = {}) {
+  let key = 'event.rsvp-number-chip';
+  if (ticketName && long) {
+    key = 'event.tier-number';
+  } else if (ticketName) {
+    key = 'event.tier-number-chip';
+  } else if (long) {
+    key = 'event.rsvp-number';
+  }
+  const classes = ['chip', 'chip-rsvp-number'];
+  if (paymentStatus === 'awaiting') {
+    classes.push('chip-warn');
+  } else if (paymentStatus === 'submitted') {
+    classes.push('chip-info');
+  } else if (paymentStatus === 'paid') {
+    classes.push('chip-ok');
+  }
+  return createElement('span', { class: classes.join(' '), text: translate(key, { number: rsvpNumber, tier: ticketName }) });
+}
+
 // The card links to the event page and shows the cover, the kind (and
 // "cancelled" or "full"), the title, the summary when there is one, and the
-// when, where, price and how many are going (when anyone is). On the
-// account page's My events, rsvpNumber adds the person's RSVP ID for it
-// (migrations/013), and paymentStatus a chip while their payment is still
-// to make or to be checked (migrations/016).
-export function eventCard(event, { rsvpNumber = null, paymentStatus = 'none' } = {}) {
+// when, where, price and how many are going (when anyone is). For someone
+// going (the account page's My events, and the feed when signed in),
+// rsvpNumber adds their number for it (numberChip, by the tier in
+// ticketName), and paymentStatus colours it and adds a chip while their
+// payment is still to make or to be checked (migrations/016).
+export function eventCard(event, { rsvpNumber = null, ticketName = null, paymentStatus = 'none' } = {}) {
   const chips = [createElement('span', { class: `chip kind-${event.kind}`, text: translate(`kind.${event.kind}`) })];
   if (rsvpNumber !== null) {
-    chips.push(createElement('span', { class: 'chip chip-rsvp-number', text: translate('event.rsvp-number-chip', { number: rsvpNumber }) }));
+    chips.push(numberChip({ rsvpNumber, ticketName, paymentStatus }));
   }
   if (paymentStatus === 'awaiting' || paymentStatus === 'submitted') {
     chips.push(createElement('span', { class: 'chip chip-warn', text: translate(`event.payment-chip.${paymentStatus}`) }));

@@ -1,6 +1,6 @@
 // The public event feed: upcoming, dates to come, or past, by kind.
 
-import '../app.js';
+import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
 import { api } from '../api.js';
 import { errorText } from '../ui.js';
@@ -16,6 +16,32 @@ let searchTimer = null;
 // Counts feed requests, so an answer that arrives after a newer request was
 // made is dropped.
 let latestRequest = 0;
+// My RSVPs by event slug ({ rsvpNumber, ticketName, paymentStatus }), when
+// signed in, so the feed's cards show my number for the events I am going to.
+let mine = new Map();
+
+// Fetches my RSVPs once signed in; the feed works without them.
+async function loadMine() {
+  const current = await session;
+  if (!current || !current.signedIn) {
+    return;
+  }
+  try {
+    const rsvps = await api('/api/me/rsvps');
+    mine = new Map([...rsvps.upcoming, ...rsvps.past].filter((rsvp) => rsvp.event).map((rsvp) => [rsvp.event.slug, rsvp]));
+  } catch {
+    mine = new Map();
+  }
+}
+
+// A feed card, with my number on it when I am going.
+function card(event) {
+  const rsvp = mine.get(event.slug);
+  if (!rsvp) {
+    return eventCard(event);
+  }
+  return eventCard(event, { rsvpNumber: rsvp.rsvpNumber, ticketName: rsvp.ticketName, paymentStatus: rsvp.paymentStatus });
+}
 
 // Marks the button in the group whose attribute matches value as pressed.
 function markPressed(groupId, attributeName, value) {
@@ -26,7 +52,7 @@ function markPressed(groupId, attributeName, value) {
 
 function render() {
   const feed = byId('feed');
-  feed.replaceChildren(...state.events.map(eventCard));
+  feed.replaceChildren(...state.events.map(card));
   feed.setAttribute('aria-busy', 'false');
   byId('feedEmpty').hidden = state.events.length > 0;
   // Nothing found for a search says so, and what it looked for.
@@ -147,5 +173,12 @@ onChange(() => {
   }
 });
 
-// The tour once the first page of the feed has drawn (or failed to).
-load().finally(() => startTours('home'));
+// The tour once the first page of the feed has drawn (or failed to). My
+// RSVPs come alongside; the cards are drawn again once they arrive.
+const mineLoaded = loadMine();
+Promise.all([load(), mineLoaded]).finally(() => startTours('home'));
+mineLoaded.then(() => {
+  if (mine.size > 0 && state.events.length) {
+    render();
+  }
+});
