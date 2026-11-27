@@ -129,6 +129,36 @@ export async function readJson(request, response, { maxBytes = MAX_BODY_BYTES } 
   }
 }
 
+// A webhook's body, as sent and as parsed: { raw, parsed }. raw is the exact
+// text when it can still be had (the stream not read yet, or the runtime
+// kept it as a string or Buffer), else null, for a signature over the
+// bytes; parsed is the JSON, or null.
+export async function readRawJson(request, { maxBytes = MAX_BODY_BYTES } = {}) {
+  let raw = null;
+  let parsed = null;
+  try {
+    const kept = request.body;
+    if (typeof kept === 'string') {
+      raw = kept;
+    } else if (Buffer.isBuffer(kept)) {
+      raw = kept.toString('utf8');
+    } else if (kept !== undefined && kept !== null && typeof kept === 'object') {
+      parsed = kept;
+    } else if (!request.readableEnded) {
+      raw = await readStream(request, maxBytes);
+    }
+    if (raw !== null && raw !== '') {
+      parsed = JSON.parse(raw);
+    }
+  } catch {
+    return { raw: null, parsed: null };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    parsed = null;
+  }
+  return { raw, parsed };
+}
+
 function readStream(request, maxBytes) {
   return new Promise((resolve, reject) => {
     let size = 0;

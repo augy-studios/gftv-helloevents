@@ -24,6 +24,8 @@ import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVo
 import { registrationOpenFor, heldRegistrationFields } from '../_lib/event-rules.js';
 import { preparePicture, storeRegistrationPhoto, registrationPhotoPath, readPaymentFile, deletePaymentFiles, MAX_PROOF_BYTES } from '../_lib/payments.js';
 import { publicEventDetail } from '../_lib/serialize.js';
+import { attendeeCode } from '../_lib/checkin.js';
+import { entryForViewer } from '../_lib/entry-codes.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { storedRegistrationFields, readRegistrationAnswers, PHOTO_NAME } from '../../js/registration-fields.js';
@@ -126,6 +128,13 @@ async function showPhoto(request, response, user) {
   response.end(file.bytes);
 }
 
+async function entryOfMine(event, user, mine) {
+  if (!mine.going) {
+    return null;
+  }
+  return entryForViewer(event, user.id, mine.payment);
+}
+
 // The page's event again, as this person now sees it.
 async function eventAnswer(event, user) {
   await withMealCounts(event);
@@ -150,6 +159,11 @@ async function eventAnswer(event, user) {
     contact: mine.contact,
     registration: mine.registration,
     personal: user.personal,
+    idVerified: user.idVerified,
+    helloidPending: user.helloidPending,
+    checkinCode: attendeeCode(event.id, user.id, mine.rsvpNumber),
+    checkedInAt: mine.checkedInAt,
+    entry: await entryOfMine(event, user, mine),
   });
 }
 

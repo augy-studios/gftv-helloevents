@@ -114,9 +114,9 @@ test('the Manage tour covers the tabs each role has', async ({ page }) => {
   await page.goto('/login?next=/manage');
   await signInAsStaff(page, STAFF.username);
   await page.waitForURL(`${serverOrigin()}/manage`);
-  // An editor: Event list, Manage event, Venue sign-ups, New event, the hint.
+  // An editor: Event list, Manage event, New event, the hint.
   await expect(text(page)).toHaveText('Event list: every event, drafts and ones not released yet included.');
-  await expect(dots(page)).toHaveCount(5);
+  await expect(dots(page)).toHaveCount(4);
   await finish(page);
   await expect(text(page)).toHaveText('Published, Drafts and Cancelled each have their own list. The number says how many.');
   await finish(page);
@@ -132,7 +132,7 @@ test('the Manage tour covers the tabs each role has', async ({ page }) => {
   expect(await seen(page)).toEqual(['manage', 'hint', 'manage.events', 'manage.editor', 'editor.basics']);
 });
 
-test('an admin is also shown the Name filter and Password resets tabs', async ({ page }) => {
+test('an admin is also shown the ID reviews, Name filter and Password resets tabs', async ({ page }) => {
   await page.goto('/login?next=/manage');
   await signInAsStaff(page, ADMIN.username);
   await page.waitForURL(`${serverOrigin()}/manage`);

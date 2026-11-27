@@ -47,6 +47,8 @@ import { startOrganiser, syncOrganiser, relabelOrganiser } from '../manage-organ
 import { setTimetable, readTimetable, startTimetable, relabelTimetable, TIMETABLE_CHANGED } from '../manage-timetable.js';
 import { mealLabel } from '../format.js';
 import { setContact, readContact, startContact, relabelContact, CONTACT_CHANGED } from '../manage-contact.js';
+import { setIdCheck, readIdCheck, startIdCheck, setOfferedIdWays, renderIdLists, idWayName } from '../manage-idcheck.js';
+import { startEntry, loadEntryCodes, relabelEntry } from '../manage-entry.js';
 import { contactText, contactHref } from '../contact-fields.js';
 import { contactLabel } from '../contact-form.js';
 import { setRegistration, readRegistration, startRegistration, relabelRegistration, syncRegistration, REGISTRATION_CHANGED } from '../manage-registration.js';
@@ -69,8 +71,10 @@ const TEXT_FIELDS = [
   'priceType', 'priceMin', 'priceMax', 'priceNote', 'capacity', 'status', 'publishLocal', 'staffNotes',
   'volunteerDiscountType', 'volunteerDiscountValue', 'timetableView', 'externalUrlLabel', 'externalUrlCustomLabel',
   'lepakLabel', 'lepakLimit',
+  // Entry QR codes (migrations/027, js/manage-entry.js).
+  'entryQrMode', 'entryQrAudience', 'entryQrShow', 'entryQrHours',
 ];
-const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'fursuitersAsked', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder', 'lepakEnabled'];
+const CHECK_FIELDS = ['datesHidden', 'addressAttendeesOnly', 'isOnline', 'priceHidden', 'tiersEnabled', 'rsvpOpen', 'fursuitersAsked', 'volunteersWanted', 'volunteerDiscountEnabled', 'crossBorder', 'lepakEnabled', 'idCheckDoor'];
 
 // A new event starts in the browser's own time zone, or Singapore's when the
 // browser names none.
@@ -97,6 +101,10 @@ const BLANK = {
   contactRule: 'any',
   registrationEnabled: false,
   registrationFields: null,
+  idCheckProviders: [],
+  entryQrMode: 'off',
+  entryQrAudience: 'all',
+  entryQrShow: 'always',
 };
 
 let currentUser = null;
@@ -255,6 +263,8 @@ byId('listStatus').addEventListener('click', (event) => {
 async function loadList() {
   const data = await api('/api/manage/events');
   events = data.events;
+  // The ID checks this deploy offers (migrations/027).
+  setOfferedIdWays(data.idProviders);
   listStale = false;
   renderList();
   // The earlier conventions a volunteer benefit can be for come from it.
@@ -309,6 +319,8 @@ function setForm(values) {
   setTimetable(rooms, items);
   setPayment(values);
   setContact(values);
+  setIdCheck(values);
+  loadEntryCodes();
   setRegistration(values);
   fillVolunteerSources(values.volunteerDiscountFrom);
   setCover(values);
@@ -499,6 +511,7 @@ function readForm() {
   Object.assign(values, readTimetable());
   Object.assign(values, readPayment());
   Object.assign(values, readContact());
+  Object.assign(values, readIdCheck());
   Object.assign(values, readRegistration());
   return values;
 }
@@ -691,6 +704,10 @@ form.addEventListener('change', (event) => {
   if (event.target.closest('#attendeeList') || event.target.closest('#epanel-editors') || event.target.id === 'payQrFile') {
     return;
   }
+  // The entry QR codes upload and are handed out on their own.
+  if (event.target.closest('#entryCodesBox')) {
+    return;
+  }
   // A convention draws people from everywhere, so Kind set to Convention
   // ticks "Cross-border event" (the editor can untick it). Saved with it.
   if (event.target.id === 'f-kind' && event.target.value === 'convention') {
@@ -864,6 +881,7 @@ const FIELD_TABS = {
   contactFields: 'price', contactLabel: 'price',
   registrationFields: 'questions', registrationLabel: 'questions', registrationHint: 'questions', registrationOptions: 'questions', registrationLink: 'questions', registrationTiers: 'questions',
   tierClosesLocal: 'price',
+  idCheckProviders: 'idcheck',
   timetableRooms: 'timetable', roomName: 'timetable', roomTag: 'timetable',
   timetableItems: 'timetable', itemTitle: 'timetable', itemDate: 'timetable', itemStart: 'timetable', itemEnd: 'timetable', itemNote: 'timetable',
 };
@@ -1112,6 +1130,7 @@ function showSavedControls() {
   renderCover();
   loadGallery(editing);
   renderAttendees();
+  loadEntryCodes();
 }
 
 // The open event is kept in the address (/manage?slug=...#editor), so a
@@ -1302,6 +1321,19 @@ function attendeeRow(attendee) {
   const paymentText = attendeePaymentText(attendee);
   if (paymentText) {
     details.push(paymentText);
+  }
+  // The ID check and check-in (migrations/027).
+  if (attendee.idCheck) {
+    if (attendee.idCheck.state === 'verified') {
+      details.push(translate('manage.attendee-id-verified', { way: idWayName(attendee.idCheck.via) }));
+    } else if (attendee.idCheck.state === 'pending') {
+      details.push(translate('manage.idcheck-pending'));
+    } else {
+      details.push(translate('manage.idcheck-none'));
+    }
+  }
+  if (attendee.checkedInAt) {
+    details.push(translate('manage.attendee-checked-in', { time: formatDate(attendee.checkedInAt) }));
   }
   details.push(formatDate(attendee.rsvpAt));
   const controls = attendeePaymentControls(attendee, name, (list) => {
@@ -1549,6 +1581,25 @@ function attendeeCsvRows() {
     }
   }
   columns.push(...registrationColumns());
+  // The ID check and check-in (migrations/027).
+  if (attendees.some((attendee) => attendee.idCheck)) {
+    columns.push([translate('manage.csv.id-check'), (attendee) => {
+      if (!attendee.idCheck) {
+        return '';
+      }
+      if (attendee.idCheck.state === 'verified') {
+        return translate('manage.attendee-id-verified', { way: idWayName(attendee.idCheck.via) });
+      }
+      if (attendee.idCheck.state === 'pending') {
+        return translate('manage.idcheck-pending');
+      }
+      return translate('manage.idcheck-none');
+    }]);
+  }
+  columns.push([translate('manage.csv.checked-in'), (attendee) => attendee.checkedInAt]);
+  if (attendees.some((attendee) => attendee.idDoorCheckedAt)) {
+    columns.push([translate('manage.csv.id-door'), (attendee) => attendee.idDoorCheckedAt]);
+  }
   return [
     columns.map(([heading]) => heading),
     ...attendees.map((attendee) => columns.map(([, cell]) => cell(attendee))),
@@ -1586,6 +1637,7 @@ function renderAttendees() {
     attendeeRows = attendees.map((attendee) => attendeeRow(attendee));
   }
   byId('attendeeList').replaceChildren(...attendeeRows);
+  renderIdLists(attendees, Boolean(editing));
 }
 
 // Where an attendee of a cross-border event is from, or that they have not
@@ -1839,6 +1891,8 @@ startOrganiser();
 startTimetable();
 startPayment({ getEvent: () => editing });
 startContact();
+startIdCheck();
+startEntry({ getEvent: () => editing });
 // The tiers the registration questions can be for: those in the Price and
 // RSVP tab now, while the event is paid and sells tiers.
 startRegistration({
@@ -1961,6 +2015,7 @@ onChange(() => {
     relabelLocations();
     relabelMeals();
     relabelContact();
+    relabelEntry();
     relabelRegistration();
     relabelTiers();
     relabelOrganiser();

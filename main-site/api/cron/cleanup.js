@@ -3,8 +3,10 @@
 //
 // Sweeps what expiry-on-read misses, so the free-tier database stays small:
 // expired sessions, challenges, WebAuthn ceremonies, Telegram link tokens,
-// admin reset codes, sign-up allowances and rate limit buckets, and audit
-// entries older than AUDIT_DAYS.
+// admin reset codes and rate limit buckets, ID checks that never finished
+// or did not pass after ID_CHECK_DAYS (migrations/027; approved ones stay,
+// so one document cannot check another account), and audit entries older
+// than AUDIT_DAYS.
 
 import { route, send, errorDetail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
@@ -13,6 +15,7 @@ import { safeEqual } from '../_lib/crypto.js';
 
 const AUDIT_DAYS = 365;
 const RATE_BUCKET_HOURS = 24;
+const ID_CHECK_DAYS = 30;
 
 // Checks Vercel's cron secret, then runs each sweep in turn and answers with
 // how many rows each one removed.
@@ -51,16 +54,19 @@ export default route('cron/cleanup', async (request, response) => {
   await sweep('rateLimits', deleteFrom(TABLES.rateLimits).lt('window_start', rateCutoff));
   // migrations/003; harmless before it has run (the error is the missing
   // table, which is logged and skipped).
-  const laterTables = [
-    ['passwordResets', TABLES.passwordResets],
-    ['signupAllowances', TABLES.signupAllowances],
-  ];
+  const laterTables = [['passwordResets', TABLES.passwordResets]];
   for (const [name, table] of laterTables) {
     try {
       await sweep(name, deleteFrom(table).lt('expires_at', now));
     } catch (cause) {
       console.warn('[helloevents] cleanup', name, errorDetail(cause));
     }
+  }
+  const idCheckCutoff = new Date(Date.now() - ID_CHECK_DAYS * 86400_000).toISOString();
+  try {
+    await sweep('idChecks', deleteFrom(TABLES.idChecks).neq('status', 'approved').lt('created_at', idCheckCutoff));
+  } catch (cause) {
+    console.warn('[helloevents] cleanup idChecks', errorDetail(cause));
   }
   const auditCutoff = new Date(Date.now() - AUDIT_DAYS * 86400_000).toISOString();
   await sweep('audit', deleteFrom(TABLES.audit).lt('created_at', auditCutoff));

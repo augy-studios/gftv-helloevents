@@ -16,7 +16,7 @@
 // event's link-preview tags, api/events/page.js; only apps reading the link
 // need those, and they have no service worker.)
 
-const VERSION = '2026-11-27.2';
+const VERSION = '2026-11-27.3';
 const PREFIX = 'gftv-helloevents-';
 const CACHE = PREFIX + VERSION;
 
@@ -29,6 +29,8 @@ const PRECACHE = [
   '/signup',
   '/reset',
   '/checkout',
+  '/checkin',
+  '/helloid',
   '/404.html',
   '/style.css',
   '/manifest.json',
@@ -111,10 +113,21 @@ const PRECACHE = [
   '/js/pages/signup.js',
   '/js/pages/reset.js',
   '/js/pages/checkout.js',
+  // ID checks, check-in and entry codes (migrations/027). The QR reader
+  // for the check-in page (js/vendor/jsqr.js) is left out: only some
+  // browsers need it, and it is kept the first time it loads.
+  '/js/pages/checkin.js',
+  '/js/pages/helloid.js',
+  '/js/helloid-documents.js',
+  '/js/event-pass.js',
+  '/js/account-idcheck.js',
+  '/js/manage-idcheck.js',
+  '/js/manage-entry.js',
+  '/js/manage-idreviews.js',
 ];
 
 // The pages that are part of the shell, by their clean path.
-const SHELL_PAGES = new Set(['/', '/event', '/login', '/account', '/manage', '/signup', '/reset']);
+const SHELL_PAGES = new Set(['/', '/event', '/login', '/account', '/manage', '/signup', '/reset', '/checkin', '/helloid']);
 const EVENT_PATH = /^\/e\/[a-z0-9-]{3,60}$/;
 
 // A redirected response cannot be served to a navigation, so store a clean copy.

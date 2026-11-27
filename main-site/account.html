@@ -186,7 +186,7 @@
                 <div class="callout warn small u-mt-1" id="personalNeeded" hidden></div>
                 <form class="u-mt-1" id="countryForm" novalidate>
                     <label class="field">
-                        <span data-i18n="field.legal-name">Legal name</span>
+                        <span><span data-i18n="field.legal-name">Legal name</span> <span class="verified-mark" id="legalNameVerified" hidden><span data-icon="badge-check"></span><span data-i18n="idcheck.verified">Verified</span></span></span>
                         <input id="legalNameInput" type="text" autocomplete="name" maxlength="100" aria-describedby="legalNameHint">
                         <span class="field-hint" id="legalNameHint" data-i18n="account.legal-name-hint">As on your ID, for events that check it at the door.</span>
                     </label>
@@ -211,6 +211,25 @@
                     <div class="actions inline"><button class="btn btn-primary" type="submit" id="countrySubmit"><span data-i18n="account.personal-save">Update details</span></button></div>
                     <div class="callout danger" id="countryError" role="alert"></div>
                 </form>
+            </section>
+
+            <!-- ID verification (migrations/027, js/account-idcheck.js): HelloID,
+                 free and this site's own, and the outside providers set up
+                 here. Done once; events that require an ID check take it. -->
+            <section class="glass-card page-card" id="idBox" aria-labelledby="idTitle">
+                <h2 id="idTitle" data-i18n="idcheck.title">ID verification</h2>
+                <p class="muted small" data-i18n="idcheck.lede">Some events ask people to verify their ID before they RSVP. Verify once here and it counts for every event that accepts the way you used. Your verified legal name and date of birth are then locked.</p>
+                <div class="callout ok small u-mt-1" id="idVerifiedNote" hidden></div>
+                <div class="callout small u-mt-1" id="idStatus" hidden></div>
+                <div class="id-options u-mt-1" id="idOptions">
+                    <a class="btn btn-primary" id="idHelloid" href="/helloid"><span data-icon="id"></span><span data-i18n="idcheck.start-helloid">Verify with HelloID</span></a>
+                    <button class="btn" type="button" id="idDidit" hidden><span data-icon="external"></span><span data-i18n="idcheck.start-didit">Verify with Didit</span></button>
+                    <button class="btn" type="button" id="idVeriff" hidden><span data-icon="external"></span><span data-i18n="idcheck.start-veriff">Verify with Veriff</span></button>
+                </div>
+                <p class="field-hint" id="idOptionsHint" data-i18n="idcheck.options-hint">HelloID is GFTV's own check. Didit and Veriff are outside services, which only some events accept. Check which ways the event you are going to accepts.</p>
+                <div class="actions inline" id="idRefreshRow" hidden><button class="btn btn-quiet btn-small" type="button" id="idRefresh"><span data-icon="refresh"></span><span data-i18n="idcheck.refresh">Check again</span></button></div>
+                <a class="btn btn-small u-mt-1" id="idBackToEvent" hidden><span data-icon="arrow-left"></span><span data-i18n="idcheck.back-to-event">Back to the event</span></a>
+                <div class="callout danger" id="idError" role="alert"></div>
             </section>
 
             <section class="glass-card page-card" id="stickerBox" hidden aria-labelledby="stickerTitle">
@@ -281,7 +300,7 @@
         <nav>
             <a href="/" data-i18n="footer.events">All events</a>
             <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
-            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
+            <a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a>
         </nav>
         <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
         <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>

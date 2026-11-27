@@ -41,10 +41,60 @@ the functions with the service role key. No Supabase Auth, no request signing.
   pins every answer's exact fields, so one can't creep back in. `npm test` checks this.
 - **Password reset** gives the same answer for an unknown, suspended or staff-only name, so it
   doesn't reveal which accounts exist; staff are pointed to gftv.asia.
-- **Venue sign-ups.** New accounts are limited to 5 an hour per connection. At a meet or con where
-  everyone shares the venue's Wi-Fi, a staff member opens `/manage` on that Wi-Fi and raises the
-  limit for that connection (its salted IP hash) for 2 to 12 hours, to 50 to 500 an hour. It ends
-  by itself or with "End now", and is in the audit log.
+- **Sign-ups have no limit per connection** (migrations/027), so everyone at a meet or con on the
+  venue's Wi-Fi can sign up at once. Turnstile and the limit per email address (5 tries an hour)
+  stay. The venue sign-up allowances and their tab in `/manage` are gone, and so is their table.
+- **ID checks** (migrations/027). An event can require the people going to verify their ID: the
+  edit form's **ID verification** tab ticks the ways it accepts, and lists who has verified and who
+  has not. Most events require none. A person verifies once, on the account page's Profile tab, and
+  it counts for every event accepting that way; someone already going keeps their place. Passing
+  sets the account's legal name and date of birth (locked, migrations/024), and a checkmark shows
+  by the legal name. One document (or, for HelloID, one face) verifies one account only. An admin
+  correcting a verified legal name or date of birth takes the check away.
+  - **HelloID** (`api/_lib/helloid.js`, `api/me/helloid.js`, `/helloid`), GFTV's own and the only
+    free way, run entirely on Vercel. The person picks the issuing country (the connection's, from
+    Vercel's `x-vercel-ip-country`; any country, `js/helloid-documents.js`) and the document,
+    photographs it (a card's back too), confirms the name and date of birth a machine-readable zone
+    gave (or types them), then follows a challenge on camera: turn left, right, up and down in a
+    random order, then hold still while the screen flashes red, green and blue in a random order.
+    The server checks, with Human (`@vladmandic/human`, MIT, TensorFlow.js on WebAssembly) and
+    Tesseract (`tesseract.js`, Apache 2.0, with `mrz` to parse): one face, the same person in every
+    frame, the turns, the face following the flashes, the live face matching the ID, the MRZ's
+    check digits, expiry, date of birth and name, the device (a virtual camera or an automated
+    browser) and whether the document, face or device already verified another account. All clear:
+    approved at once, photos deleted. Otherwise GFTV's admins decide on `/manage`'s **ID reviews**
+    tab, seeing the photos and findings; the photos are deleted once decided, and the person is
+    told (and can try again). HelloID never declines on its own, except a document already used. An
+    approved check keeps a face template (encrypted with `crypto.js encryptSecret`), a keyed hash of
+    the document number and of the device. A website cannot read passport chips (NFC), and no web
+    check can prove a document genuine. The thresholds at the top of `helloid.js` are a first
+    setting, to tune on real checks. `vercel.json` gives `api/me/helloid.js` 60 s, 3009 MB and the
+    model files.
+  - **Didit and Veriff** (`api/_lib/id-checks.js`), outside providers, paid per check, each on when
+    its keys are set (`.env.example`, SETUP.md). The account page sends the person to the
+    provider's page, which sends them back through `/api/idcheck/return`; the provider's webhook
+    (`/api/idcheck/webhook?provider=`) is checked against its signature. Neither is trusted: both
+    only say which check to read again from the provider's API. Only the name, date of birth and a
+    keyed hash of the document number are kept.
+- **Check-in** (migrations/027, `/checkin?id=`, `api/manage/checkin.js`). Someone going sees their
+  check-in QR code on the event page (signed with `SIGNING_SECRET`, so it cannot be made up, and
+  saved on the phone for when there is no connection). Organisers open the check-in page from the
+  edit form's **Check-in and entry** tab and scan codes (the browser's BarcodeDetector, or the
+  vendored jsQR on Safari and Firefox) or type an RSVP ID or username. The page keeps the attendee
+  list on the device until a day after the event, with each code's fingerprint, so it works with no
+  connection, and sends what it did when the connection is back. An event can ask for ID to be
+  checked at the door too: the page then shows the legal name and date of birth and asks for a tick
+  first. **Self check-in**: while on, the page shows a QR code (of the event page with
+  `?checkin=`) that changes every 30 seconds, made four hours ahead so it keeps changing offline,
+  and taken for 5 minutes; people going scan it with their phone's camera. With no connection on
+  their phone, the event page says to show their own QR code instead.
+- **Entry QR codes** (migrations/027, `api/_lib/entry-codes.js`). Organisers upload their own codes
+  (a cinema's tickets, a venue's pass): one for everyone, or one per person, handed out in RSVP
+  order and reassignable by RSVP ID. They pick who gets them (everyone going, or only confirmed
+  payments) and when (at once, from some hours before the start, or once checked in). The event page
+  shows the person's own, saved on their phone.
+- **Privacy page** at `/privacy` (`privacy.html`), in the same shape as the UwU apps' ones, for the
+  Google Play listing.
 - **Gallery and cover pictures** (migrations/019). Every event has a gallery on `/manage`: "Add
   pictures" (several at once) or a picture pasted anywhere in the open form (Ctrl+V, Cmd+V on a
   Mac; pasted into a text field along with text, the text is pasted instead) adds pictures, up to
@@ -514,7 +564,10 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    function (a checkout sends the tiers it buys) and adds the functions that count and check
    each tier's places, which the event pages, checkout and upgrades call. Run
    `026_staff_alerts.sql` before deploying admin and organiser alerts: the event pages, RSVPs,
-   payments, the edit form and the cron read its columns.
+   payments, the edit form and the cron read its columns. Run `027_id_checks_checkin.sql` before deploying
+   ID checks, check-in and entry codes: sign-in reads the account's new ID columns, the event
+   pages, RSVPs, checkout, the edit form and the attendee list read the event and attendee ones,
+   and it drops the venue sign-up allowances' table, which nothing reads any more.
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

@@ -24,6 +24,11 @@
         },
         "api/manage/gallery.js": {
             "maxDuration": 60
+        },
+        "api/me/helloid.js": {
+            "maxDuration": 60,
+            "memory": 3009,
+            "includeFiles": "{node_modules/@vladmandic/human/dist/human.node-wasm.js,node_modules/@vladmandic/human/models/{blazeface,facemesh,faceres,antispoof,liveness}.*,node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm,node_modules/@tesseract.js-data/eng/4.0.0_best_int/**,node_modules/tesseract.js-core/**,node_modules/tesseract.js/src/**,node_modules/mrz/lib/**}"
         }
     },
     "crons": [
@@ -68,7 +73,7 @@
                 },
                 {
                     "key": "Permissions-Policy",
-                    "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+                    "value": "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
                 },
                 {
                     "key": "Cross-Origin-Opener-Policy",
@@ -86,7 +91,7 @@
             ]
         },
         {
-            "source": "/(login|account|manage|signup|reset)",
+            "source": "/(login|account|manage|signup|reset|checkin|helloid)",
             "headers": [
                 {
                     "key": "X-Robots-Tag",

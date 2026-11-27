@@ -53,6 +53,7 @@ import { galleryImageUrl } from './gallery.js';
 import { displayDescription } from './rich-text.js';
 import { storedContactFields, storedContactRule, storedContact, contactComplete } from '../../js/contact-fields.js';
 import { qrUrl } from './payments.js';
+import { eventIdProviders, idCheckPassed, idStanding } from './id-checks.js';
 import { configuredRegistrationFields, storedAnswers, answersComplete, missingAccountDetails, ageOn } from '../../js/registration-fields.js';
 
 // ---------------------------------------------------------------------------
@@ -149,7 +150,17 @@ export function selfView(user, { editsEvents = false } = {}) {
     // Profile tab: the legal name, date of birth and country are locked
     // once set.
     personal: selfPersonal(user.personal),
+    // The ID checks the account passed (migrations/027): the checkmark by
+    // the legal name.
+    idVerified: idVerifiedList(user.idVerified),
   };
+}
+
+function idVerifiedList(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list;
 }
 
 function selfPersonal(personal) {
@@ -212,8 +223,29 @@ export function attendeeView(row, event = {}, standing = {}) {
     contact: attendeeContact(event, row.contact),
     registration: attendeeRegistration(event, row, person, isStaff),
     personal: attendeePersonal(event, row, account),
+    // Where they stand with the ID check this event requires
+    // (migrations/027): { state: verified, pending or none, via }, or null
+    // when it requires none; and when they were checked in, and their ID
+    // checked at the door.
+    idCheck: attendeeIdCheck(event, account),
+    checkedInAt: missingToNull(row.checked_in_at),
+    idDoorCheckedAt: missingToNull(row.id_door_checked_at),
     rsvpAt: row.created_at,
   };
+}
+
+function attendeeIdCheck(event, account) {
+  if (eventIdProviders(event).length === 0) {
+    return null;
+  }
+  return idStanding(event, account.id_verified_providers, account.helloid_pending === true);
+}
+
+function entryQrValue(value, fallback) {
+  if (typeof value === 'string' && value !== '') {
+    return value;
+  }
+  return fallback;
 }
 
 // The registration answers someone gave (migrations/024), for the event's
@@ -1018,6 +1050,24 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
   if (row.cross_border === true && viewer.signedIn === true && !viewer.country) {
     needsCountry = true;
   }
+  // An event requiring an ID check (migrations/027) needs one passed with a
+  // provider it accepts before an RSVP; someone going keeps their place.
+  let needsIdCheck = false;
+  if (viewer.signedIn === true && viewer.going !== true && !idCheckPassed(row, viewer.idVerified, viewer.helloidPending)) {
+    needsIdCheck = true;
+  }
+  // Their check-in code and when they were checked in (migrations/027),
+  // for the QR code they show at the door.
+  let checkinCode = null;
+  let checkedInAt = null;
+  let entry = null;
+  if (viewer.going === true) {
+    checkinCode = missingToNull(viewer.checkinCode);
+    checkedInAt = missingToNull(viewer.checkedInAt);
+    // The organisers' entry QR code for them (entry-codes.js
+    // entryForViewer), or null.
+    entry = missingToNull(viewer.entry);
+  }
   // Someone going who said they are a fursuiter (migrations/023).
   let myFursuiter = false;
   if (viewer.going === true && viewer.fursuiter === true) {
@@ -1064,6 +1114,9 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
     // Whether people going are asked if they are fursuiters (migrations/023),
     // by the plain tick box (not when the registration form asks it).
     fursuitersAsked: fursuiterTickShown(row),
+    // The ID check providers it accepts (migrations/027), none when it
+    // requires no ID check.
+    idCheckProviders: eventIdProviders(row),
     // How people pay, and whether a ticket goes through /checkout.
     payment: { checkout: needsCheckout(row), methods: paymentOptions(row) },
     viewer: {
@@ -1079,6 +1132,10 @@ export function publicEventDetail(row, viewer = {}, now = Date.now()) {
       volunteered: viewer.volunteered === true,
       volunteerDiscount,
       needsCountry,
+      needsIdCheck,
+      checkinCode,
+      checkedInAt,
+      entry,
       contact: myContact,
       contactMissing,
       registration: viewerRegistration(row, viewer, now),
@@ -1246,6 +1303,12 @@ export function managedEvent(row) {
     })),
     volunteersWanted: row.volunteers_wanted === true,
     fursuitersAsked: row.fursuiters_asked === true,
+    idCheckProviders: eventIdProviders(row),
+    idCheckDoor: row.id_check_door === true,
+    entryQrMode: entryQrValue(row.entry_qr_mode, 'off'),
+    entryQrAudience: entryQrValue(row.entry_qr_audience, 'all'),
+    entryQrShow: entryQrValue(row.entry_qr_show, 'always'),
+    entryQrHours: stringOrBlank(row.entry_qr_hours),
     volunteerDiscountEnabled: row.volunteer_discount_enabled === true,
     volunteerDiscountFrom: emptyToBlank(row.volunteer_discount_from),
     volunteerDiscountType: volunteerDiscountType(row),
@@ -1447,6 +1510,11 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
   if (row.cross_border === true && !viewer.country) {
     needsCountry = true;
   }
+  // An ID check first, as on the event page (migrations/027).
+  let needsIdCheck = false;
+  if (viewer.going !== true && !idCheckPassed(row, viewer.idVerified, viewer.helloidPending)) {
+    needsIdCheck = true;
+  }
   let rsvpNumber = null;
   let volunteer = false;
   let fursuiter = false;
@@ -1486,6 +1554,8 @@ export function checkoutView(row, viewer = {}, now = Date.now()) {
     takesVolunteers: takesVolunteers(row),
     asksFursuiters: fursuiterTickShown(row),
     needsCountry,
+    needsIdCheck,
+    idCheckProviders: eventIdProviders(row),
     contact: contactView(row),
     registration: registrationView(row),
     viewer: {

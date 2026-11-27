@@ -44,7 +44,6 @@ export const TABLES = Object.freeze({
   rateLimits: 'gftvevents_rate_limits',
   // migrations/003
   passwordResets: 'gftvevents_password_resets',
-  signupAllowances: 'gftvevents_signup_allowances',
   nameFilters: 'gftvevents_name_filters',
   // Who an editor confirmed volunteered at a convention (migrations/012).
   volunteers: 'gftvevents_volunteers',
@@ -62,6 +61,12 @@ export const TABLES = Object.freeze({
   stickerPacks: 'gftvevents_sticker_packs',
   stickers: 'gftvevents_stickers',
   stickersBucket: 'gftvevents_stickers',
+  // migrations/027: each ID check started with a provider (id-checks.js).
+  idChecks: 'gftvevents_id_checks',
+  // HelloID checks, one per person per event (helloid-checks.js), and the
+  // organisers' own entry QR codes (entry-codes.js).
+  helloidChecks: 'gftvevents_helloid_checks',
+  entryCodes: 'gftvevents_entry_codes',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).

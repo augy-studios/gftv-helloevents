@@ -119,6 +119,21 @@ export async function sendPaymentConfirmed(row, accountId) {
   return deliverToOne(accountId, noticeFor('paid', row));
 }
 
+// Tells one person GFTV's admins decided their HelloID check
+// (migrations/027): approved, or declined (the reason, and trying again,
+// are on their account page). Sent whatever their notice choices, like a
+// payment confirmed.
+export async function sendHelloidDecision(accountId, approved) {
+  let heading = 'ID check not approved';
+  let message = 'HelloID could not verify your ID. See why on your account page, and try again.';
+  if (approved) {
+    heading = 'ID verified';
+    message = 'Your HelloID check is approved. Events that ask for an ID check now take your RSVP.';
+  }
+  const notice = { title: 'HelloID', heading, lines: [message], intro: message, details: [], url: `${siteUrl()}/account#profile`, image: null, tag: 'helloid' };
+  return deliverToOne(accountId, notice);
+}
+
 // Tells one person they are now going to an event, with everything they
 // need (joinNotice), whatever their notice choices, like a payment
 // confirmed. row: the event, with what reminderNotice reads; meals: the

@@ -5,6 +5,11 @@
 //   reg/<event id>/<account id>/<random>.webp    a registration form photo,
 //                                                such as a con badge photo
 //                                                (migrations/024)
+//   entry/<event id>/<random>.png             an organiser's entry QR code
+//                                                (migrations/027)
+//   helloid/<account id>/<random>.webp        a HelloID check's ID photo
+//                                                and selfie, kept only until
+//                                                it is decided (migrations/027)
 //
 // The browser draws the picture onto a canvas and sends it (js/picture-file.js):
 // a QR code as PNG, at its own shape (no crop, no fixed aspect ratio), kept
@@ -38,6 +43,8 @@ const MAX_INPUT_PIXELS = MAX_SIDE * MAX_SIDE;
 const QR_PATH = /^qr\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.png$/;
 const PROOF_PATH = /^proof\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
 const PHOTO_PATH = /^reg\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
+const ENTRY_PATH = /^entry\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.png$/;
+const HELLOID_PATH = /^helloid\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{16,64}\.webp$/;
 
 const KINDS = {
   qr: { format: 'png', mime: 'image/png', maxBytes: MAX_QR_BYTES, side: QR_STORE_SIDE, error: 'qr' },
@@ -154,11 +161,25 @@ export function storeProof(eventId, accountId, buffer) {
   return upload(`proof/${eventId}/${accountId}/${randomToken(18)}.webp`, buffer, 'image/webp');
 }
 
+// An organiser's entry QR code (migrations/027), kept as a lossless PNG.
+export function storeEntryCode(eventId, buffer) {
+  return upload(`entry/${eventId}/${randomToken(18)}.png`, buffer, 'image/png');
+}
+
+// A HelloID check's picture (migrations/027): the ID photo or the selfie,
+// already checked and re-encoded by helloid.js.
+export function storeHelloidPicture(accountId, buffer) {
+  return upload(`helloid/${accountId}/${randomToken(18)}.webp`, buffer, 'image/webp');
+}
+
 function isPaymentPath(path) {
   if (typeof path !== 'string') {
     return false;
   }
   if (QR_PATH.test(path) || PHOTO_PATH.test(path)) {
+    return true;
+  }
+  if (ENTRY_PATH.test(path) || HELLOID_PATH.test(path)) {
     return true;
   }
   return PROOF_PATH.test(path);

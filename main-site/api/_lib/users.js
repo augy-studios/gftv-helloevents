@@ -24,7 +24,7 @@ const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_edit
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
 const ACCOUNT_COLUMNS =
   'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram, country, ' +
-  'legal_name, date_of_birth, emergency_name, emergency_phone';
+  'legal_name, date_of_birth, emergency_name, emergency_phone, id_verified_providers, helloid_pending';
 
 // When reminders can come, in hours before an event starts (migrations/011):
 // 1, 2 and 3 hours, a day and a week. An account picks any of them.
@@ -65,6 +65,8 @@ function fromStaff(staff, account = null) {
     is_approved: staff.is_approved === true,
     country: countryOf(account),
     personal: personalDetails(account),
+    idVerified: idVerifiedOf(account),
+    helloidPending: helloidPendingOf(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in staff) {
@@ -90,6 +92,8 @@ function fromPublic(account) {
     is_approved: account.status === 'active',
     country: countryOf(account),
     personal: personalDetails(account),
+    idVerified: idVerifiedOf(account),
+    helloidPending: helloidPendingOf(account),
     prefs: notificationPreferences(account),
   };
   if ('password_hash' in account) {
@@ -106,6 +110,23 @@ function countryOf(account) {
     return account.country;
   }
   return null;
+}
+
+// The ID check providers the account has passed with (migrations/027,
+// id-checks.js), or none.
+function idVerifiedOf(account) {
+  if (account && Array.isArray(account.id_verified_providers)) {
+    return account.id_verified_providers.filter((name) => typeof name === 'string');
+  }
+  return [];
+}
+
+// Whether a HelloID check of the account waits for the admins.
+function helloidPendingOf(account) {
+  if (account && account.helloid_pending === true) {
+    return true;
+  }
+  return false;
 }
 
 // The account's personal details (migrations/024): { legalName,

@@ -49,6 +49,11 @@ const notifications = await route('me/notifications');
 const profile = await route('me/profile');
 const rsvps = await route('me/rsvps');
 const config = await route('public/config');
+const checkin = await route('manage/checkin');
+const entryCodesRoute = await route('manage/entry-codes');
+const idcheck = await route('me/idcheck');
+const helloid = await route('me/helloid');
+const helloidReviews = await route('manage/helloid');
 
 const SHARED_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 const PASSWORD = 'correct horse battery';
@@ -133,6 +138,8 @@ function assertKeys(response, expected, opaque = []) {
 const USER = [
   'username', 'displayName', 'avatarUrl', 'kind', 'role', 'canManage', 'editsEvents', 'country',
   ...nest('personal', ['legalName', 'dateOfBirth', 'emergencyName', 'emergencyPhone']),
+  // The ID checks passed (migrations/027): the checkmark by the legal name.
+  'idVerified',
 ];
 const METHODS = ['totp', 'passkey', 'telegram', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];
@@ -168,13 +175,16 @@ const DETAIL = [
   ...listOf('tiers', ['name', 'price', 'benefits', 'includedBenefits', 'includesTier', 'maxPerPerson', 'methods', 'closesAt', 'closed', 'limit', 'left', 'full', 'currency']),
   ...listOf('meals', ['id', 'label', 'limit', 'left', ...listOf('locations', LOCATION)]),
   ...nest('timetable', TIMETABLE),
-  ...nest('volunteers', ['wanted', 'discount']), 'fursuitersAsked',
+  ...nest('volunteers', ['wanted', 'discount']), 'fursuitersAsked', 'idCheckProviders',
   ...nest('payment', ['checkout', 'methods']),
   ...nest('lepak', ['offered', 'label', 'limit', 'left']),
   ...nest('contact', [...listOf('fields', ['id', 'type', 'label']), 'rule']),
   ...nest('registration', ['fields', 'currency']),
   ...nest('viewer', [
     'signedIn', 'going', 'lepak', 'rsvpNumber', 'meals', 'canManage', 'volunteer', 'fursuiter', 'volunteered', 'volunteerDiscount', 'needsCountry',
+    // migrations/027: an ID check to pass first, their check-in QR code,
+    // when they were checked in, and the organisers' entry code for them.
+    'needsIdCheck', 'checkinCode', 'checkedInAt', 'entry',
     ...nest('payment', ['method', 'status']), 'contact', 'contactMissing',
     ...nest('registration', ['answers', 'photos', 'missing', 'accountMissing', 'personal', 'tier', 'asked', 'open']), 'canUpgrade',
   ]),
@@ -194,6 +204,7 @@ const EDITOR = [
   ...listOf('ticketTiers', ['id', 'name', 'price', 'benefits', 'includes', 'previousDisplay', 'maxPerPerson', 'paymentMethods', 'paymentLink', 'paymentQrUrl', 'closesLocal', 'limit', 'currency']), 'rsvpOpen',
   ...listOf('meals', ['id', 'label', 'limit', ...listOf('locations', EDITOR_LOCATION)]),
   'volunteersWanted', 'fursuitersAsked', 'volunteerDiscountEnabled', 'volunteerDiscountFrom', 'volunteerDiscountType', 'volunteerDiscountValue',
+  'idCheckProviders', 'idCheckDoor', 'entryQrMode', 'entryQrAudience', 'entryQrShow', 'entryQrHours',
   'timetableView', ...listOf('timetableRooms', ['id', 'name', 'tag']),
   ...listOf('timetableItems', ['title', 'date', 'start', 'end', 'room', 'note']), 'staffNotes',
   'paymentMethods', 'paymentLink', 'paymentInstructions', 'paymentQrUrl', 'paymentProblems',
@@ -211,9 +222,17 @@ const ATTENDEE = [
   ...listOf('contact', ['id', 'type', 'label', 'value']),
   ...nest('payment', ['method', 'status', 'tier', 'items', 'amount', 'currency', 'reference', 'hasProof', 'submittedAt', 'paidAt', 'credit']),
   'registration', 'personal',
+  // migrations/027
+  'idCheck', 'checkedInAt', 'idDoorCheckedAt',
 ];
+// The check-in page (migrations/027): each person, and the list's extra
+// fingerprint for scanning offline.
+const CHECKIN_PERSON = [
+  'rsvpNumber', 'username', 'displayName', 'staff', 'comingFor', 'ticket', 'paymentStatus', 'idCheck', 'legalName', 'dateOfBirth',
+  'idDoorCheckedAt', 'checkedInAt', 'checkedInHow',
+];
+const CHECKIN_EVENT = ['id', 'slug', 'title', 'cancelled', 'selfCheckin', 'idCheck', 'idDoor', 'keepUntil'];
 // The staff tools under the events on /manage.
-const ALLOWANCE = ['id', 'perHour', 'label', 'expiresAt', 'by', 'here'];
 const FILTER = ['id', 'term'];
 const FLAGGED = ['username', 'displayName', 'term'];
 
@@ -524,7 +543,7 @@ test('the event list, the edit form, attendees and the cover answer only what /m
   const { b: otter } = await member();
   await otter.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, contact: { telegram: '@otter_fox' } } });
   await editor.call(rsvp, { method: 'POST', body: { slug: 'mega-con', going: true, contact: { cinsta1: 'editor.cat' } } });
-  assertKeys(await editor.call(manage), listOf('events', SUMMARY));
+  assertKeys(await editor.call(manage), [...listOf('events', SUMMARY), 'idProviders']);
   assertKeys(await editor.call(manage, { query: { checkSlug: 'mega-con', id } }), ['free']);
   assertKeys(await editor.call(manage, { query: { id } }), [...nest('event', EDITOR), ...listOf('attendees', ATTENDEE)]);
 
@@ -555,20 +574,57 @@ test('the event list, the edit form, attendees and the cover answer only what /m
 test('the staff tools answer only what their sections on /manage show', async () => {
   await member({ username: 'pride_otter', displayName: 'Pride Guard Otter', email: 'p@example.com' });
 
+  // Editors have no staff tools since the venue allowances went
+  // (migrations/027).
   const { b: editor } = await staff('editor', { is_editor: true });
-  const granted = await editor.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 2, perHour: 100, label: 'Venue' } });
-  assertKeys(granted, ['here', ...listOf('allowances', ALLOWANCE)]);
-  assertKeys(await editor.call(admin), ['here', ...listOf('allowances', ALLOWANCE)]);
-  const revoked = await editor.call(admin, { method: 'POST', body: { action: 'allowance-revoke', id: granted.json.allowances[0].id } });
-  assertKeys(revoked, ['here', 'allowances']);
+  assertKeys(await editor.call(admin), []);
 
   const { b: boss } = await staff('boss', { is_admin: true });
   const added = await boss.call(admin, { method: 'POST', body: { action: 'filter-add', term: 'Pr1de Gu4rd' } });
   assertKeys(added, [...listOf('filters', FILTER), ...listOf('flagged', FLAGGED)]);
-  assertKeys(await boss.call(admin), ['here', 'allowances', 'builtIn', ...listOf('filters', FILTER), ...listOf('flagged', FLAGGED)]);
+  assertKeys(await boss.call(admin), ['builtIn', ...listOf('filters', FILTER), ...listOf('flagged', FLAGGED)]);
   const removed = await boss.call(admin, { method: 'POST', body: { action: 'filter-remove', id: added.json.filters[0].id } });
   assertKeys(removed, ['filters', 'flagged']);
   assertKeys(await boss.call(admin, { method: 'POST', body: { action: 'reset-issue', username: 'pride_otter' } }), ['code', 'expiresAt']);
+});
+
+test('the check-in page, ID checks and entry codes answer only what their pages show (migrations/027)', async () => {
+  const { b: editor } = await staff('editor', { is_editor: true });
+  const made = await editor.call(manage, {
+    method: 'POST',
+    body: {
+      action: 'create',
+      event: {
+        title: 'Door Meet', description: 'About it.', descriptionZh: '关于。', kind: 'furmeet', status: 'published', timezone: 'Asia/Singapore', startDate: '2030-02-01', startTime: '10:00',
+        priceType: 'free', locations: [{ label: 'event', venueName: 'Hall', city: 'Singapore', country: 'SG' }],
+        idCheckDoor: true, entryQrMode: 'shared', entryQrAudience: 'all', entryQrShow: 'always',
+      },
+    },
+  });
+  const id = made.json.event.id;
+  const { b: otter } = await member();
+  await otter.call(rsvp, { method: 'POST', body: { slug: 'door-meet', going: true } });
+
+  const list = await editor.call(checkin, { query: { id } });
+  assertKeys(list, [...nest('event', CHECKIN_EVENT), ...listOf('attendees', [...CHECKIN_PERSON, 'fingerprint']), ...nest('counts', ['going', 'checkedIn'])]);
+  const asked = await editor.call(checkin, { method: 'POST', body: { action: 'checkin', id, query: '1' } });
+  // Checking ID at the door: refused until it is ticked, with the person.
+  assert.equal(asked.status, 409);
+  assert.deepEqual(keyPaths(asked.json), ['error', 'ok', ...nest('person', CHECKIN_PERSON)].sort());
+  const done = await editor.call(checkin, { method: 'POST', body: { action: 'checkin', id, query: '#1', idChecked: true } });
+  assertKeys(done, [...nest('person', CHECKIN_PERSON), 'already', ...nest('counts', ['going', 'checkedIn'])]);
+  assertKeys(await editor.call(checkin, { method: 'POST', body: { action: 'undo', id, rsvpNumber: 1 } }), [...nest('person', CHECKIN_PERSON), ...nest('counts', ['going', 'checkedIn'])]);
+  const synced = await editor.call(checkin, { method: 'POST', body: { action: 'sync', id, entries: [{ rsvpNumber: 1, at: new Date().toISOString(), how: 'scan', idChecked: true }] } });
+  assertKeys(synced, [...listOf('results', ['rsvpNumber', 'ok', 'already']), ...nest('counts', ['going', 'checkedIn'])]);
+  assertKeys(await editor.call(checkin, { method: 'POST', body: { action: 'beacon', id, on: true } }), ['selfCheckin']);
+  assertKeys(await editor.call(checkin, { query: { id, beacon: '1' } }), ['beacon', ...listOf('beacon.codes', ['url', 'from', 'until'])]);
+
+  assertKeys(await editor.call(entryCodesRoute, { query: { id } }), ['codes']);
+  assertKeys(await otter.call(idcheck), nest('idCheck', ['providers', 'verified', 'latest']));
+  assertKeys(await otter.call(helloid), nest('helloid', ['verified', 'pending', 'latest', 'country', ...nest('personal', ['legalName', 'dateOfBirth'])]));
+  assertKeys(await otter.call(helloid, { query: { challenge: '1' } }), nest('challenge', ['token', 'turns', 'flashes', 'expiresInSeconds']));
+  const { b: boss } = await staff('boss', { is_admin: true });
+  assertKeys(await boss.call(helloidReviews), ['reviews']);
 });
 
 // ---------------------------------------------------------------------------

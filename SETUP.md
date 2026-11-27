@@ -267,3 +267,45 @@ previews without the secret skip the check and show no widget.
 
 **A leaked secret:** in Cloudflare, open the widget, **Rotate secret key**, put
 the new one in `TURNSTILE_SECRET`, and redeploy.
+
+## 7. ID checks: HelloID, Didit and Veriff (optional)
+
+An event can require the people going to verify their ID (the edit form's
+**ID verification** tab). Run `migrations/027_id_checks_checkin.sql` first.
+
+**HelloID** is GFTV's own check and needs nothing set up: it runs on Vercel
+(`api/me/helloid.js`, given 60 seconds and 3009 MB in `vercel.json`). Checks
+it cannot clear on its own wait on `/manage`'s **ID reviews** tab, for
+admins. Optionally set `SIGNING_SECRET` in Vercel (a new
+`openssl rand -hex 32`, **Sensitive**); without it, `IP_HASH_SALT` signs the
+check-in codes and keys the hashes HelloID keeps.
+
+**Didit and Veriff** are paid per check, so set them up only if an event
+needs one (such as reading a passport's chip, which a website cannot do).
+Each stays off until its keys are in Vercel; the edit form greys out a way
+with no keys.
+
+### Didit
+
+1. In the Didit business console, make a **KYC workflow** (ID verification,
+   liveness, face match) and copy its **workflow ID**, and an **API key**.
+2. Add a **webhook destination**: URL
+   `https://events.globalfurry.tv/api/idcheck/webhook?provider=didit`, version
+   v3, the session status events. Copy its **secret**.
+3. In Vercel, set `DIDIT_API_KEY`, `DIDIT_WORKFLOW_ID` and
+   `DIDIT_WEBHOOK_SECRET` (the key and secret **Sensitive**), and redeploy.
+
+### Veriff
+
+1. In Veriff Station, open the integration and copy its **API key** and
+   **shared secret key**.
+2. Under the integration's settings, set **Webhook decisions URL** to
+   `https://events.globalfurry.tv/api/idcheck/webhook?provider=veriff`.
+3. In Vercel, set `VERIFF_API_KEY` and `VERIFF_SHARED_SECRET` (**Sensitive**),
+   and redeploy. Set `VERIFF_BASE_URL` only if Veriff gives the integration an
+   API address other than `https://stationapi.veriff.com`.
+
+**Check:** on the account page's Profile tab, **Verify with Didit** (or
+Veriff) appears, opens the provider's page, and coming back shows how the
+check stands. The webhook answers 401 to anything not signed with its
+secret.

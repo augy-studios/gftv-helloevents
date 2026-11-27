@@ -7,6 +7,10 @@ import { cleanDescription } from './rich-text.js';
 import { readContactFields, readContactRule } from '../../js/contact-fields.js';
 import { readRegistrationFields, registrationAsksFursuiting, storedRegistrationFields, questionsAskedOf } from '../../js/registration-fields.js';
 
+// The ID checks an event can accept (migrations/027): the outside providers
+// (id-checks.js, paid per check) and HelloID, this site's own (helloid.js).
+export const ID_CHECK_PROVIDERS = Object.freeze(['didit', 'veriff', 'helloid']);
+
 export const KINDS = ['furmeet', 'convention', 'other'];
 export const STATUSES = ['draft', 'published', 'cancelled'];
 export const PRICE_TYPES = ['free', 'paid', 'tba'];
@@ -833,6 +837,66 @@ function readCapacity(body, fields) {
   // on any kind of event. Without the field, the stored setting is kept.
   if (body.fursuitersAsked !== undefined) {
     fields.fursuiters_asked = body.fursuitersAsked === true;
+  }
+  // The ID check providers it accepts (migrations/027, id-checks.js):
+  // none, any or all of them; none means no ID check. Without the field,
+  // the stored setting is kept.
+  if (body.idCheckProviders !== undefined) {
+    if (!Array.isArray(body.idCheckProviders)) {
+      return 'idCheckProviders';
+    }
+    fields.id_check_providers = ID_CHECK_PROVIDERS.filter((name) => body.idCheckProviders.includes(name));
+  }
+  // The organisers check each person's ID at the door (the check-in page
+  // asks before checking them in).
+  if (body.idCheckDoor !== undefined) {
+    fields.id_check_door = body.idCheckDoor === true;
+  }
+  return readEntryQr(body, fields);
+}
+
+// The organisers' own entry QR codes (migrations/027, entry-codes.js): off,
+// one shared code or one per person; for everyone going or only those who
+// paid; shown always, from some hours before the start, or once checked
+// in. Each field is kept as stored when the form leaves it out.
+export const ENTRY_QR_MODES = Object.freeze(['off', 'shared', 'each']);
+export const ENTRY_QR_AUDIENCES = Object.freeze(['all', 'paid']);
+export const ENTRY_QR_SHOWS = Object.freeze(['always', 'before', 'checked_in']);
+
+function readEntryQr(body, fields) {
+  const pick = (key, column, allowed) => {
+    if (body[key] === undefined) {
+      return true;
+    }
+    if (!allowed.includes(body[key])) {
+      return false;
+    }
+    fields[column] = body[key];
+    return true;
+  };
+  if (!pick('entryQrMode', 'entry_qr_mode', ENTRY_QR_MODES)) {
+    return 'entryQrMode';
+  }
+  if (!pick('entryQrAudience', 'entry_qr_audience', ENTRY_QR_AUDIENCES)) {
+    return 'entryQrAudience';
+  }
+  if (!pick('entryQrShow', 'entry_qr_show', ENTRY_QR_SHOWS)) {
+    return 'entryQrShow';
+  }
+  if (body.entryQrHours !== undefined) {
+    if (body.entryQrHours === '' || body.entryQrHours === null) {
+      fields.entry_qr_hours = null;
+    } else {
+      const hours = Number(body.entryQrHours);
+      if (!Number.isInteger(hours) || hours < 1 || hours > 168) {
+        return 'entryQrHours';
+      }
+      fields.entry_qr_hours = hours;
+    }
+  }
+  // "From some hours before the start" needs the hours.
+  if (fields.entry_qr_show === 'before' && body.entryQrHours !== undefined && fields.entry_qr_hours === null) {
+    return 'entryQrHours';
   }
   return null;
 }

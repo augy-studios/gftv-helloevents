@@ -17,6 +17,7 @@ import { startTabs } from '../tabs.js';
 import { startTours } from '../tour.js';
 import { fillCountrySelect } from '../choices.js';
 import { startAccountStickers } from '../account-stickers.js';
+import { startIdCheckSection, renderIdCheck } from '../account-idcheck.js';
 
 const byId = (id) => document.getElementById(id);
 let currentUser = null;
@@ -54,6 +55,9 @@ function renderProfile() {
     fillCountrySelect(byId('countryInput'), currentUser.country);
   }
   renderPersonal();
+  if (Array.isArray(currentUser.idVerified)) {
+    renderIdCheck(currentUser);
+  }
 }
 
 // The personal details (migrations/024): the legal name, date of birth and
@@ -298,6 +302,12 @@ async function load() {
   renderNotify();
   renderSecurity();
   startAccountStickers(currentUser);
+  startIdCheckSection(currentUser, {
+    onUser(user) {
+      currentUser = user;
+      renderProfile();
+    },
+  });
   startTours('account');
   // Whether this device is subscribed, after the page is drawn.
   const subscription = await currentSubscription();

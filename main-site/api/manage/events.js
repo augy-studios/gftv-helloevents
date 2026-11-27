@@ -39,6 +39,8 @@ import { validateEvent, isSlug, volunteerDiscountActive, storedTiers, VOLUNTEER_
 import { MANAGE_COLUMNS, PAYMENT_COLUMNS, confirmedVolunteers } from '../_lib/events.js';
 import { managedSummary, managedEvent, attendeeView } from '../_lib/serialize.js';
 import { deleteCover } from '../_lib/covers.js';
+import { entryCodes } from '../_lib/entry-codes.js';
+import { configuredProviders } from '../_lib/id-checks.js';
 import { galleryRows, deleteGalleryFiles } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, proofPaths, registrationPhotoPaths } from '../_lib/payments.js';
@@ -58,6 +60,13 @@ function isUuid(value) {
   return UUID_PATTERN.test(text);
 }
 
+// The ID checks this deploy offers (migrations/027), for the edit form's ID
+// verification tab: the outside providers with their keys set, and HelloID,
+// always.
+function idWaysOffered() {
+  return [...configuredProviders(), 'helloid'];
+}
+
 async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
   const { data, error } = await database().from(TABLES.events).select(columns).eq('id', eventId).maybeSingle();
   if (error) {
@@ -69,7 +78,7 @@ async function loadEvent(eventId, columns = MANAGE_COLUMNS) {
 // The event columns the attendee list needs: the meals it offers, and its
 // kind and volunteer benefit, for who volunteered.
 const ATTENDEE_EVENT_COLUMNS = 'id, slug, kind, cross_border, meal_options, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_value, contact_fields, ' +
-  'fursuiters_asked, price_type, starts_at, timezone, registration_enabled, registration_fields';
+  'fursuiters_asked, price_type, starts_at, timezone, registration_enabled, registration_fields, id_check_providers';
 
 // The event's attendees in RSVP order, as the edit page lists them, each
 // with the meals they are coming for that the event still offers, and for
@@ -80,8 +89,8 @@ async function loadAttendees(event) {
   const { data, error } = await database()
     .from(TABLES.attendees)
     .select(
-      `user_id, rsvp_number, created_at, meals, lepak, volunteer, fursuiter, contact, registration, ${PAYMENT_COLUMNS}, ` +
-        `account:${TABLES.accounts}!user_id ( kind, username, display_name, country, legal_name, date_of_birth, emergency_name, emergency_phone, staff:${TABLES.users} ( username, display_name ) )`
+      `user_id, rsvp_number, created_at, meals, lepak, volunteer, fursuiter, contact, registration, checked_in_at, ${PAYMENT_COLUMNS}, ` +
+        `account:${TABLES.accounts}!user_id ( kind, username, display_name, country, legal_name, date_of_birth, emergency_name, emergency_phone, id_verified_providers, staff:${TABLES.users} ( username, display_name ) )`
     )
     .eq('event_id', event.id)
     .order('created_at', { ascending: true })
@@ -175,7 +184,7 @@ async function checkSlug(response, slug, eventId) {
 // GET: every event, any status, most recently changed first.
 async function listEvents(response, scope) {
   if (scope !== null && scope.length === 0) {
-    return ok(response, { events: [] });
+    return ok(response, { events: [], idProviders: idWaysOffered() });
   }
   let request = database()
     .from(TABLES.events)
@@ -194,7 +203,7 @@ async function listEvents(response, scope) {
   if (data !== null && data !== undefined) {
     rows = data;
   }
-  return ok(response, { events: rows.map((row) => managedSummary(row, now)) });
+  return ok(response, { events: rows.map((row) => managedSummary(row, now)), idProviders: idWaysOffered() });
 }
 
 // How many numbered addresses ("mega-con-2", "mega-con-3", ...) a new event
@@ -343,6 +352,12 @@ async function saveEvent(request, response, body, user) {
     return fail(response, 400, 'invalid_field', { field: 'volunteerDiscountFrom' });
   }
   const fields = { ...check.fields, updated_by: user.id };
+  // Only the ID checks this deploy offers (an outside provider needs its
+  // keys): one ticked before its keys were taken away goes at the next save.
+  if (Array.isArray(fields.id_check_providers)) {
+    const offered = idWaysOffered();
+    fields.id_check_providers = fields.id_check_providers.filter((way) => offered.includes(way));
+  }
   // An editor of one event (migrations/018) cannot change when it goes live.
   if (user.scope !== null) {
     delete fields.status;
@@ -367,6 +382,8 @@ async function deleteEvent(request, response, body, user) {
   const proofs = [...(await proofPaths(body.id)), ...(await registrationPhotoPaths(body.id))];
   // So are the gallery's files; its rows go with the event.
   const galleryPaths = (await galleryRows(body.id)).map((image) => image.path);
+  // And the organisers' entry QR codes (migrations/027).
+  const entryPaths = (await entryCodes(body.id)).map((code) => code.path);
   const { data, error } = await database()
     .from(TABLES.events)
     .delete()
@@ -382,7 +399,7 @@ async function deleteEvent(request, response, body, user) {
   await deleteCover(deleted.cover_image_path);
   await deleteGalleryFiles(galleryPaths);
   const tierQrs = storedTiers(deleted).map((tier) => tier.payment_qr_path);
-  await deletePaymentFiles([deleted.payment_qr_path, ...tierQrs, ...proofs]);
+  await deletePaymentFiles([deleted.payment_qr_path, ...tierQrs, ...proofs, ...entryPaths]);
   // event_id is set null on the audit rows by the foreign key, so the slug
   // goes in the details to keep the trail readable.
   await audit(request, { action: 'event.deleted', actorId: user.id, details: { slug: deleted.slug } });

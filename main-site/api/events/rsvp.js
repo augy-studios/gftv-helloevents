@@ -52,6 +52,9 @@
 // api/events/registration-photo.js gave back. "Are you fursuiting?" sets
 // the fursuiter flag too. Refused with registration_required or
 // registration_invalid, and the question's id.
+// An event requiring an ID check (migrations/027) takes a new RSVP only from
+// someone who passed one with a provider it accepts (refused with
+// id_check_required).
 // Joining goes through the gftvevents_rsvp database function, which locks the
 // event row, so two people cannot both take the last space (or a tier's
 // last place, migrations/025: refused with tier_full). Only released,
@@ -82,6 +85,9 @@ import { withDescriptionPictures } from '../_lib/description-pictures.js';
 import { deletePaymentFiles, registrationPhotoExists, registrationPhotoPath } from '../_lib/payments.js';
 import { background, sendJoined } from '../_lib/notify.js';
 import { alertNewAttendee, alertAttendeeCompleted } from '../_lib/staff-alerts.js';
+import { idCheckPassed } from '../_lib/id-checks.js';
+import { attendeeCode } from '../_lib/checkin.js';
+import { entryForViewer } from '../_lib/entry-codes.js';
 import { readRegistrationAnswers, missingAccountDetails, registrationAsksFursuiting, photoNames } from '../../js/registration-fields.js';
 import { storedContactFields, storedContactRule, readContactAnswers } from '../../js/contact-fields.js';
 
@@ -385,6 +391,12 @@ export default route('events/rsvp', async (request, response) => {
     // A ticket for the whole event, at an event taking payment online, by
     // someone not already holding one: it needs a method and a tier.
     const before = await attendance(event.id, session.user.id);
+    // An event requiring an ID check (migrations/027) takes a new RSVP only
+    // from someone who passed one with a provider it accepts; someone
+    // already going can still change or cancel.
+    if (!before.going && !idCheckPassed(event, session.user.idVerified, session.user.helloidPending)) {
+      return fail(response, 400, 'id_check_required');
+    }
     let heldWholeEvent = false;
     if (before.going && before.meals.length === 0 && !before.lepak) {
       heldWholeEvent = true;
@@ -599,6 +611,11 @@ export default route('events/rsvp', async (request, response) => {
       contact: mine.contact,
       registration: mine.registration,
       personal: session.user.personal,
+      idVerified: session.user.idVerified,
+      helloidPending: session.user.helloidPending,
+      checkinCode: attendeeCode(shown.id, session.user.id, mine.rsvpNumber),
+      checkedInAt: mine.checkedInAt,
+      entry: await entryForViewer(shown, session.user.id, mine.payment),
     }),
   });
 });

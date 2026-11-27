@@ -127,6 +127,10 @@
                     <p data-i18n="event.country-needed">This is a cross-border event. Add your country of origin to your account to RSVP.</p>
                     <a class="btn btn-small u-mt-1" id="countryLink" href="/account#profile"><span data-icon="globe"></span><span data-i18n="event.country-set">Set my country</span></a>
                 </div>
+                <div class="callout warn small" id="idCheckNeeded" hidden>
+                    <p id="idCheckNeededText"></p>
+                    <a class="btn btn-small u-mt-1" id="idCheckLink" href="/account#profile"><span data-icon="id"></span><span data-i18n="event.idcheck-verify">Verify my ID</span></a>
+                </div>
                 <p class="small muted" id="reserveNote"></p>
                 <button class="btn btn-primary btn-block" type="button" id="reserveBtn"></button>
                 <div class="callout danger" id="reserveError" role="alert"></div>
@@ -200,7 +204,7 @@
         <nav>
             <a href="/" data-i18n="footer.events">All events</a>
             <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
-            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
+            <a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a>
         </nav>
         <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
         <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>

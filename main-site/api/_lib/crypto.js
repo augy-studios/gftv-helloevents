@@ -10,11 +10,14 @@
 //                               same as gftv-linktree does.
 //   Addresses                   salted SHA-256, for rate limits and the audit
 //                               log.
+//   Check-in codes, document    HMAC-SHA256 with SIGNING_SECRET (or, without
+//   numbers                     it, IP_HASH_SALT), one label per use
+//                               (migrations/027).
 //
 // The same formats as gftv-linktree's api/_lib/crypto.js, so a staff account
 // and its shared backup codes work the same on both sites.
 
-import { randomBytes, createHash, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, createHmac, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { requiredEnv, optionalEnv } from './env.js';
 import { errorDetail } from './http.js';
@@ -206,4 +209,28 @@ export function decryptSecret(envelope) {
 
 export function hashIp(ipAddress) {
   return sha256(`${optionalEnv('IP_HASH_SALT', 'helloevents')}:${ipAddress}`);
+}
+
+// The key for keyedHash: SIGNING_SECRET, or IP_HASH_SALT (already a long
+// random string on every deploy) when it is not set. Production with
+// neither is a mistake, so it fails rather than sign with a known key.
+function signingKey() {
+  let secret = optionalEnv('SIGNING_SECRET');
+  if (!secret) {
+    secret = optionalEnv('IP_HASH_SALT');
+  }
+  if (!secret) {
+    if (process.env.VERCEL_ENV === 'production') {
+      throw new Error('missing environment variable SIGNING_SECRET');
+    }
+    secret = 'helloevents-local';
+  }
+  return secret;
+}
+
+// HMAC-SHA256 of value for one purpose (label, so a value signed for one
+// use is never accepted for another), as base64url. Signs check-in codes
+// and hashes document numbers (migrations/027).
+export function keyedHash(label, value) {
+  return createHmac('sha256', signingKey()).update(`${label}:${value}`, 'utf8').digest('base64url');
 }

@@ -1,15 +1,9 @@
 // The staff tools on /manage beside the events (help desk #7, round 4).
 //
-// GET -> { allowances, here, filters?, builtIn?, flagged? }
+// GET -> { filters, builtIn, flagged }   admins; {} for other editors
 //
-// Editors and admins:
-//   POST { action: "allowance-grant", hours, perHour, label? }
-//        "Venue mode": raise the sign-up limit for the connection this staff
-//        member is on right now (its salted IP hash, never the address), for
-//        1 to 12 hours, to 20 to 500 sign-ups an hour. For a con or meet
-//        where everyone shares the venue's Wi-Fi. Nothing to hand out: the
-//        allowance belongs to the connection, and ends by itself.
-//   POST { action: "allowance-revoke", id }
+// (The venue sign-up allowances that were here went with the per-connection
+// sign-up limit, migrations/027.)
 //
 // Admins only:
 //   POST { action: "filter-add", term }      a word public names may not use
@@ -22,17 +16,19 @@
 //        (migrations/024) correct a locked personal detail on any account
 //        (public, or staff by their gftv.asia username), after checking who
 //        they are. A blank value clears it, so they can fill it in again.
+//        Correcting the legal name or date of birth also takes away the
+//        account's ID check (migrations/027), so they check again.
 //        -> { fixed: [the details changed] }
 //
 // Every write is in the audit log. Answers carry no IP hash, email or id of
 // a person; flagged names are a username and a display name.
 
-import { route, guard, readJson, ok, fail, clientIp } from '../_lib/http.js';
+import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { limited, audit } from '../_lib/guards.js';
 import { requireUser } from '../_lib/session.js';
 import { isAdmin } from '../_lib/users.js';
-import { hashIp, randomBytesCode, sha256 } from '../_lib/crypto.js';
+import { randomBytesCode, sha256 } from '../_lib/crypto.js';
 import { countryCode } from '../_lib/countries.js';
 import { ensureStaffAccount } from '../_lib/users.js';
 import { personName, birthDate } from '../../js/registration-fields.js';
@@ -65,64 +61,6 @@ function rowsOrEmpty(data) {
     return [];
   }
   return data;
-}
-
-// Who granted an allowance: a staff member's gftv.asia username, a public
-// account's own username, or null when it is not known.
-function grantedBy(account) {
-  if (account === null || account === undefined) {
-    return null;
-  }
-  if (account.kind === 'staff') {
-    const staff = account.staff;
-    if (staff === null || staff === undefined) {
-      return null;
-    }
-    if (staff.username === null || staff.username === undefined) {
-      return null;
-    }
-    return staff.username;
-  }
-  if (account.username === null || account.username === undefined) {
-    return null;
-  }
-  return account.username;
-}
-
-// The live sign-up allowances, soonest to end first.
-async function allowances(request) {
-  const hereHash = hashIp(clientIp(request));
-  const { data, error } = await database()
-    .from(TABLES.signupAllowances)
-    .select(`id, ip_hash, max_per_hour, label, expires_at, by:${TABLES.accounts} ( kind, username, staff:${TABLES.users} ( username ) )`)
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .order('expires_at', { ascending: true })
-    .limit(50);
-  if (error) {
-    throw error;
-  }
-  return rowsOrEmpty(data).map((row) => {
-    let label = null;
-    if (row.label) {
-      label = row.label;
-    }
-    return {
-      id: row.id,
-      perHour: row.max_per_hour,
-      label,
-      expiresAt: row.expires_at,
-      by: grantedBy(row.by),
-      // Whether it is for the connection the viewer is on, not which one.
-      here: row.ip_hash === hereHash,
-    };
-  });
-}
-
-// The allowances, and whether one of them is for the viewer's connection.
-async function allowancesAnswer(request) {
-  const list = await allowances(request);
-  return { allowances: list, here: list.some((allowance) => allowance.here) };
 }
 
 // The admins' own list of words public names may not use.
@@ -175,75 +113,13 @@ async function filtersAnswer() {
   return { filters: filterList, flagged: flaggedNames };
 }
 
-// GET: the allowances for every editor; the word list, the built-in words
-// and the flagged names for admins too.
-async function showTools(request, response, admin) {
-  const answer = await allowancesAnswer(request);
-  if (admin) {
-    answer.filters = await filters();
-    answer.builtIn = BUILT_IN_TERMS;
-    answer.flagged = await flagged();
+// GET: the word list, the built-in words and the flagged names, for
+// admins; nothing for other editors, who have no staff tools.
+async function showTools(response, admin) {
+  if (!admin) {
+    return ok(response, {});
   }
-  return ok(response, answer);
-}
-
-// "allowance-grant": venue mode for the connection this staff member is on.
-async function grantAllowance(request, response, body, user) {
-  const hours = Number(body.hours);
-  const perHour = Number(body.perHour);
-  if (!Number.isInteger(hours) || hours < 1 || hours > 12) {
-    return fail(response, 400, 'invalid_field', { field: 'hours' });
-  }
-  if (!Number.isInteger(perHour) || perHour < 20 || perHour > 500) {
-    return fail(response, 400, 'invalid_field', { field: 'perHour' });
-  }
-  // The label without control characters, or null when nothing is left.
-  const cleanedLabel = stringOrEmpty(body.label)
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim()
-    .slice(0, 80);
-  let label = null;
-  if (cleanedLabel) {
-    label = cleanedLabel;
-  }
-  const allowance = {
-    ip_hash: hashIp(clientIp(request)),
-    max_per_hour: perHour,
-    label,
-    created_by: user.id,
-    expires_at: new Date(Date.now() + hours * 3600_000).toISOString(),
-  };
-  const { data, error } = await database()
-    .from(TABLES.signupAllowances)
-    .insert(allowance)
-    .select('id')
-    .single();
-  if (error) {
-    throw error;
-  }
-  await audit(request, {
-    action: 'admin.signup_allowance_granted',
-    actorId: user.id,
-    details: { id: data.id, hours, perHour, label },
-  });
-  return ok(response, { allowances: await allowances(request), here: true });
-}
-
-// "allowance-revoke": ends an allowance now.
-async function revokeAllowance(request, response, body, user) {
-  if (!isUuid(body.id)) {
-    return fail(response, 400, 'bad_request');
-  }
-  const { error } = await database()
-    .from(TABLES.signupAllowances)
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('id', body.id)
-    .is('revoked_at', null);
-  if (error) {
-    throw error;
-  }
-  await audit(request, { action: 'admin.signup_allowance_revoked', actorId: user.id, details: { id: body.id } });
-  return ok(response, await allowancesAnswer(request));
+  return ok(response, { filters: await filters(), builtIn: BUILT_IN_TERMS, flagged: await flagged() });
 }
 
 // "filter-add": a word public names may not use, compared in its folded
@@ -394,18 +270,24 @@ async function fixPersonal(request, response, body, user) {
   if (!account) {
     return fail(response, 404, 'account_not_found');
   }
+  const fixed = Object.keys(changes);
+  // An ID check vouched for the name and date of birth it read
+  // (migrations/027): correcting either takes the check away, and the
+  // person checks again.
+  if ('legal_name' in changes || 'date_of_birth' in changes) {
+    changes.id_verified_providers = [];
+    changes.id_verified_at = null;
+  }
   const { error } = await database().from(TABLES.accounts).update(changes).eq('id', account.id);
   if (error) {
     throw error;
   }
-  const fixed = Object.keys(changes);
   await audit(request, { action: 'admin.personal_fixed', actorId: user.id, details: { username, fields: fixed } });
   return ok(response, { fixed });
 }
 
-// Sends each request to its step. Allowances are for every editor; the
-// word list and reset codes are for admins only. Every POST counts against
-// the manageWrite limit.
+// Sends each request to its step: all of them for admins only. Every POST
+// counts against the manageWrite limit.
 export default route('manage/admin', async (request, response) => {
   if (guard(request, response, ['GET', 'POST'])) {
     return;
@@ -418,7 +300,7 @@ export default route('manage/admin', async (request, response) => {
   const admin = isAdmin(user);
 
   if (request.method === 'GET') {
-    await showTools(request, response, admin);
+    await showTools(response, admin);
     return;
   }
 
@@ -427,15 +309,6 @@ export default route('manage/admin', async (request, response) => {
     return;
   }
   if (await limited(request, response, 'manageWrite', [`u:${user.id}`])) {
-    return;
-  }
-
-  if (body.action === 'allowance-grant') {
-    await grantAllowance(request, response, body, user);
-    return;
-  }
-  if (body.action === 'allowance-revoke') {
-    await revokeAllowance(request, response, body, user);
     return;
   }
 

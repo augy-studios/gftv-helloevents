@@ -16,6 +16,8 @@ export const LIMITS = Object.freeze({
   rsvp: [30, 60],
   manageWrite: [120, 60],
   securityWrite: [30, 900],
+  // Per email address only: sign-ups have no per-connection limit
+  // (migrations/027), so a venue sharing one Wi-Fi can all sign up.
   signup: [5, 3600],
   recover: [5, 3600],
   notifyWrite: [30, 900],
@@ -33,17 +35,29 @@ export const LIMITS = Object.freeze({
   // Google Maps links read for the edit form (api/manage/place.js), kept
   // well inside Nominatim's one request a second.
   placeLookup: [30, 600],
+  // ID checks (migrations/027): starting one costs the site a check at
+  // the provider, so few an hour per account; coming back from a provider
+  // and its webhooks, per connection and per check.
+  idCheck: [6, 3600],
+  idCheckRead: [60, 600],
+  idWebhook: [300, 60],
+  // Check-in (migrations/027): organisers scanning at the door, and people
+  // checking themselves in at the beacon.
+  checkin: [300, 60],
+  selfCheckin: [20, 600],
 });
 
 // Count one hit for each subject and answer 429 if any is over. Returns true
 // when the request has been answered. A failure of the limiter itself lets
 // the request through, so a database hiccup does not lock everybody out.
-// { max } raises the limit on the connection's bucket only (a staff member's
-// sign-up allowance); subject buckets keep the normal limit.
-export async function limited(request, response, name, subjects = [], { max: connectionLimit = null } = {}) {
+// { perConnection: false } leaves out the connection's own bucket, so only
+// the subjects count (sign-up, migrations/027: a con crowd on one Wi-Fi).
+export async function limited(request, response, name, subjects = [], { perConnection = true } = {}) {
   const [allowedHits, windowSeconds] = LIMITS[name];
-  const ipBucket = `${name}:ip:${hashIp(clientIp(request))}`;
-  const buckets = [ipBucket, ...subjects.map((subject) => `${name}:${subject}`)];
+  const buckets = subjects.map((subject) => `${name}:${subject}`);
+  if (perConnection) {
+    buckets.unshift(`${name}:ip:${hashIp(clientIp(request))}`);
+  }
   try {
     for (const bucket of buckets) {
       const { data: hits, error } = await database().rpc('gftvevents_rate_hit', {
@@ -53,11 +67,7 @@ export async function limited(request, response, name, subjects = [], { max: con
       if (error) {
         throw error;
       }
-      let limit = allowedHits;
-      if (bucket === ipBucket && connectionLimit) {
-        limit = connectionLimit;
-      }
-      if (Number(hits) > limit) {
+      if (Number(hits) > allowedHits) {
         response.setHeader('Retry-After', String(windowSeconds));
         fail(response, 429, 'rate_limited');
         return true;
@@ -88,32 +98,4 @@ export async function audit(request, { action, actorId = null, eventId = null, d
   if (error) {
     console.error('[helloevents] audit insert:', action, error.message);
   }
-}
-
-// The live sign-up allowance for this request's connection, or null. Staff
-// grant one from /manage for the connection they are on ("venue mode",
-// migrations/003); it raises the sign-up limit for that connection only,
-// until it expires or is revoked. The most generous one wins.
-export async function signupAllowance(request) {
-  const { data, error } = await database()
-    .from(TABLES.signupAllowances)
-    .select('id, max_per_hour, expires_at')
-    .eq('ip_hash', hashIp(clientIp(request)))
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .order('max_per_hour', { ascending: false })
-    .limit(1);
-  if (error) {
-    // Before migration 003, or a hiccup: the normal limit applies.
-    console.error('[helloevents] sign-up allowance:', error.message);
-    return null;
-  }
-  if (data === null || data === undefined) {
-    return null;
-  }
-  const allowance = data[0];
-  if (allowance === null || allowance === undefined) {
-    return null;
-  }
-  return allowance;
 }

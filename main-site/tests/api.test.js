@@ -306,7 +306,9 @@ test('someone can come only for the meals an event offers, change their choice, 
 
   const going = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['m-tea123', 'lunch'] } });
   assert.equal(going.status, 200);
-  assert.deepEqual(going.json.event.viewer, { signedIn: true, going: true, lepak: false, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, fursuiter: false, volunteered: false, volunteerDiscount: false, needsCountry: false, payment: { method: null, status: 'none' }, contact: {}, contactMissing: false, registration: { answers: {}, photos: {}, missing: false, accountMissing: [], personal: {}, tier: null, asked: [], open: false }, canUpgrade: false });
+  const { checkinCode, ...viewer } = going.json.event.viewer;
+  assert.match(checkinCode, /^ghe1\.[0-9a-f-]{36}\.1\.[A-Za-z0-9_-]{22}$/, 'their check-in QR code (migrations/027)');
+  assert.deepEqual(viewer, { signedIn: true, going: true, lepak: false, rsvpNumber: 1, meals: ['lunch', 'm-tea123'], canManage: false, volunteer: false, fursuiter: false, volunteered: false, volunteerDiscount: false, needsCountry: false, needsIdCheck: false, checkedInAt: null, entry: null, payment: { method: null, status: 'none' }, contact: {}, contactMissing: false, registration: { answers: {}, photos: {}, missing: false, accountMissing: [], personal: {}, tier: null, asked: [], open: false }, canUpgrade: false });
   assert.equal(going.json.event.going, 0, 'a meal-only attendee takes no space');
 
   const changed = await b.call(rsvp, { method: 'POST', body: { slug: 'meal-meet', going: true, meals: ['dinner'] } });

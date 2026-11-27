@@ -1,6 +1,6 @@
 // Round 4 of help desk #7, end to end against the in-memory database: reset
-// with a backup code, admin one-time reset codes, venue sign-up allowances,
-// the display name filter with the admins' own list, and backup codes for
+// with a backup code, admin one-time reset codes (the venue sign-up
+// allowances that were here went in migrations/027), the display name filter with the admins' own list, and backup codes for
 // whoever turns 2FA on.
 
 import { test, beforeEach } from 'node:test';
@@ -155,48 +155,15 @@ test('an expired reset code fails; on a 2FA account a code only sets the passwor
 });
 
 // ---------------------------------------------------------------------------
-// Venue sign-up allowances
+// Staff tools without venue allowances (migrations/027)
 // ---------------------------------------------------------------------------
 
-test('a staff member raises the sign-up limit for the venue connection, for a while', async () => {
-  const venue = '203.0.113.50';
-  const tryJoin = (n) => on(venue).call(signup, { method: 'POST', body: join({ username: `guest${n}`, email: `guest${n}@example.com` }) });
-  for (let n = 1; n <= 5; n += 1) assert.equal((await tryJoin(n)).status, 200);
-  assert.equal((await tryJoin(6)).status, 429, 'the normal limit');
-
-  // A member cannot; an editor on the venue Wi-Fi can.
-  const m = await member({ username: 'visitor', email: 'visitor@example.com' }, on('198.51.100.200'));
-  assert.equal((await m.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 4, perHour: 100 } })).status, 403);
-  const ed = await staff('editor', { is_editor: true }, on(venue));
-  assert.equal((await ed.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 24, perHour: 100 } })).json.field, 'hours');
-  assert.equal((await ed.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 4, perHour: 5000 } })).json.field, 'perHour');
-  const granted = await ed.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 4, perHour: 100, label: 'Furmeet hall' } });
-  assert.equal(granted.status, 200);
-  assert.equal(granted.json.here, true);
-  assert.equal(granted.json.allowances[0].by, 'editor');
-  assert.equal(JSON.stringify(granted.json).includes('ip_hash'), false);
-  assert.equal(JSON.stringify(granted.json).includes(db.table('gftvevents_signup_allowances')[0].ip_hash), false, 'the hash is never sent');
-  assert.deepEqual(leaks(granted.json), []);
-
-  for (let n = 6; n <= 12; n += 1) assert.equal((await tryJoin(n)).status, 200, `sign-up ${n} at the venue`);
-  // Another connection is not affected.
-  for (let n = 0; n < 5; n += 1) await on('192.0.2.9').call(signup, { method: 'POST', body: join({ username: `else${n}`, email: `else${n}@example.com` }) });
-  assert.equal((await on('192.0.2.9').call(signup, { method: 'POST', body: join({ username: 'else9', email: 'else9@example.com' }) })).status, 429);
-
-  // Ending it restores the normal limit.
-  await ed.call(admin, { method: 'POST', body: { action: 'allowance-revoke', id: granted.json.allowances[0].id } });
-  assert.equal((await tryJoin(13)).status, 429);
-  assert.ok(db.table('gftvevents_audit_logs').some((a) => a.action === 'admin.signup_allowance_granted'));
-  assert.ok(db.table('gftvevents_audit_logs').some((a) => a.action === 'admin.signup_allowance_revoked'));
-});
-
-test('an expired allowance no longer counts', async () => {
-  const venue = '203.0.113.60';
-  const ed = await staff('editor', { is_editor: true }, on(venue));
-  await ed.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 2, perHour: 50 } });
-  db.table('gftvevents_signup_allowances')[0].expires_at = new Date(Date.now() - 1000).toISOString();
-  for (let n = 1; n <= 5; n += 1) await on(venue).call(signup, { method: 'POST', body: join({ username: `late${n}`, email: `late${n}@example.com` }) });
-  assert.equal((await on(venue).call(signup, { method: 'POST', body: join({ username: 'late6', email: 'late6@example.com' }) })).status, 429);
+test('the staff tools are for admins only now the venue allowances are gone', async () => {
+  const ed = await staff('editor', { is_editor: true });
+  assert.deepEqual((await ed.call(admin)).json, { ok: true }, 'an editor gets nothing');
+  assert.equal((await ed.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 4, perHour: 100 } })).json.error, 'admin_only');
+  const ad = await staff('boss', { is_admin: true });
+  assert.equal((await ad.call(admin, { method: 'POST', body: { action: 'allowance-grant', hours: 4, perHour: 100 } })).json.error, 'bad_request');
 });
 
 // ---------------------------------------------------------------------------
@@ -221,7 +188,7 @@ test('admins keep their own list; existing names that match are flagged, not cha
   const ed = await staff('editor', { is_editor: true });
   assert.equal((await ed.call(admin, { method: 'POST', body: { action: 'filter-add', term: 'prideguard' } })).json.error, 'admin_only');
   const editorView = (await ed.call(admin)).json;
-  assert.equal('filters' in editorView, false, 'editors see allowances only');
+  assert.equal('filters' in editorView, false, 'editors see no staff tools');
 
   assert.equal((await ad.call(admin, { method: 'POST', body: { action: 'filter-add', term: 'x' } })).json.error, 'filter_invalid');
   const added = await ad.call(admin, { method: 'POST', body: { action: 'filter-add', term: 'Pr1de Gu4rd' } });

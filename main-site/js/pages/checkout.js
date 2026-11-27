@@ -390,7 +390,31 @@ function renderOrder() {
   setText('reserveNote', translate(noteKey));
   const needsCountry = checkout.needsCountry === true;
   byId('countryNeeded').hidden = !needsCountry;
-  button.disabled = needsCountry;
+  // An event requiring an ID check (migrations/027).
+  let needsIdCheck = false;
+  if (checkout.needsIdCheck === true && !needsCountry) {
+    needsIdCheck = true;
+  }
+  byId('idCheckNeeded').hidden = !needsIdCheck;
+  if (needsIdCheck) {
+    const names = checkout.idCheckProviders.map((way) => {
+      if (way === 'helloid') {
+        return translate('idcheck.way.helloid');
+      }
+      if (way === 'didit') {
+        return 'Didit';
+      }
+      return 'Veriff';
+    });
+    byId('idCheckNeededText').textContent = translate('event.idcheck-needed', { ways: names.join(', ') });
+    const next = encodeURIComponent(`/e/${checkout.slug}`);
+    let href = `/account?next=${next}#profile`;
+    if (checkout.idCheckProviders.includes('helloid')) {
+      href = `/helloid?next=${next}`;
+    }
+    byId('idCheckLink').href = href;
+  }
+  button.disabled = [needsCountry, needsIdCheck].some(Boolean);
 }
 
 // The registration questions asked of the tickets picked: those for every

@@ -23,7 +23,8 @@ export const DETAIL_COLUMNS =
   'volunteers_wanted, volunteer_discount_enabled, volunteer_discount_from, volunteer_discount_type, volunteer_discount_value, ' +
   'timetable_view, timetable_rooms, timetable_items, external_url_label, external_url_custom_label, cross_border, ' +
   'payment_methods, payment_link, payment_qr_path, payment_instructions, lepak_enabled, lepak_limit, lepak_label, contact_fields, contact_rule, ' +
-  'fursuiters_asked, registration_enabled, registration_fields, organiser_chat_ids';
+  'fursuiters_asked, registration_enabled, registration_fields, organiser_chat_ids, id_check_providers, id_check_door, self_checkin_on, ' +
+  'entry_qr_mode, entry_qr_audience, entry_qr_show, entry_qr_hours';
 
 // The edit form's columns (serialize.js managedEvent). No stored timestamps:
 // the form shows none, and nothing here reads them.
@@ -172,7 +173,7 @@ export const PAYMENT_COLUMNS =
 export async function attendance(eventId, userId) {
   const { data, error } = await database()
     .from(TABLES.attendees)
-    .select(`meals, volunteer, fursuiter, rsvp_number, lepak, contact, registration, ${PAYMENT_COLUMNS}`)
+    .select(`meals, volunteer, fursuiter, rsvp_number, lepak, contact, registration, checked_in_at, ${PAYMENT_COLUMNS}`)
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -180,7 +181,7 @@ export async function attendance(eventId, userId) {
     throw error;
   }
   if (!data) {
-    return { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {} };
+    return { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {}, checkedInAt: null };
   }
   let meals = [];
   if (Array.isArray(data.meals)) {
@@ -198,7 +199,11 @@ export async function attendance(eventId, userId) {
   if (data.registration && typeof data.registration === 'object' && !Array.isArray(data.registration)) {
     registration = data.registration;
   }
-  return { going: true, meals, volunteer: data.volunteer === true, fursuiter: data.fursuiter === true, rsvpNumber, payment: data, lepak: data.lepak === true, contact, registration };
+  let checkedInAt = null;
+  if (data.checked_in_at) {
+    checkedInAt = data.checked_in_at;
+  }
+  return { going: true, meals, volunteer: data.volunteer === true, fursuiter: data.fursuiter === true, rsvpNumber, payment: data, lepak: data.lepak === true, contact, registration, checkedInAt };
 }
 
 // Whether an event asks the people going for contact details.

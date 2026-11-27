@@ -302,11 +302,11 @@ test('RSVP state and spaces come from the count', () => {
 
 test('an attendee is a name, a username and staff or not, never an email or id', () => {
   const staff = ser.attendeeView({ user_id: 'u1', created_at: 'x', account: { kind: 'staff', id: 'u1', staff: { id: 'u1', username: 'fox', display_name: 'Fox', email: 'fox@example.com' } } });
-  assert.deepEqual(Object.keys(staff).sort(), ['contact', 'country', 'displayName', 'fursuiter', 'lepak', 'meals', 'pastVolunteer', 'payment', 'personal', 'registration', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
+  assert.deepEqual(Object.keys(staff).sort(), ['checkedInAt', 'contact', 'country', 'displayName', 'fursuiter', 'idCheck', 'idDoorCheckedAt', 'lepak', 'meals', 'pastVolunteer', 'payment', 'personal', 'registration', 'rsvpAt', 'rsvpNumber', 'staff', 'username', 'volunteer', 'volunteered']);
   assert.equal(staff.staff, true);
   const member = ser.attendeeView({ user_id: 'p1', rsvp_number: 7, created_at: 'x', account: { kind: 'public', id: 'p1', username: 'otter', display_name: 'Otter', email: 'otter@example.com' } });
   const noPayment = { method: null, status: 'none', tier: null, items: [], amount: null, currency: null, reference: null, hasProof: false, submittedAt: null, paidAt: null, credit: 0 };
-  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], lepak: false, country: null, volunteer: false, fursuiter: false, volunteered: false, pastVolunteer: false, payment: noPayment, contact: [], registration: [], personal: null, rsvpAt: 'x' });
+  assert.deepEqual(member, { rsvpNumber: 7, username: 'otter', displayName: 'Otter', staff: false, meals: [], lepak: false, country: null, volunteer: false, fursuiter: false, volunteered: false, pastVolunteer: false, payment: noPayment, contact: [], registration: [], personal: null, idCheck: null, checkedInAt: null, idDoorCheckedAt: null, rsvpAt: 'x' });
   assert.equal(JSON.stringify(member).includes('example.com'), false);
   // An attendee's country goes to the editors of a cross-border event only.
   const traveller = { user_id: 'p2', created_at: 'x', account: { kind: 'public', username: 'lynx', display_name: 'Lynx', country: 'MY' } };
@@ -590,9 +590,9 @@ test('the signed-in view of yourself has no secrets', () => {
     id: 'u1', kind: 'staff', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
     is_admin: false, is_editor: true, is_approved: true, avatar_url: 'http://insecure.example/a.png',
   });
-  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, editsEvents: false, country: null, personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null } });
+  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, editsEvents: false, country: null, personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
   const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$', country: 'SG' });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null } });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
 });
 
 test('a public account can never manage events, whatever its row says', () => {

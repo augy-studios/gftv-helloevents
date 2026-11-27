@@ -15,8 +15,8 @@
 // one of our hostnames (TURNSTILE_HOSTNAMES). A token works once and lasts
 // 300 seconds, so the page resets the widget after every try.
 //
-// It adds to the rate limits, the venue sign-up allowances and the name
-// filter; it replaces none of them. They run as before around it.
+// It adds to the rate limits and the name filter; it replaces neither.
+// They run as before around it.
 //
 // Without TURNSTILE_SECRET:
 //   - production (VERCEL_ENV=production): refused, fail closed, with

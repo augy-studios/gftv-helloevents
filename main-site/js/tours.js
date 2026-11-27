@@ -198,7 +198,7 @@ export const TOURS = [
     steps: [
       { el: '#tab-events', i18n: 'tour.manage.tab-events' },
       { el: '#tab-editor', i18n: 'tour.manage.tab-editor' },
-      { el: '#tab-signups', i18n: 'tour.manage.tab-signups' },
+      { el: '#tab-idreviews', i18n: 'tour.manage.tab-idreviews' },
       { el: '#tab-filter', i18n: 'tour.manage.tab-filter' },
       { el: '#tab-reset', i18n: 'tour.manage.tab-reset' },
       { el: '#newEvent', i18n: 'tour.manage.new' },
@@ -324,16 +324,6 @@ export const TOURS = [
   },
 
   // --- Manage: the staff tools --------------------------------------------
-  {
-    id: 'manage.signups',
-    page: 'manage',
-    needs: '#panel-signups',
-    steps: [
-      { el: '#allowanceHere', i18n: 'tour.tools.signups-here' },
-      { el: '#allowanceForm', i18n: 'tour.tools.signups-raise' },
-      { el: '#allowanceList li', i18n: 'tour.tools.signups-list' },
-    ],
-  },
   {
     id: 'manage.filter',
     page: 'manage',

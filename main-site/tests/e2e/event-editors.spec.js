@@ -47,7 +47,7 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await expect(page.locator('#listBox')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('#eventList .item-title')).toHaveText([event.title]);
   await expect(page.locator('#newEvent')).toBeHidden();
-  await expect(page.locator('#tab-signups')).toBeHidden();
+  await expect(page.locator('#tab-filter')).toBeHidden();
   await page.locator('#eventList .item-row .btn').click();
   await expect(page.locator('#f-status')).toBeDisabled();
   await expect(page.locator('#statusStaffOnly')).toBeVisible();

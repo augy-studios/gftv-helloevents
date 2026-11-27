@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="helloid.meta-title">HelloID | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/assets/fonts/emoji/emoji.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="HelloID | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/helloid">
+    <link rel="canonical" href="https://events.globalfurry.tv/helloid">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="tourBtn" aria-label="Show me around" title="Show me around" data-i18n-attr="aria-label:tour.button,title:tour.button" hidden>
+                <span data-icon="help"></span>
+            </button>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="helloid">
+        <p class="back-link"><a class="text-link" id="helloidBack" href="/account#profile"><span data-icon="arrow-left"></span><span data-i18n="helloid.back">Back to my account</span></a></p>
+
+        <section class="glass-card page-card loading-card" id="helloidLoading" aria-busy="true">
+            <span class="delayed"><span class="spinner"></span></span>
+        </section>
+
+        <!-- 1. Which ID: the issuing country (from the connection, can be
+             changed) and the documents it issues (js/helloid-documents.js). -->
+        <section class="glass-card page-card helloid-step" id="stepDocument" hidden aria-labelledby="documentTitle">
+            <p class="helloid-brand"><span data-icon="id"></span> <span data-i18n="idcheck.way.helloid">HelloID</span> <span class="pill pill-beta" data-i18n="idcheck.beta">Beta</span></p>
+            <h1 id="documentTitle" data-i18n="helloid.document-title">Which ID will you use?</h1>
+            <p class="muted" data-i18n="helloid.document-lede">Use your original, valid ID. Photocopies and photos of a screen are not accepted.</p>
+            <div class="helloid-country">
+                <div>
+                    <span class="muted small" data-i18n="helloid.issued-in">Issued in</span>
+                    <strong id="countryName"></strong>
+                </div>
+                <button class="btn btn-small btn-quiet" type="button" id="countryChange" data-i18n="helloid.change">Change</button>
+            </div>
+            <label class="field" id="countryField" hidden>
+                <span data-i18n="helloid.issued-in">Issued in</span>
+                <select id="countrySelect"></select>
+            </label>
+            <ul class="helloid-documents" id="documentList"></ul>
+            <div class="callout ok small" id="helloidAlready" hidden data-i18n="helloid.already">Your ID is already verified with HelloID.</div>
+            <div class="callout warn small" id="helloidWaiting" hidden data-i18n="helloid.waiting">Your last HelloID check is waiting for GFTV's admins. Starting again replaces it.</div>
+        </section>
+
+        <!-- 2. Consent. -->
+        <section class="glass-card page-card helloid-step" id="stepConsent" hidden aria-labelledby="consentTitle">
+            <h1 id="consentTitle" data-i18n="helloid.consent-title">Before you start</h1>
+            <ul class="helloid-points">
+                <li data-i18n="helloid.consent-photos">You take a photo of your ID, and a short video check of your face: turn your head when asked, while the screen flashes colours. Find good light and hold your phone at arm's length.</li>
+                <li data-i18n="helloid.consent-checks">GFTV's server checks the ID, that your face is live and matches the ID, and your device and connection. Nothing is sent to anyone else.</li>
+                <li data-i18n="helloid.consent-keep">The photos are deleted as soon as the check is decided. If it passes, GFTV keeps a face template (numbers, not a picture) and a code made from your document's number, only so the same person cannot verify another account. They are deleted with your account.</li>
+                <li data-i18n="helloid.consent-review">If the checks are not sure, GFTV's admins look at the photos to decide.</li>
+            </ul>
+            <label class="check u-mt-1"><input type="checkbox" id="consentBox"><span data-i18n="helloid.consent-agree">I agree to HelloID checking my ID this way</span></label>
+            <div class="actions inline"><button class="btn btn-primary" type="button" id="consentNext" disabled data-i18n="helloid.next">Continue</button></div>
+        </section>
+
+        <!-- 3. The ID's photo (front, then back for a card). -->
+        <section class="glass-card page-card helloid-step" id="stepCapture" hidden aria-labelledby="captureTitle">
+            <h1 id="captureTitle"></h1>
+            <p class="muted" id="captureHint"></p>
+            <div class="helloid-camera document">
+                <video id="docVideo" playsinline muted autoplay></video>
+                <img id="docPreview" alt="" hidden>
+                <div class="helloid-frame" aria-hidden="true"></div>
+            </div>
+            <div class="actions inline">
+                <button class="btn btn-primary" type="button" id="docShoot"><span data-icon="camera"></span><span data-i18n="helloid.take-photo">Take the photo</span></button>
+                <button class="btn" type="button" id="docRetake" hidden><span data-icon="refresh"></span><span data-i18n="helloid.retake">Take it again</span></button>
+                <button class="btn btn-primary" type="button" id="docUse" hidden data-i18n="helloid.use-photo">Use this photo</button>
+                <label class="btn btn-quiet" id="docFileLabel" hidden><span data-icon="image"></span><span data-i18n="helloid.camera-fallback">Use the camera app instead</span><input type="file" id="docFile" accept="image/*" capture="environment" hidden></label>
+            </div>
+            <div class="callout danger" id="captureError" role="alert"></div>
+        </section>
+
+        <!-- 4. The legal name and date of birth it is for. -->
+        <section class="glass-card page-card helloid-step" id="stepDetails" hidden aria-labelledby="detailsTitle">
+            <h1 id="detailsTitle" data-i18n="helloid.details-title">Check your details</h1>
+            <p class="muted" id="detailsHint"></p>
+            <label class="field">
+                <span data-i18n="field.legal-name">Legal name</span>
+                <input id="detailsName" type="text" autocomplete="name" maxlength="100">
+            </label>
+            <label class="field">
+                <span data-i18n="field.date-of-birth">Date of birth</span>
+                <input id="detailsBirth" type="date" min="1900-01-01">
+            </label>
+            <p class="field-hint" data-i18n="helloid.details-lock">Once your ID is verified, these become your locked legal name and date of birth.</p>
+            <div class="actions inline"><button class="btn btn-primary" type="button" id="detailsNext" data-i18n="helloid.next">Continue</button></div>
+            <div class="callout danger" id="detailsError" role="alert"></div>
+        </section>
+
+        <!-- 5. The live face check: turns, then colour flashes. -->
+        <section class="glass-card page-card helloid-step" id="stepLive" hidden aria-labelledby="liveTitle">
+            <h1 id="liveTitle" data-i18n="helloid.live-title">Now your face</h1>
+            <p class="muted" data-i18n="helloid.live-lede">Fit your face in the oval and follow the prompts. Keep the phone still: move your head, not the phone.</p>
+            <div class="helloid-camera face">
+                <video id="faceVideo" playsinline muted autoplay></video>
+                <div class="helloid-oval" aria-hidden="true"></div>
+                <p class="helloid-prompt" id="livePrompt" aria-live="assertive"></p>
+            </div>
+            <div class="actions inline"><button class="btn btn-primary" type="button" id="liveStart" data-i18n="helloid.live-start">Start</button></div>
+            <div class="callout danger" id="liveError" role="alert"></div>
+        </section>
+        <div class="helloid-flash" id="flash" hidden></div>
+
+        <!-- 6. Sending, and the result. -->
+        <section class="glass-card page-card helloid-step" id="stepResult" hidden aria-labelledby="resultTitle" aria-live="polite">
+            <h1 id="resultTitle"></h1>
+            <p id="resultText"></p>
+            <div class="actions inline">
+                <button class="btn btn-primary" type="button" id="resultRetry" hidden><span data-icon="refresh"></span><span data-i18n="helloid.retry">Try sending again</span></button>
+                <a class="btn btn-primary" id="resultContinue" href="/account#profile" hidden data-i18n="helloid.continue">Continue</a>
+                <button class="btn" type="button" id="resultAgain" hidden data-i18n="helloid.again">Start again</button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/helloid.js"></script>
+</body>
+
+</html>

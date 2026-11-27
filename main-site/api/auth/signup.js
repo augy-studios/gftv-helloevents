@@ -5,10 +5,10 @@
 // offers it). Answers only ok: the page moves on to the account page, which
 // asks /api/auth/session who is signed in.
 //
-// Protected by Turnstile (action "signup", turnstile.js) and rate
-// limits on the connection and the email. The connection limit is 5 an hour,
-// or what a staff member set for it in /manage ("venue mode", a sign-up
-// allowance for one connection for a few hours; migrations/003).
+// Protected by Turnstile (action "signup", turnstile.js) and a rate limit
+// on the email (5 tries an hour). There is no limit per connection
+// (migrations/027): everyone at a meet or con on the venue's Wi-Fi shares
+// one address, and can all sign up at once.
 //
 // Usernames and emails already used by a staff account on gftv.asia are
 // refused, and so are usernames and display names that contain a listed
@@ -22,7 +22,7 @@
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';
 import { hashPassword, sha256 } from '../_lib/crypto.js';
-import { limited, audit, signupAllowance } from '../_lib/guards.js';
+import { limited, audit } from '../_lib/guards.js';
 import { refusedName } from '../_lib/name-filter.js';
 import { refusedForTurnstile } from '../_lib/turnstile.js';
 import { createSession } from '../_lib/session.js';
@@ -39,18 +39,12 @@ export default route('auth/signup', async (request, response) => {
   if (!body) {
     return;
   }
-  // A staff member's sign-up allowance raises the connection's limit.
-  const allowance = await signupAllowance(request);
   let typedEmail = '';
   if (body.email !== null && body.email !== undefined) {
     typedEmail = body.email;
   }
   const subjects = [`email:${sha256(String(typedEmail).trim().toLowerCase())}`];
-  let limitOptions = {};
-  if (allowance) {
-    limitOptions = { max: allowance.max_per_hour };
-  }
-  if (await limited(request, response, 'signup', subjects, limitOptions)) {
+  if (await limited(request, response, 'signup', subjects, { perConnection: false })) {
     return;
   }
   if (await refusedForTurnstile(request, response, body, 'signup')) {
@@ -104,10 +98,6 @@ export default route('auth/signup', async (request, response) => {
 
   const account = await loadAccount(data.id);
   await createSession(request, response, account, 'password');
-  let auditDetails = {};
-  if (allowance) {
-    auditDetails = { allowance: allowance.id };
-  }
-  await audit(request, { action: 'account.created', actorId: account.id, details: auditDetails });
+  await audit(request, { action: 'account.created', actorId: account.id });
   ok(response);
 });

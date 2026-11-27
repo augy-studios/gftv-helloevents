@@ -13,6 +13,8 @@ import { currentSession } from '../_lib/session.js';
 import { canEditEvent } from '../_lib/event-editors.js';
 import { releasedEventBySlug, anyEventBySlug, attendance, withMealCounts, withVolunteerSource, volunteerStanding, contactSuggestion, eventAsksContact, DETAIL_COLUMNS } from '../_lib/events.js';
 import { publicEventDetail } from '../_lib/serialize.js';
+import { attendeeCode } from '../_lib/checkin.js';
+import { entryForViewer } from '../_lib/entry-codes.js';
 import { withGallery } from '../_lib/gallery.js';
 import { withDescriptionPictures } from '../_lib/description-pictures.js';
 
@@ -26,6 +28,37 @@ function countryOfSession(session) {
 
 // Finds the event (any status for an editor, released ones for everyone
 // else) and answers with what this viewer may see of it.
+// The ID check providers the signed-in person passed with (migrations/027).
+function idVerifiedOfSession(session) {
+  if (!session) {
+    return [];
+  }
+  return session.user.idVerified;
+}
+
+function helloidPendingOfSession(session) {
+  if (!session) {
+    return false;
+  }
+  return session.user.helloidPending;
+}
+
+// The organisers' entry QR code for them, while going (migrations/027).
+async function entryOf(row, session, mine) {
+  if (!session || !mine.going) {
+    return null;
+  }
+  return entryForViewer(row, session.user.id, mine.payment);
+}
+
+// Their check-in code for this event, while going (migrations/027).
+function checkinCodeOf(row, session, mine) {
+  if (!session || !mine.going) {
+    return null;
+  }
+  return attendeeCode(row.id, session.user.id, mine.rsvpNumber);
+}
+
 // The signed-in person's personal details (migrations/024), or none.
 function personalOfSession(session) {
   if (!session) {
@@ -62,7 +95,7 @@ export default route('events/detail', async (request, response) => {
   await withVolunteerSource(row);
   await withGallery(row);
   await withDescriptionPictures(row);
-  let mine = { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {} };
+  let mine = { going: false, meals: [], volunteer: false, fursuiter: false, rsvpNumber: null, payment: null, lepak: false, contact: {}, registration: {}, checkedInAt: null };
   let standing = { volunteered: false, discount: false };
   let contactSuggest = {};
   if (session) {
@@ -89,6 +122,11 @@ export default route('events/detail', async (request, response) => {
     contactSuggest,
     registration: mine.registration,
     personal: personalOfSession(session),
+    idVerified: idVerifiedOfSession(session),
+    helloidPending: helloidPendingOfSession(session),
+    checkinCode: checkinCodeOf(row, session, mine),
+    checkedInAt: mine.checkedInAt,
+    entry: await entryOf(row, session, mine),
   });
   // Only an editor ever sees an unreleased event, and is told so: a draft,
   // or one whose release time is still to come.

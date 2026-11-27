@@ -24,7 +24,7 @@ async function openEditor(page) {
 test('an editor sets up a registration form; a member registers, then changes an answer from the card', async ({ page, context }) => {
   await openEditor(page);
   // The form is a paid event's own tab, next to Price and RSVP.
-  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Questions', 'Meals', 'Timetable', 'Attendees and notes'], { useInnerText: true });
+  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Questions', 'Meals', 'Timetable', 'Attendees and notes', 'ID verification', 'Check-in and entry'], { useInnerText: true });
   await openSection(page, 'Questions');
   await expect(page.locator('#registrationFieldsBox')).toBeHidden();
   await page.locator('#f-registrationEnabled').check();

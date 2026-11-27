@@ -68,7 +68,7 @@
         <div class="tabs" role="tablist" id="manageTabs" aria-label="Manage" data-i18n-attr="aria-label:manage.tabs-label" hidden>
             <button class="tab" type="button" role="tab" id="tab-events" data-tab="events" aria-controls="panel-events" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="manage.tab.events">Event list</span></button>
             <button class="tab" type="button" role="tab" id="tab-editor" data-tab="editor" aria-controls="panel-editor" aria-selected="false" tabindex="-1" hidden><span data-icon="edit"></span><span data-i18n="manage.tab.editor">Manage event</span></button>
-            <button class="tab" type="button" role="tab" id="tab-signups" data-tab="signups" aria-controls="panel-signups" aria-selected="false" tabindex="-1" hidden><span data-icon="users"></span><span data-i18n="admin.allowance-title">Venue sign-ups</span></button>
+            <button class="tab" type="button" role="tab" id="tab-idreviews" data-tab="idreviews" aria-controls="panel-idreviews" aria-selected="false" tabindex="-1" hidden><span data-icon="id"></span><span data-i18n="admin.idreviews-title">ID reviews</span><span class="list-count" id="idReviewCount"></span></button>
             <button class="tab" type="button" role="tab" id="tab-filter" data-tab="filter" aria-controls="panel-filter" aria-selected="false" tabindex="-1" hidden><span data-icon="alert"></span><span data-i18n="admin.filter-title">Name filter</span></button>
             <button class="tab" type="button" role="tab" id="tab-reset" data-tab="reset" aria-controls="panel-reset" aria-selected="false" tabindex="-1" hidden><span data-icon="key"></span><span data-i18n="manage.tab.reset">Password resets</span></button>
         </div>
@@ -121,6 +121,8 @@
                     <button class="tab" type="button" role="tab" id="etab-meals" data-tab="meals" aria-controls="epanel-meals" aria-selected="false" tabindex="-1"><span data-icon="clock"></span><span data-i18n="manage.etab.meals">Meals</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-timetable" data-tab="timetable" aria-controls="epanel-timetable" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="manage.etab.timetable">Timetable</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-people" data-tab="people" aria-controls="epanel-people" aria-selected="false" tabindex="-1"><span data-icon="users"></span><span data-i18n="manage.etab.people">Attendees and notes</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-idcheck" data-tab="idcheck" aria-controls="epanel-idcheck" aria-selected="false" tabindex="-1"><span data-icon="id"></span><span data-i18n="manage.etab.idcheck">ID verification</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
+                    <button class="tab" type="button" role="tab" id="etab-entry" data-tab="entry" aria-controls="epanel-entry" aria-selected="false" tabindex="-1"><span data-icon="qr"></span><span data-i18n="manage.etab.entry">Check-in and entry</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                     <button class="tab" type="button" role="tab" id="etab-editors" data-tab="editors" aria-controls="epanel-editors" aria-selected="false" tabindex="-1" hidden><span data-icon="user"></span><span data-i18n="manage.etab.editors">Organisers</span><span class="tab-mark" hidden><span aria-hidden="true">•</span><span class="visually-hidden" data-i18n="manage.etab-problem">(a field to check)</span></span></button>
                 </div>
 
@@ -706,6 +708,97 @@
                     </section>
                 </div>
 
+                <!-- ID verification (migrations/027, js/manage-idcheck.js): the ID
+                     checks the event accepts, a check at the door, and who
+                     has verified and who has not. -->
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-idcheck" aria-labelledby="etab-idcheck" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.idcheck">Require an ID check</legend>
+                        <p class="muted small" data-i18n="manage.idcheck-lede">Tick the ID checks this event accepts. People must pass one of them before they can RSVP; someone already going keeps their place. Each person checks once, on their account page, and it counts for every event that accepts that check. Leave all unticked for no ID check.</p>
+                        <div class="id-ways" id="idWays">
+                            <label class="check id-way" data-way="helloid">
+                                <input type="checkbox" id="f-idway-helloid" value="helloid" aria-describedby="idWayHelloidHint">
+                                <span><strong data-i18n="idcheck.way.helloid">HelloID</strong> <span class="pill pill-beta" data-i18n="idcheck.beta">Beta</span> <span class="pill pill-ok" data-i18n="idcheck.free">Free</span></span>
+                            </label>
+                            <p class="field-hint" id="idWayHelloidHint" data-i18n="manage.hint.idway-helloid">GFTV's own check, and the only free one. A photo of their ID, a live face check (turning their head while the screen flashes colours) matched to the ID, and the device and connection. A passport fills in the name by itself. Checks it cannot clear go to GFTV's admins.</p>
+                            <label class="check id-way" data-way="didit">
+                                <input type="checkbox" id="f-idway-didit" value="didit" aria-describedby="idWayDiditHint">
+                                <span><strong>Didit</strong> <span class="pill pill-warn" data-i18n="idcheck.paid">Paid</span></span>
+                            </label>
+                            <p class="field-hint" id="idWayDiditHint" data-i18n="manage.hint.idway-didit">An outside provider. Each check costs GFTV money, so pick it only when the event needs it, such as reading a passport's chip.</p>
+                            <label class="check id-way" data-way="veriff">
+                                <input type="checkbox" id="f-idway-veriff" value="veriff" aria-describedby="idWayVeriffHint">
+                                <span><strong>Veriff</strong> <span class="pill pill-warn" data-i18n="idcheck.paid">Paid</span></span>
+                            </label>
+                            <p class="field-hint" id="idWayVeriffHint" data-i18n="manage.hint.idway-veriff">An outside provider. Each check costs GFTV money.</p>
+                        </div>
+                        <p class="callout warn small" id="idWaysPaidNote" hidden data-i18n="manage.idcheck-paid-note">Didit and Veriff are paid: every check costs GFTV. HelloID is the only free one.</p>
+                        <label class="check u-mt-1">
+                            <input type="checkbox" id="f-idCheckDoor" name="idCheckDoor" aria-describedby="idCheckDoorHint">
+                            <span data-i18n="manage.field.idCheckDoor">Check each person's ID at the door too</span>
+                        </label>
+                        <p class="field-hint" id="idCheckDoorHint" data-i18n="manage.hint.idCheckDoor">The check-in page shows their legal name and date of birth, and asks you to tick that you checked their ID before it checks them in. It counts for this event only.</p>
+                    </fieldset>
+                    <section class="id-lists" id="idListsBox" hidden aria-labelledby="idListsTitle">
+                        <h3 class="section-label" id="idListsTitle" data-i18n="manage.idcheck-lists">Who has verified</h3>
+                        <h4 class="small" id="idVerifiedTitle"></h4>
+                        <ul class="item-list" id="idVerifiedList"></ul>
+                        <h4 class="small u-mt-1" id="idPendingTitle"></h4>
+                        <ul class="item-list" id="idPendingList"></ul>
+                    </section>
+                </div>
+
+                <!-- Check-in and entry (migrations/027): the check-in page, and the
+                     organisers' own entry QR codes (js/manage-entry.js). -->
+                <div class="tab-panel editor-panel" role="tabpanel" id="epanel-entry" aria-labelledby="etab-entry" hidden>
+                    <fieldset>
+                        <legend data-i18n="manage.section.checkin">Check-in</legend>
+                        <p class="muted small" data-i18n="manage.checkin-lede">At the door, open the check-in page on a phone or tablet: scan each person's QR code from their event page, or type their RSVP ID or username. Once it has opened it keeps working with no connection, and sends the check-ins when the connection is back. Self check-in shows a QR code people scan to check themselves in.</p>
+                        <a class="btn" id="checkinOpen" target="_blank" rel="noopener" hidden><span data-icon="qr"></span><span data-i18n="manage.checkin-open">Open the check-in page</span></a>
+                    </fieldset>
+                    <fieldset>
+                        <legend data-i18n="manage.section.entry">Entry QR codes</legend>
+                        <p class="muted small" data-i18n="manage.entry-lede">Your own QR codes for getting in, such as a cinema's tickets or a venue's pass. People going see theirs on the event page, saved on their phone in case the connection drops.</p>
+                        <div class="form-grid">
+                            <label class="field">
+                                <span data-i18n="manage.field.entryQrMode">Entry QR codes</span>
+                                <select id="f-entryQrMode" name="entryQrMode">
+                                    <option value="off" data-i18n="manage.entry-mode.off">None</option>
+                                    <option value="shared" data-i18n="manage.entry-mode.shared">One code for everyone</option>
+                                    <option value="each" data-i18n="manage.entry-mode.each">One code per person</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.entryQrAudience">Who gets it</span>
+                                <select id="f-entryQrAudience" name="entryQrAudience">
+                                    <option value="all" data-i18n="manage.entry-audience.all">Everyone going</option>
+                                    <option value="paid" data-i18n="manage.entry-audience.paid">Only people whose payment is confirmed</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span data-i18n="manage.field.entryQrShow">When it shows</span>
+                                <select id="f-entryQrShow" name="entryQrShow">
+                                    <option value="always" data-i18n="manage.entry-show.always">As soon as they get it</option>
+                                    <option value="before" data-i18n="manage.entry-show.before">From some hours before the start</option>
+                                    <option value="checked_in" data-i18n="manage.entry-show.checked_in">Once they are checked in</option>
+                                </select>
+                            </label>
+                            <label class="field" id="entryQrHoursField">
+                                <span data-i18n="manage.field.entryQrHours">Hours before the start</span>
+                                <input id="f-entryQrHours" name="entryQrHours" type="number" min="1" max="168" step="1" inputmode="numeric" placeholder="2">
+                            </label>
+                        </div>
+                        <div id="entryCodesBox" hidden>
+                            <p class="field-hint" id="entryCodesHint"></p>
+                            <ul class="entry-codes" id="entryCodeList"></ul>
+                            <label class="btn u-mt-1" id="entryCodeAddLabel"><span data-icon="plus"></span><span id="entryCodeAddText"></span><input type="file" id="entryCodeFile" accept="image/*" multiple hidden></label>
+                            <p class="field-status" id="entryCodeStatus" role="status"></p>
+                            <div class="callout danger" id="entryCodeError" role="alert"></div>
+                        </div>
+                        <p class="muted small" id="entryCodesSaveFirst" hidden data-i18n="manage.entry-save-first">Save the event first, then add the codes.</p>
+                    </fieldset>
+                </div>
+
                 <!-- Organisers: the event's own editors (migrations/018) and its
                      organisers' Telegram chats (migrations/026),
                      js/manage-editors.js. Admins only. Not part of the form's
@@ -755,40 +848,13 @@
             </form>
         </div>
 
-        <div class="tab-panel" role="tabpanel" id="panel-signups" aria-labelledby="tab-signups" hidden>
-            <section class="glass-card page-card admin-tools" id="allowanceBox" aria-labelledby="allowanceTitle">
-                <h2 id="allowanceTitle" data-i18n="admin.allowance-title">Venue sign-ups</h2>
-                <p class="muted small" data-i18n="admin.allowance-lede">New accounts are limited to 5 an hour from one connection. At a meet or con where everyone shares the venue's Wi-Fi, open this page on that Wi-Fi and raise the limit for that connection for a few hours. It ends by itself.</p>
-                <p class="small" id="allowanceHere"></p>
-                <form id="allowanceForm" novalidate>
-                    <div class="form-grid">
-                        <label class="field">
-                            <span data-i18n="admin.allowance-hours">For how long</span>
-                            <select id="allowanceHours">
-                                <option value="2" data-i18n="admin.hours-2">2 hours</option>
-                                <option value="4" data-i18n="admin.hours-4">4 hours</option>
-                                <option value="8" selected data-i18n="admin.hours-8">8 hours</option>
-                                <option value="12" data-i18n="admin.hours-12">12 hours</option>
-                            </select>
-                        </label>
-                        <label class="field">
-                            <span data-i18n="admin.allowance-rate">Sign-ups an hour</span>
-                            <select id="allowanceRate">
-                                <option value="50">50</option>
-                                <option value="100" selected>100</option>
-                                <option value="200">200</option>
-                                <option value="500">500</option>
-                            </select>
-                        </label>
-                        <label class="field span-2">
-                            <span data-i18n="admin.allowance-label">Where (optional)</span>
-                            <input id="allowanceLabel" type="text" maxlength="80">
-                        </label>
-                    </div>
-                    <div class="actions inline"><button class="btn btn-primary" type="submit" id="allowanceSubmit"><span data-icon="users"></span><span data-i18n="admin.allowance-grant">Raise the limit on this connection</span></button></div>
-                </form>
-                <ul class="item-list u-mt-1" id="allowanceList"></ul>
-                <div class="callout danger" id="allowanceError" role="alert"></div>
+        <div class="tab-panel" role="tabpanel" id="panel-idreviews" aria-labelledby="tab-idreviews" hidden>
+            <section class="glass-card page-card admin-tools" id="idReviewsBox" aria-labelledby="idReviewsTitle">
+                <h2 id="idReviewsTitle" data-i18n="admin.idreviews-title">ID reviews</h2>
+                <p class="muted small" data-i18n="admin.idreviews-lede">HelloID checks it could not clear on its own. Compare the ID with the selfie and the details, then approve or decline (with a reason they will see). The photos are deleted once you decide; an approved check keeps only a face template, so the same person cannot verify another account.</p>
+                <ul class="id-reviews" id="idReviewList"></ul>
+                <p class="muted" id="idReviewsNone" hidden data-i18n="admin.idreviews-none">Nothing waiting.</p>
+                <div class="callout danger" id="idReviewError" role="alert"></div>
             </section>
         </div>
 
@@ -1031,7 +1097,7 @@
         <nav>
             <a href="/" data-i18n="footer.events">All events</a>
             <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
-            <a href="https://policy.globalfurry.tv/legal/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Privacy Policy</a>
+            <a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a>
         </nav>
         <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
         <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>

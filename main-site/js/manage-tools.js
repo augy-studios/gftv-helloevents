@@ -1,6 +1,7 @@
-// The staff tools in their own tabs on /manage (api/manage/admin.js): venue
-// sign-up allowances for editors and admins; the name filter, flagged names
-// and member password reset codes for admins. The server checks the role on
+// The staff tools in their own tabs on /manage (api/manage/admin.js), for
+// admins: HelloID reviews (js/manage-idreviews.js), the name filter, flagged
+// names, member password reset codes and corrections to locked personal
+// details. The server checks the role on
 // every request; hiding sections here is only tidiness.
 
 import { t as translate, onChange } from '../assets/i18n/i18n.js';
@@ -8,45 +9,10 @@ import { api, post } from './api.js';
 import { createElement, withBusy, formatDate, copyText } from './ui.js';
 import { iconNode } from './icons.js';
 import { fillCountrySelect } from './choices.js';
+import { startIdReviews, relabelIdReviews } from './manage-idreviews.js';
 
 const byId = (id) => document.getElementById(id);
 let state = null;
-let isAdmin = false;
-
-// One venue allowance: its name (marked when it is for this connection), the
-// rate, until when and who set it, and an End button.
-function allowanceRow(allowance) {
-  let name = allowance.label;
-  if (!name) {
-    name = translate('admin.allowance-unnamed');
-  }
-  let thisConnection = '';
-  if (allowance.here) {
-    thisConnection = ` (${translate('admin.allowance-this')})`;
-  }
-  let grantedBy = allowance.by;
-  if (!grantedBy) {
-    grantedBy = '?';
-  }
-  const detail = translate('admin.allowance-detail', { rate: allowance.perHour, until: formatDate(allowance.expiresAt), by: grantedBy });
-  return createElement('li', { class: 'item-row' }, [
-    iconNode('users'),
-    createElement('span', { class: 'item-main' }, [
-      createElement('span', { text: `${name}${thisConnection}` }),
-      createElement('span', { class: 'muted small', text: detail }),
-    ]),
-    createElement('button', { class: 'btn btn-small btn-quiet', type: 'button', text: translate('admin.allowance-end'), onclick: () => revoke(allowance.id) }),
-  ]);
-}
-
-function renderAllowances() {
-  let hereKey = 'admin.allowance-here-off';
-  if (state.here) {
-    hereKey = 'admin.allowance-here-on';
-  }
-  byId('allowanceHere').textContent = translate(hereKey);
-  byId('allowanceList').replaceChildren(...state.allowances.map((allowance) => allowanceRow(allowance)));
-}
 
 // One word an admin added to the name filter, with its Remove button.
 function nameFilterRow(nameFilter) {
@@ -89,18 +55,7 @@ function renderFilters() {
 }
 
 function render() {
-  renderAllowances();
-  if (isAdmin) {
-    renderFilters();
-  }
-}
-
-async function revoke(id) {
-  await withBusy(null, byId('allowanceError'), async () => {
-    const data = await post('/api/manage/admin', { action: 'allowance-revoke', id });
-    state = { ...state, ...data };
-    renderAllowances();
-  });
+  renderFilters();
 }
 
 async function removeFilter(id) {
@@ -111,37 +66,23 @@ async function removeFilter(id) {
   });
 }
 
-// Loads the tools' state and shows the tabs this role may use: venue
-// allowances for every editor, the name filter and reset codes for admins
-// only (the page then calls its tabs' refresh). Then wires the three forms:
-// grant an allowance, add a filter word, and make a one-time reset code
-// (shown with a Copy button).
+// For an admin, loads the tools' state and shows their tabs (the page then
+// calls its tabs' refresh). Then wires the forms: add a filter word, make a
+// one-time reset code (shown with a Copy button), and correct a locked
+// personal detail. Other editors have no staff tools.
 export async function startTools(currentUser) {
-  isAdmin = currentUser.role === 'admin';
+  if (currentUser.role !== 'admin') {
+    return;
+  }
   try {
     state = await api('/api/manage/admin');
   } catch {
     return; // the events still work; the tools' tabs stay hidden
   }
-  byId('tab-signups').hidden = false;
-  byId('tab-filter').hidden = !isAdmin;
-  byId('tab-reset').hidden = !isAdmin;
+  byId('tab-filter').hidden = false;
+  byId('tab-reset').hidden = false;
   render();
-
-  byId('allowanceForm').addEventListener('submit', (event) => {
-    event.preventDefault();
-    withBusy(byId('allowanceSubmit'), byId('allowanceError'), async () => {
-      const data = await post('/api/manage/admin', {
-        action: 'allowance-grant',
-        hours: Number(byId('allowanceHours').value),
-        perHour: Number(byId('allowanceRate').value),
-        label: byId('allowanceLabel').value,
-      });
-      state = { ...state, ...data };
-      byId('allowanceLabel').value = '';
-      renderAllowances();
-    });
-  });
+  await startIdReviews();
 
   byId('filterForm').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -195,5 +136,8 @@ export async function startTools(currentUser) {
     });
   });
 
-  onChange(render);
+  onChange(() => {
+    render();
+    relabelIdReviews();
+  });
 }

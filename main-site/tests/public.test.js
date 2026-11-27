@@ -130,7 +130,7 @@ test('signing up makes a public account with a bcrypt cost 12 password, and sign
   const r = await b.call(signup, { method: 'POST', body: join({ username: 'Otter', email: ' Otter@Example.com ' }) });
   assert.equal(r.status, 200);
   // The answer is only ok (help desk #18); the session says who it is.
-  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null } });
+  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
   assert.deepEqual(leaks(r.json), []);
   const row = db.table('gftvevents_accounts')[0];
   assert.equal(row.kind, 'public');
@@ -156,9 +156,16 @@ test('sign-up refuses taken, reserved and staff names and addresses, and needs t
   assert.equal((await browserFor().call(signup, { method: 'POST', body: join({ username: 'newone', email: 'c@example.com', agree: false }) })).json.error, 'terms_required');
 });
 
-test('sign-up is rate limited per connection', async () => {
-  for (let i = 0; i < 5; i += 1) await browser().call(signup, { method: 'POST', body: join({ username: `u${i}xx`, email: `${i}@example.com` }) });
-  const sixth = await browser().call(signup, { method: 'POST', body: join({ username: 'u9xx', email: '9@example.com' }) });
+test('sign-up has no limit per connection, so a venue on one Wi-Fi can all sign up (migrations/027)', async () => {
+  for (let i = 0; i < 12; i += 1) {
+    const joined = await browser().call(signup, { method: 'POST', body: join({ username: `u${i}xx`, email: `${i}@example.com` }) });
+    assert.equal(joined.status, 200, `sign-up ${i + 1} from one connection`);
+  }
+});
+
+test('sign-up is still rate limited per email address', async () => {
+  for (let i = 0; i < 5; i += 1) await browser().call(signup, { method: 'POST', body: join({ username: `e${i}xx`, email: 'same@example.com' }) });
+  const sixth = await browser().call(signup, { method: 'POST', body: join({ username: 'e9xx', email: 'same@example.com' }) });
   assert.equal(sixth.status, 429);
 });
 

@@ -1,7 +1,7 @@
 // Tabs: a role="tablist" of buttons, each with aria-controls naming its
 // role="tabpanel". One panel shows at a time; the arrow keys, Home and End
 // move between the tabs that are not hidden, and the open tab is kept in
-// the address (#signups) so a reload or a shared link opens it again.
+// the address (#filter) so a reload or a shared link opens it again.
 //
 // A tab is hidden with its button's hidden attribute (a section this role
 // may not use); the list itself hides while only one tab is left.
@@ -91,7 +91,7 @@ export function startTabs(tablist, { onSelect, useHash = true } = {}) {
     }
   }
 
-  // A link to another tab on the same page (/manage#signups) opens it.
+  // A link to another tab on the same page (/manage#filter) opens it.
   if (useHash) {
     window.addEventListener('hashchange', () => {
       const tab = byName(location.hash.slice(1));

@@ -15,6 +15,7 @@ import { drawContactForm } from '../contact-form.js';
 import { drawRegistrationForm, registrationErrorText } from '../registration-form.js';
 import { renderRegistrationCard } from '../registration-card.js';
 import { askedForPicks } from '../registration-fields.js';
+import { renderPass, showOfflinePass, beaconCodeFromAddress, checkInFromBeacon } from '../event-pass.js';
 
 const byId = (id) => document.getElementById(id);
 const slug = decodeURIComponent(location.pathname.replace(/^\/e\//, '').replace(/\/+$/, '')).toLowerCase();
@@ -483,7 +484,14 @@ function renderRsvp() {
   }
   byId('rsvpCountry').hidden = !needsCountry;
   byId('rsvpCountryLink').href = countryPageHref();
-  if (needsCountry) {
+  // An event requiring an ID check (migrations/027) needs one passed first;
+  // someone going keeps their place.
+  let needsIdCheck = false;
+  if (event.viewer.needsIdCheck === true && !going && canJoin && !needsCountry) {
+    needsIdCheck = true;
+  }
+  renderIdCheckNotice(needsIdCheck);
+  if (needsCountry || needsIdCheck) {
     byId('rsvpMeals').hidden = true;
     byId('rsvpVolunteerRow').hidden = true;
     byId('rsvpFursuiterRow').hidden = true;
@@ -492,7 +500,7 @@ function renderRsvp() {
 
   const rsvpButton = byId('rsvpBtn');
   let rsvpButtonHidden = false;
-  if (!signedIn || (!going && !canJoin) || needsCountry) {
+  if (!signedIn || (!going && !canJoin) || needsCountry || needsIdCheck) {
     rsvpButtonHidden = true;
   }
   rsvpButton.hidden = rsvpButtonHidden;
@@ -790,6 +798,31 @@ function renderTiers() {
 }
 
 // Where to set a country of origin, coming back here afterwards.
+// The ID check notice: which ways the event accepts, and where to verify
+// (HelloID straight away when it is one of them, else the account page).
+function renderIdCheckNotice(shown) {
+  byId('rsvpIdCheck').hidden = !shown;
+  if (!shown) {
+    return;
+  }
+  const names = event.idCheckProviders.map((way) => {
+    if (way === 'helloid') {
+      return translate('idcheck.way.helloid');
+    }
+    if (way === 'didit') {
+      return 'Didit';
+    }
+    return 'Veriff';
+  });
+  byId('rsvpIdCheckText').textContent = translate('event.idcheck-needed', { ways: names.join(', ') });
+  const next = encodeURIComponent(location.pathname);
+  let href = `/account?next=${next}#profile`;
+  if (event.idCheckProviders.includes('helloid')) {
+    href = `/helloid?next=${next}`;
+  }
+  byId('rsvpIdCheckLink').href = href;
+}
+
 function countryPageHref() {
   return `/account?next=${encodeURIComponent(location.pathname)}#profile`;
 }
@@ -887,6 +920,7 @@ function render() {
   byId('previewNote').hidden = !preview;
 
   renderRsvp();
+  renderPass(event);
 }
 
 // The timetable is drawn on its own, only when it changes (or the reader's
@@ -918,8 +952,20 @@ async function load() {
     render();
     drawTimetable();
     startTours('event');
+    // Opened from the organisers' self check-in QR code (migrations/027).
+    const beaconCode = beaconCodeFromAddress();
+    if (beaconCode) {
+      checkInFromBeacon(event, beaconCode, (checkedInAt) => {
+        event.viewer.checkedInAt = checkedInAt;
+        renderPass(event);
+      });
+    }
   } catch (error) {
     byId('eventLoading').hidden = true;
+    // No connection: the pass saved on this device, when there is one.
+    if (error.code === 'offline' && showOfflinePass(slug)) {
+      return;
+    }
     if (error.code === 'not_found') {
       byId('eventMissing').hidden = false;
     } else {

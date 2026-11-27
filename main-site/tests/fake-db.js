@@ -14,6 +14,7 @@ const DEFAULTS = {
     email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true, reminder_hours: [24],
     notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null, country: null,
     legal_name: null, date_of_birth: null, emergency_name: null, emergency_phone: null,
+    id_verified_providers: [], id_verified_at: null, helloid_pending: false,
   }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
   gftvevents_sessions: () => ({ last_seen_at: now(), ip_hash: null }),
@@ -37,11 +38,14 @@ const DEFAULTS = {
     lepak_enabled: false, lepak_limit: null, lepak_label: null, contact_fields: [], contact_rule: 'any',
     registration_enabled: false, registration_fields: null,
     cover_source_image_id: null, cover_crop: null,
+    id_check_providers: [], id_check_door: false, self_checkin_on: false,
+    entry_qr_mode: 'off', entry_qr_audience: 'all', entry_qr_show: 'always', entry_qr_hours: null,
   }),
   gftvevents_attendees: () => ({
     meals: [], reminders_sent: [], volunteer: false, fursuiter: false, lepak: false, contact: {}, registration: {}, payment_credit: null,
     payment_method: null, payment_status: 'none', payment_tier: null, payment_items: null, payment_amount: null, payment_currency: null,
     payment_reference: null, payment_proof_path: null, payment_submitted_at: null, paid_at: null, paid_by: null, organisers_told_at: null,
+    checked_in_at: null, checked_in_by: null, checked_in_how: null, id_door_checked_at: null, id_door_checked_by: null,
   }),
   gftvevents_volunteers: () => ({ confirmed_by: null }),
   gftvevents_event_editors: () => ({ added_by: null, created_at: now() }),
@@ -50,7 +54,9 @@ const DEFAULTS = {
   gftvevents_stickers: () => ({ still_path: null, still_from_frame: false, emoji: null, position: 0, created_at: now() }),
   gftvevents_audit_logs: () => ({ details: {}, actor_id: null, event_id: null, ip_hash: null }),
   gftvevents_password_resets: () => ({ used_at: null, created_by: null }),
-  gftvevents_signup_allowances: () => ({ label: null, revoked_at: null, created_by: null }),
+  gftvevents_helloid_checks: () => ({ status: 'pending', decided_auto: false, reviewed_by: null, id_photo_path: null, selfie_path: null, findings: {}, verified_name: null, verified_birth: null, identity_hash: null, face_template: null, device_hash: null, decline_reason: null, failure: null, submitted_at: now(), decided_at: null }),
+  gftvevents_entry_codes: () => ({ position: 0, assigned_to: null, created_at: now() }),
+  gftvevents_id_checks: () => ({ status: 'started', verified_name: null, verified_birth: null, identity_hash: null, failure: null, created_at: now(), updated_at: now(), decided_at: null }),
 };
 
 // Generated columns, recomputed on every write.
@@ -96,7 +102,7 @@ const FKS = {
   gftvevents_telegram_links: [toAccount('user_id')],
   gftvevents_telegram_link_tokens: [toAccount('user_id'), { column: 'challenge_id', parent: 'gftvevents_auth_challenges', onDelete: 'cascade' }],
   // migrations/016: paid_by, the editor who confirmed a payment.
-  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('paid_by', 'set null')],
+  gftvevents_attendees: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('paid_by', 'set null'), toAccount('checked_in_by', 'set null'), toAccount('id_door_checked_by', 'set null')],
   // migrations/012: confirmed volunteers, and the convention a volunteer
   // benefit is for.
   gftvevents_volunteers: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('user_id'), toAccount('confirmed_by', 'set null')],
@@ -120,7 +126,10 @@ const FKS = {
   gftvhello_backup_codes: [{ column: 'user_id', parent: 'gftvhello_users', onDelete: 'cascade' }],
   // migrations/003
   gftvevents_password_resets: [toAccount('account_id'), toAccount('created_by', 'set null')],
-  gftvevents_signup_allowances: [toAccount('created_by', 'set null')],
+  // migrations/027
+  gftvevents_id_checks: [toAccount('account_id')],
+  gftvevents_helloid_checks: [toAccount('account_id'), toAccount('reviewed_by', 'set null')],
+  gftvevents_entry_codes: [{ column: 'event_id', parent: 'gftvevents_events', onDelete: 'cascade' }, toAccount('assigned_to', 'set null')],
   gftvevents_name_filters: [toAccount('created_by', 'set null')],
 };
 

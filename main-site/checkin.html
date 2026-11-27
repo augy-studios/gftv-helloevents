@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title data-i18n="checkin.meta-title">Check-in | GFTV HelloEvents</title>
+    <meta name="description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television." data-i18n-attr="content:meta.description">
+    <meta name="robots" content="noindex">
+
+    <meta name="theme-color" content="#ffffff">
+    <script src="/js/prepaint.js"></script>
+
+    <link rel="preload" href="/assets/fonts/ProximaNova-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/assets/fonts/emoji/emoji.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/GHE-180.png">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Check-in | GFTV HelloEvents">
+    <meta property="og:site_name" content="GFTV HelloEvents">
+    <meta property="og:description" content="Find furmeets and furry conventions, and RSVP. By Global Furry Television.">
+    <meta property="og:url" content="https://events.globalfurry.tv/checkin">
+    <link rel="canonical" href="https://events.globalfurry.tv/checkin">
+    <meta property="og:image" content="https://events.globalfurry.tv/GHE-main.png">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:image" content="https://events.globalfurry.tv/GHE-main.png">
+
+    <script type="module" src="/assets/i18n/boot.js"></script>
+</head>
+
+<body>
+    <script src="/js/official-bar.js"></script>
+
+    <header class="site-header">
+        <a class="brand" href="/">
+            <img src="/GHE-192.png" alt="" width="32" height="32">
+            <span data-i18n="site.name">GFTV HelloEvents</span>
+        </a>
+        <div class="header-actions">
+            <a class="btn btn-small btn-quiet" href="/manage" data-when="manager" hidden><span data-icon="edit"></span><span class="btn-label" data-i18n="nav.manage">Manage</span></a>
+            <a class="btn btn-small btn-quiet" href="/account" data-when="signed-in" hidden><span data-icon="user"></span><span class="btn-label" data-i18n="nav.account">Account</span></a>
+            <a class="btn btn-small" href="/login" data-when="signed-out"><span data-icon="lock"></span><span class="btn-label" data-i18n="nav.sign-in">Sign in</span></a>
+            <div data-language-switcher></div>
+            <button class="icon-btn" type="button" id="tourBtn" aria-label="Show me around" title="Show me around" data-i18n-attr="aria-label:tour.button,title:tour.button" hidden>
+                <span data-icon="help"></span>
+            </button>
+            <button class="icon-btn" type="button" id="themeBtn" aria-label="Theme" aria-haspopup="dialog" aria-controls="themeModal">
+                <span data-icon="sun"></span>
+            </button>
+        </div>
+    </header>
+
+    <main class="wide checkin">
+        <p class="back-link"><a class="text-link" id="checkinBack" href="/manage"><span data-icon="arrow-left"></span><span data-i18n="checkin.back">Back to Manage</span></a></p>
+
+        <section class="glass-card page-card loading-card" id="checkinLoading" aria-busy="true">
+            <span class="delayed"><span class="spinner"></span></span>
+        </section>
+
+        <div id="checkinView" hidden>
+            <section class="glass-card page-card checkin-head">
+                <h1 id="checkinTitle"></h1>
+                <p class="checkin-count" id="checkinCount" aria-live="polite"></p>
+                <p class="small" id="checkinNet" role="status"></p>
+            </section>
+
+            <div class="tabs" role="tablist" id="checkinTabs" aria-label="Check-in" data-i18n-attr="aria-label:checkin.tabs-label">
+                <button class="tab" type="button" role="tab" id="tab-scan" data-tab="scan" aria-controls="panel-scan" aria-selected="true"><span data-icon="camera"></span><span data-i18n="checkin.tab.scan">Scan</span></button>
+                <button class="tab" type="button" role="tab" id="tab-list" data-tab="list" aria-controls="panel-list" aria-selected="false" tabindex="-1"><span data-icon="list"></span><span data-i18n="checkin.tab.list">Attendees</span></button>
+                <button class="tab" type="button" role="tab" id="tab-beacon" data-tab="beacon" aria-controls="panel-beacon" aria-selected="false" tabindex="-1"><span data-icon="qr"></span><span data-i18n="checkin.tab.beacon">Self check-in</span></button>
+            </div>
+
+            <section class="glass-card page-card tab-panel" role="tabpanel" id="panel-scan" aria-labelledby="tab-scan">
+                <div class="checkin-camera">
+                    <video id="scanVideo" playsinline muted></video>
+                    <p class="muted" id="scanIdle" data-i18n="checkin.scan-idle">The camera is off.</p>
+                </div>
+                <div class="actions inline">
+                    <button class="btn btn-primary" type="button" id="scanStart"><span data-icon="camera"></span><span data-i18n="checkin.scan-start">Start scanning</span></button>
+                    <button class="btn" type="button" id="scanStop" hidden data-i18n="checkin.scan-stop">Stop</button>
+                </div>
+                <form class="row u-mt-1" id="lookupForm" novalidate>
+                    <label class="field grow">
+                        <span data-i18n="checkin.lookup">RSVP ID or username</span>
+                        <input id="lookupInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="#12 or @username" data-i18n-attr="placeholder:checkin.lookup-placeholder">
+                    </label>
+                    <button class="btn" type="submit" id="lookupSubmit" data-i18n="checkin.lookup-go">Check in</button>
+                </form>
+                <div class="checkin-result" id="checkinResult" hidden aria-live="assertive"></div>
+                <div class="callout danger" id="scanError" role="alert"></div>
+            </section>
+
+            <section class="glass-card page-card tab-panel" role="tabpanel" id="panel-list" aria-labelledby="tab-list" hidden>
+                <label class="field">
+                    <span data-i18n="checkin.filter">Find someone</span>
+                    <input id="listFilter" type="search" autocomplete="off">
+                </label>
+                <ul class="item-list" id="checkinList"></ul>
+            </section>
+
+            <section class="glass-card page-card tab-panel" role="tabpanel" id="panel-beacon" aria-labelledby="tab-beacon" hidden>
+                <p class="muted small" data-i18n="checkin.beacon-lede">While self check-in is on, show this QR code at the entrance. People going scan it with their phone's camera, which opens the event page and checks them in. It changes every 30 seconds, so a photo of it soon stops working, and it keeps changing with no connection.</p>
+                <label class="check"><input type="checkbox" id="beaconOn"><span data-i18n="checkin.beacon-on">Self check-in is on</span></label>
+                <div class="checkin-beacon" id="beaconBox" hidden>
+                    <div class="qr-code beacon-qr" id="beaconQr"></div>
+                    <button class="btn" type="button" id="beaconFull"><span data-icon="external"></span><span data-i18n="checkin.beacon-full">Full screen</span></button>
+                </div>
+                <div class="callout danger" id="beaconError" role="alert"></div>
+            </section>
+
+            <section class="glass-card page-card">
+                <button class="btn btn-quiet btn-small" type="button" id="clearDevice"><span data-icon="trash"></span><span data-i18n="checkin.clear">Clear this device</span></button>
+                <p class="field-hint" data-i18n="checkin.clear-hint">This device keeps the attendee list so check-in works with no connection, until a day after the event. Clear it when you are done.</p>
+            </section>
+        </div>
+
+        <!-- Checking ID at the door. -->
+        <div class="modal-backdrop hidden" id="doorModal">
+            <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="doorTitle">
+                <div class="modal-head">
+                    <h2 id="doorTitle" data-i18n="checkin.door-title">Check their ID</h2>
+                    <button class="icon-btn small" type="button" data-close-modal="doorModal" aria-label="Close" data-i18n-attr="aria-label:common.close"><span data-icon="close"></span></button>
+                </div>
+                <p data-i18n="checkin.door-lede">Hold their ID next to them. Check the photo, and that the name and date of birth match.</p>
+                <dl class="checkin-door" id="doorDetails"></dl>
+                <div class="actions inline">
+                    <button class="btn btn-primary" type="button" id="doorConfirm"><span data-icon="check"></span><span data-i18n="checkin.door-confirm">ID checked: check them in</span></button>
+                    <button class="btn" type="button" data-close-modal="doorModal" data-i18n="checkin.door-cancel">Not now</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/" data-i18n="footer.events">All events</a>
+            <a href="https://policy.globalfurry.tv/legal/terms" target="_blank" rel="noopener" data-i18n="footer.terms">Terms of Use</a>
+            <a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a>
+        </nav>
+        <span data-i18n="footer.made">Made with</span> <span data-icon="heart"></span> <span data-i18n="footer.in">in</span>
+        <a href="https://www.google.com/maps/place/Singapore" target="_blank" rel="noopener" data-i18n="footer.singapore">Singapore</a>
+        <span data-i18n="footer.by">by Global Furry Television</span> &copy; 2014-<span id="currentYear"></span>.
+        <span data-i18n="footer.rights">All rights reserved.</span>
+    </footer>
+
+    <div class="modal-backdrop hidden" id="themeModal">
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="themeModalTitle">
+            <div class="modal-head">
+                <h2 id="themeModalTitle" data-i18n="theme.title">Theme</h2>
+                <button class="icon-btn small" type="button" data-close-modal="themeModal" aria-label="Close" data-i18n-attr="aria-label:common.close">
+                    <span data-icon="close"></span>
+                </button>
+            </div>
+            <p class="modal-section-label" data-i18n="theme.mode-label">Mode</p>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn" type="button" data-mode="light" aria-pressed="false"><span data-icon="sun"></span><span data-i18n="theme.mode.light">Light</span></button>
+                <button class="mode-btn" type="button" data-mode="dark" aria-pressed="false"><span data-icon="moon"></span><span data-i18n="theme.mode.dark">Dark</span></button>
+                <button class="mode-btn mode-btn-wide" type="button" data-mode="time" aria-pressed="false"><span data-icon="clock"></span><span data-i18n="theme.mode.time">Time-based</span></button>
+            </div>
+            <p class="mode-note" id="modeNote" hidden></p>
+            <p class="modal-section-label" data-i18n="theme.color-label">Colour theme</p>
+            <div class="swatch-grid" id="swatchGrid"></div>
+        </div>
+    </div>
+
+    <script src="/js/vendor/qrcode.js"></script>
+    <script type="module" src="/js/pages/checkin.js"></script>
+</body>
+
+</html>

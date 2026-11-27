@@ -80,7 +80,7 @@ test('an editor creates an event in Manage, edits it, and the public page and fe
   await expect(status(page)).toHaveText(/^Saves by itself once it has a title/);
   await expect(page.locator('#f-slug')).toHaveValue('');
   // The form opens on Basics; the other sections are tabs of their own.
-  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Meals', 'Timetable', 'Attendees and notes'], { useInnerText: true });
+  await expect(page.locator('#editorTabs').getByRole('tab')).toHaveText(['Basics', 'When and where', 'Price and RSVP', 'Meals', 'Timetable', 'Attendees and notes', 'ID verification', 'Check-in and entry'], { useInnerText: true });
   await expect(page.locator('#f-startDate')).toBeHidden();
   await openSection(page, 'When and where');
   await expect(page.locator('#f-title')).toBeHidden();
@@ -404,19 +404,25 @@ test('the organiser is one of GFTV\'s teams, or anyone else typed in under Other
 });
 
 test('the event list, the edit form and the staff tools are tabs, and the open tab is kept in the address', async ({ page }) => {
-  await openManage(page);
+  // (An editor has just Event list and Manage event: the venue sign-ups tab
+  // went in migrations/027. event-editors.spec.js checks the staff tabs
+  // stay hidden for them.)
+  await openManage(page, ADMIN.username);
   const tabs = page.locator('#manageTabs');
-  await expect(tabs.getByRole('tab')).toHaveText(['Event list', 'Manage event', 'Venue sign-ups']);
-  await expect(page.locator('#allowanceBox')).toBeHidden();
+  await expect(tabs.getByRole('tab')).toHaveText(['Event list', 'Manage event', 'ID reviews', 'Name filter', 'Password resets']);
+  await expect(page.locator('#filterBox')).toBeHidden();
   await expect(page.locator('#editorEmpty')).toBeHidden();
 
-  await tabs.getByRole('tab', { name: 'Venue sign-ups' }).click();
-  await expect(page.locator('#allowanceBox')).toBeVisible();
+  await tabs.getByRole('tab', { name: 'Name filter' }).click();
+  await expect(page.locator('#filterBox')).toBeVisible();
   await expect(page.locator('#listBox')).toBeHidden();
-  await expect(page).toHaveURL(/#signups$/);
+  await expect(page).toHaveURL(/#filter$/);
 
   // The arrow keys move between the tabs. With no event open, the edit tab
   // says so.
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.getByRole('tab', { name: 'ID reviews' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#idReviewsBox')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
   await expect(tabs.getByRole('tab', { name: 'Manage event' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#editorEmpty')).toBeVisible();
@@ -425,13 +431,13 @@ test('the event list, the edit form and the staff tools are tabs, and the open t
   await expect(tabs.getByRole('tab', { name: 'Event list' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#listBox')).toBeVisible();
 
-  // Opened again at #signups, that tab opens.
-  await page.goto('/manage#signups');
-  await expect(page.locator('#allowanceBox')).toBeVisible();
+  // Opened again at #filter, that tab opens.
+  await page.goto('/manage#filter');
+  await expect(page.locator('#filterBox')).toBeVisible();
   // New event opens the edit tab.
   await page.locator('#newEvent').click();
   await expect(page.locator('#eventForm')).toBeVisible();
-  await expect(page.locator('#allowanceBox')).toBeHidden();
+  await expect(page.locator('#filterBox')).toBeHidden();
 });
 
 test('an admin asked to delete an event can set it to Cancelled instead', async ({ page }) => {

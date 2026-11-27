@@ -10,11 +10,18 @@
   "dependencies": {
     "@simplewebauthn/server": "^13.1.1",
     "@supabase/supabase-js": "^2.45.0",
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
+    "@tensorflow/tfjs-converter": "4.22.0",
+    "@tensorflow/tfjs-core": "4.22.0",
+    "@tesseract.js-data/eng": "1.0.0",
     "@upstash/redis": "^1.40.0",
     "@vercel/functions": "^2.2.13",
+    "@vladmandic/human": "3.3.6",
     "bcryptjs": "^2.4.3",
     "htmlparser2": "^9.1.0",
+    "mrz": "5.0.2",
     "sharp": "^0.34.5",
+    "tesseract.js": "7.0.0",
     "web-push": "^3.6.7"
   },
   "scripts": {

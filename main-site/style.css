@@ -2184,3 +2184,171 @@ html.touring { overflow: hidden; }
 .picture-size legend { width: 100%; margin-bottom: 0.25rem; font-weight: 600; font-size: 0.9375rem; }
 .picture-size-option { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 32px; cursor: pointer; }
 .picture-size-option input { accent-color: var(--brand-dark); }
+
+/* ---------------------------------------------------------------------------
+   ID checks, check-in and entry codes (migrations/027)
+   --------------------------------------------------------------------------- */
+
+.pill {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.pill-ok { background: var(--callout-ok-bg); color: var(--ok); }
+.pill-warn { background: var(--callout-warn-bg); color: var(--warn); }
+.pill-beta { background: color-mix(in srgb, var(--link) 14%, transparent); color: var(--link); letter-spacing: 0.02em; text-transform: uppercase; }
+.id-way { margin-bottom: 0.25rem; }
+.id-way.is-unavailable { opacity: 0.55; }
+.id-ways .field-hint { margin: 0 0 0.85rem 1.85rem; }
+.verified-mark { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--ok); font-size: 0.8125rem; font-weight: 600; }
+.verified-mark svg { width: 16px; height: 16px; }
+.id-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* Entry codes on the edit form */
+.entry-codes { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.entry-code img { width: 64px; height: 64px; object-fit: contain; background: var(--qr-bg); border-radius: var(--radius-sm); flex: none; }
+.entry-code input { width: 6rem; }
+
+/* The admins' ID reviews */
+.id-reviews { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 1rem; }
+.id-review { padding: 1rem; }
+.id-review-head { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
+.id-review-photos { display: grid; grid-template-columns: 2fr 1fr; gap: 0.75rem; margin: 0.75rem 0; }
+.id-review-photos img { width: 100%; max-height: 360px; object-fit: contain; background: var(--bg-alt); border-radius: var(--radius-sm); }
+.findings { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; gap: 0.3rem; }
+.finding { display: flex; align-items: center; gap: 0.4rem; }
+.finding svg { width: 18px; height: 18px; flex: none; }
+.finding-true svg { color: var(--ok); }
+.finding-false svg { color: var(--danger); }
+.id-review-actions { flex-wrap: wrap; gap: 0.5rem; }
+.id-review-actions input { flex: 1 1 12rem; min-width: 0; }
+@media (max-width: 560px) {
+  .id-review-photos { grid-template-columns: 1fr; }
+}
+
+/* HelloID (/helloid) */
+.helloid { max-width: 640px; margin: 0 auto; padding: 0 16px; }
+.helloid-brand { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-weight: 700; color: var(--brand-text); }
+.helloid-brand svg { width: 22px; height: 22px; }
+.helloid-country {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.helloid-country div { display: grid; }
+.helloid-documents { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.helloid-documents li + li { border-top: 1px solid var(--border); }
+.helloid-document {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 56px;
+  padding: 0.75rem 1rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.helloid-document:hover, .helloid-document:focus-visible { background: var(--surface-hover); }
+.helloid-document span { flex: 1; }
+.helloid-document svg { width: 22px; height: 22px; flex: none; }
+.helloid-points { padding-left: 1.25rem; }
+.helloid-points li { margin-bottom: 0.5rem; }
+.helloid-camera { position: relative; margin: 1rem 0; overflow: hidden; border-radius: var(--radius); background: #000; }
+.helloid-camera video, .helloid-camera img { display: block; width: 100%; max-height: 60vh; object-fit: contain; }
+.helloid-camera.face video { transform: scaleX(-1); aspect-ratio: 3 / 4; object-fit: cover; }
+.helloid-frame { position: absolute; inset: 12% 8%; border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 12px; pointer-events: none; }
+.helloid-oval { position: absolute; inset: 12% 20% 18%; border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 50%; pointer-events: none; }
+.helloid-prompt {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ffffff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+}
+.helloid-prompt:empty { display: none; }
+/* The colour flashes: the whole screen, above everything. */
+.helloid-flash { position: fixed; inset: 0; z-index: 100; background: #ffffff; }
+
+/* Check-in (/checkin) */
+.checkin-head h1 { margin: 0; }
+.checkin-count { margin: 0.25rem 0 0; font-size: 1.5rem; font-weight: 700; }
+#checkinNet.is-offline { color: var(--warn); font-weight: 600; }
+.checkin-camera { position: relative; display: grid; place-items: center; min-height: 160px; overflow: hidden; border-radius: var(--radius); background: var(--bg-alt); }
+.checkin-camera video { display: block; width: 100%; max-height: 50vh; object-fit: cover; }
+.checkin-result { margin-top: 1rem; padding: 1rem; border-radius: var(--radius-sm); }
+.checkin-result.is-ok { background: var(--callout-ok-bg); }
+.checkin-result.is-warn { background: var(--callout-warn-bg); }
+.checkin-result-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.25rem; }
+.checkin-result-head svg { width: 22px; height: 22px; }
+.checkin-name { margin: 0; font-size: 1.375rem; font-weight: 700; }
+.checkin-result p { margin: 0.25rem 0; }
+.item-row.is-in > svg { color: var(--ok); }
+.checkin-beacon { display: grid; justify-items: center; gap: 0.75rem; }
+.beacon-qr svg { width: min(80vw, 420px); height: min(80vw, 420px); }
+.beacon-qr:fullscreen { display: grid; place-items: center; background: var(--qr-bg); }
+.beacon-qr:fullscreen svg { width: min(90vw, 90vh); height: min(90vw, 90vh); }
+.checkin-door { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 1rem 0; }
+.checkin-door dt { font-weight: 600; }
+.checkin-door dd { margin: 0; }
+
+/* The pass on the event page */
+.pass-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.pass-card { display: grid; justify-items: center; text-align: center; }
+.pass-card .section-label { margin: 0; }
+.pass-entry { width: 100%; max-width: 280px; background: var(--qr-bg); border-radius: var(--radius-sm); padding: 8px; }
+.pass-offline h1 { margin: 0.5rem 0 1rem; }
+
+/* ---------------------------------------------------------------------------
+   The privacy page (privacy.html): a plain document, in the site's colours.
+   --------------------------------------------------------------------------- */
+
+body.legal { padding: 32px 16px 48px; }
+.legal-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 40px 36px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.legal-home { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px; color: var(--text); font-weight: 700; text-decoration: none; }
+.legal-home img { border-radius: 9px; display: block; }
+.legal-page h1 { margin: 0; font-size: 2rem; line-height: 1.2; }
+.legal-date { color: var(--text-muted); margin: 4px 0 20px; }
+.legal-page h2 { font-size: 1.25rem; line-height: 1.3; margin: 32px 0 8px; scroll-margin-top: 16px; }
+.legal-page h3 { font-size: 1.05rem; margin: 20px 0 6px; }
+.legal-page p, .legal-page ul, .legal-page ol { margin: 0 0 12px; }
+.legal-page ul, .legal-page ol { padding-left: 22px; }
+.legal-page li { margin-bottom: 6px; }
+.legal-page a { color: var(--link); }
+.legal-short { margin: 20px 0; padding: 16px 20px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.legal-short h2 { margin-top: 0; }
+.legal-toc { margin: 20px 0; }
+.legal-table { overflow-x: auto; margin: 0 0 12px; }
+.legal-table table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+.legal-table th, .legal-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.legal-back { margin-top: 32px; }
+@media (max-width: 600px) {
+  .legal-page { padding: 24px 18px; }
+  .legal-table thead { display: none; }
+  .legal-table tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .legal-table td { display: block; padding: 2px 0; border: 0; }
+  .legal-table td::before { content: attr(data-label) ": "; font-weight: 600; }
+}
