@@ -1133,8 +1133,8 @@ function showSavedControls() {
   loadEntryCodes();
 }
 
-// The open event is kept in the address (/manage?slug=...#editor), so a
-// reload opens it again.
+// The open event is kept in the address (/manage?slug=...), so a reload
+// opens it again.
 function rememberOpenEvent() {
   let search = '';
   if (editing) {
@@ -1908,8 +1908,7 @@ startRegistration({
 startEditors({ getEvent: () => editing });
 byId('attendeesCsv').addEventListener('click', downloadAttendees);
 
-// The edit form's section tabs, kept out of the address (it already says
-// #editor). A tab picked with the tab bar stuck under the page header (the
+// The edit form's section tabs, kept out of the address. A tab picked with the tab bar stuck under the page header (the
 // form scrolled down) starts at its top, not partway down.
 editorTabs = startTabs(byId('editorTabs'), {
   useHash: false,
@@ -1967,7 +1966,10 @@ async function start() {
   byId('etab-editors').hidden = currentUser.role !== 'admin';
   editorTabs.refresh();
   fillCurrencyList(byId('currencyList'));
+  // The open tab is kept out of the address bar: a link such as
+  // /manage#filter still opens its tab, and a reload opens the one open.
   tabs = startTabs(byId('manageTabs'), {
+    hideHash: true,
     onSelect(name) {
       // Back from the form: the list opens on the status of the event that
       // was open, so a new draft is found under Drafts.
@@ -1981,6 +1983,13 @@ async function start() {
       }
     },
   });
+  // /manage?slug=... from an event page's "Edit this event".
+  const slug = new URLSearchParams(location.search).get('slug');
+  // The Manage event tab kept from before (or from another account signed in
+  // on this browser tab) is empty without ?slug=..., so the list opens.
+  if (tabs.current() === 'editor' && !slug) {
+    tabs.open('events');
+  }
   let toolsReady = Promise.resolve();
   if (!eventEditorOnly) {
     toolsReady = startTools(currentUser).then(() => tabs.refresh());
@@ -1994,8 +2003,6 @@ async function start() {
   // The tours once the list is drawn and the staff tools' tabs are settled,
   // so the page's tour finds every tab this role has.
   toolsReady.finally(() => startTours('manage'));
-  // /manage?slug=... from an event page's "Edit this event".
-  const slug = new URLSearchParams(location.search).get('slug');
   let match = null;
   if (slug) {
     match = events.find((row) => row.slug === slug);

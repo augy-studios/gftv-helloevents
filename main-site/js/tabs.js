@@ -1,7 +1,8 @@
 // Tabs: a role="tablist" of buttons, each with aria-controls naming its
 // role="tabpanel". One panel shows at a time; the arrow keys, Home and End
 // move between the tabs that are not hidden, and the open tab is kept in
-// the address (#filter) so a reload or a shared link opens it again.
+// the address (#filter) so a reload or a shared link opens it again, or
+// kept out of it with hideHash (below).
 //
 // A tab is hidden with its button's hidden attribute (a section this role
 // may not use); the list itself hides while only one tab is left.
@@ -9,12 +10,14 @@
 // Each selection sends a bubbling "tabchange" event from the tablist.
 //
 // useHash: false leaves the address alone, for tabs inside a tab (the edit
-// form's sections inside /manage#editor).
+// form's sections inside /manage's Manage event tab).
 //
 // hideHash: a link with a tab's name (/account#profile) still opens that
 // tab, but the name is taken off the address bar at once and never written
 // there; the open tab is kept for this browser tab (sessionStorage) instead,
-// so a reload opens it again.
+// so a reload opens it again. A tab that opens only because the kept one is
+// not shown yet (a staff tool's tab, before its section loads) is not kept,
+// so the later refresh() still finds the kept one.
 
 // The tab kept for this page with hideHash, or null.
 function keptTab(key) {
@@ -54,7 +57,9 @@ export function startTabs(tablist, { onSelect, useHash = true, hideHash = false 
   const shown = () => tabs().filter((tab) => !tab.hidden);
   const panelOf = (tab) => document.getElementById(tab.getAttribute('aria-controls'));
 
-  function select(tab, { focus = false, remember = true } = {}) {
+  // remember: the tab is put in the address, or kept with hideHash.
+  // keep: with hideHash, kept even though remember is false.
+  function select(tab, { focus = false, remember = true, keep = remember } = {}) {
     for (const each of tabs()) {
       const selected = each === tab;
       each.setAttribute('aria-selected', String(selected));
@@ -70,7 +75,7 @@ export function startTabs(tablist, { onSelect, useHash = true, hideHash = false 
     if (remember && useHash && !hideHash) {
       history.replaceState(null, '', `#${tab.dataset.tab}`);
     }
-    if (useHash && hideHash) {
+    if (keep && useHash && hideHash) {
       keepTab(storageKey, tab.dataset.tab);
     }
     if (onSelect) {
@@ -120,10 +125,13 @@ export function startTabs(tablist, { onSelect, useHash = true, hideHash = false 
     const visible = shown();
     tablist.hidden = visible.length < 2;
     let wanted;
+    // Kept with hideHash: the tab a link named, now that it opens.
+    let keep = false;
     if (useHash && hideHash) {
       wanted = byName(linked);
       if (wanted) {
         linked = null;
+        keep = true;
       } else {
         wanted = byName(keptTab(storageKey));
       }
@@ -137,7 +145,7 @@ export function startTabs(tablist, { onSelect, useHash = true, hideHash = false 
       wanted = visible[0];
     }
     if (wanted) {
-      select(wanted, { remember: false });
+      select(wanted, { remember: false, keep });
     }
   }
 
@@ -150,7 +158,7 @@ export function startTabs(tablist, { onSelect, useHash = true, hideHash = false 
       }
       if (tab) {
         linked = null;
-        select(tab, { remember: false });
+        select(tab, { remember: false, keep: true });
       }
     });
   }

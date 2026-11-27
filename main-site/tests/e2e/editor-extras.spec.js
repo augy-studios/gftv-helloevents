@@ -40,7 +40,7 @@ test('a custom link is tidied and saved; a taken one says so and can get a rando
   await expect(slug).toHaveValue('lion-city-2032');
   await expect(status(page)).toHaveText(SAVED);
   await expect(page.locator('#slugTaken')).toBeHidden();
-  await expect(page).toHaveURL(/\/manage\?slug=lion-city-2032#editor$/);
+  await expect(page).toHaveURL(/\/manage\?slug=lion-city-2032$/);
   await expect(page.locator('#editorView')).toHaveAttribute('href', '/e/lion-city-2032');
 
   // Taken again, then fixed with eight random characters on the end.

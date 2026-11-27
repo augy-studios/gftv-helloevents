@@ -1,5 +1,5 @@
 // The admins' ID reviews tab on /manage (migrations/027,
-// api/manage/helloid.js): the HelloID checks it could not clear on its own,
+// api/manage/helloid.js): the HelloID checks that could not clear on its own,
 // each with the ID photo (front and back), the selfie, the legal name and
 // date of birth it is for, and what the checks found. Approve, or decline
 // with a reason the person sees.

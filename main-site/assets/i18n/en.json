@@ -1580,7 +1580,7 @@
   "manage.csv.checked-in": "Checked in",
   "manage.csv.id-door": "ID checked at the door",
   "admin.idreviews-title": "ID reviews",
-  "admin.idreviews-lede": "HelloID checks it could not clear on its own. Compare the ID with the selfie and the details, then approve or decline (with a reason they will see). The photos are deleted once you decide; an approved check keeps only a face template, so the same person cannot verify another account.",
+  "admin.idreviews-lede": "HelloID checks that could not clear on its own. Compare the ID with the selfie and the details, then approve or decline (with a reason they will see). The photos are deleted once you decide; an approved check keeps only a face template, so the same person cannot verify another account.",
   "admin.idreviews-none": "Nothing waiting.",
   "admin.idreview-for": "For: {name}, born {birth}",
   "admin.idreview-typed": "typed by them",
