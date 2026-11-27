@@ -141,7 +141,7 @@ const USER = [
   // The ID checks passed (migrations/027): the checkmark by the legal name.
   'idVerified',
 ];
-const METHODS = ['totp', 'passkey', 'telegram', 'backup'];
+const METHODS = ['totp', 'passkey', 'telegram', 'emailCodes', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];
 
 const WHEN = ['tba', 'startsAt', 'endsAt', 'startTimeTbc', 'endTimeTbc', 'timezone'];
@@ -240,7 +240,7 @@ const FLAGGED = ['username', 'displayName', 'term'];
 // Notifications.
 const SECURITY = [
   'required', ...nest('totp', ['shared', 'local']), 'passkeys',
-  ...nest('telegram', ['available', 'linked', 'username']), 'backupCodesLeft',
+  ...nest('telegram', ['available', 'linked', 'username']), ...nest('emailCodes', ['available', 'confirmed', 'address']), 'backupCodesLeft',
 ];
 const PASSKEY = ['id', 'label', 'createdAt', 'lastUsedAt'];
 const NOTIFY = [
@@ -421,7 +421,7 @@ test('a reset for a public account lists its ways back in, and each step answers
   const { id } = await member();
   linkTelegram(id);
   const start = await on().call(recover, { method: 'POST', body: { action: 'start', identifier: 'otter' } });
-  assertKeys(start, ['found', 'challenge', 'telegram', 'backup', ...nest('factor', FACTOR)]);
+  assertKeys(start, ['found', 'challenge', 'telegram', 'emailCodes', 'backup', ...nest('factor', FACTOR)]);
   const b = on();
   assertKeys(await b.call(recover, { method: 'POST', body: { action: 'send', challenge: start.json.challenge } }), ['sent']);
   const done = await b.call(recover, { method: 'POST', body: { action: 'finish', challenge: start.json.challenge, telegramCode: telegramCode(), newPassword: 'a brand new secret' } });
@@ -433,7 +433,7 @@ test('a reset for a public account lists its ways back in, and each step answers
   linkTelegram(badgerId, 778);
   addPasskey(badgerId);
   const again = await on().call(recover, { method: 'POST', body: { action: 'start', identifier: 'badger' } });
-  assertKeys(again, ['found', 'challenge', 'telegram', 'backup', ...nest('factor', FACTOR)]);
+  assertKeys(again, ['found', 'challenge', 'telegram', 'emailCodes', 'backup', ...nest('factor', FACTOR)]);
   assert.equal(again.json.factor.required, true);
   const c = on();
   await c.call(recover, { method: 'POST', body: { action: 'send', challenge: again.json.challenge } });

@@ -5,8 +5,9 @@ import { countryCode } from './countries.js';
 // Pure functions, so tests/unit.test.js runs them directly.
 
 const USERNAME = /^[a-z0-9_]{3,32}$/;
-// Deliberately loose: a real check is a message that arrives, and there is
-// no email sender yet. This only refuses what cannot be an address.
+// Deliberately loose: a real check is a message that arrives, which the
+// account page sends when the address is confirmed for email codes
+// (email-factor.js). This only refuses what cannot be an address.
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // Words a name may not contain (staff, official, GFTV, ...) are checked by

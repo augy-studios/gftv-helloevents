@@ -9,13 +9,20 @@
 //   method "telegram"         { code }      the code Telegram sent
 //   method "passkey-options"                -> { options }
 //   method "passkey"          { response }  the browser's assertion
+//   method "email-send"                     email a code and a link to the
+//                                           confirmed address (migrations/028)
+//   method "email"            { code }      the code the email holds
+//   method "email-link"       { link }      the link's token, from /login#email=,
+//                                           with no challenge: it names its own.
+//                                           Only in the browser that asked for
+//                                           the email (email-factor.js).
 //
 // Five wrong answers end the challenge, on top of the rate limits.
 //
 // A passed factor answers only ok and sets the session cookie: the sign-in
 // page moves on, and the next page asks /api/auth/session who is signed in.
 
-import { route, guard, readJson, ok, fail } from '../_lib/http.js';
+import { route, guard, readJson, ok, fail, errorDetail } from '../_lib/http.js';
 import { sha256 } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
 import { authenticationOptions, finishAuthentication } from '../_lib/webauthn.js';
@@ -23,6 +30,57 @@ import { createSession, findChallenge, failChallengeAttempt, deleteChallenge } f
 import { loadAccount, canSignIn } from '../_lib/users.js';
 import { totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
 import { linkedChat, telegramConfigured } from '../_lib/telegram.js';
+import { emailConfigured } from '../_lib/email.js';
+import { confirmedEmail, sendEmailCode, emailCodeOk, challengeForLink, linkToken, sameBrowser } from '../_lib/email-factor.js';
+
+// "email-link": the emailed link, followed in the browser that asked for it,
+// signs that browser in. The link names its challenge; a link opened in any
+// other browser (or by a mail scanner) is refused and counts as a wrong try.
+async function signInWithLink(request, response, body) {
+  const link = linkToken(body.link);
+  if (await limited(request, response, 'secondFactor', [`l:${sha256(String(link))}`])) {
+    return;
+  }
+  const challenge = await challengeForLink(link, 'login');
+  if (!challenge) {
+    return fail(response, 401, 'email_link_expired');
+  }
+  if (!sameBrowser(request, challenge)) {
+    await failChallengeAttempt(challenge);
+    await audit(request, { action: 'auth.factor_failed', actorId: challenge.user_id, details: { method: 'email-link', reason: 'other_browser' } });
+    return fail(response, 401, 'email_link_other_browser');
+  }
+  const user = await loadAccount(challenge.user_id, { withSecrets: true });
+  if (!user || !canSignIn(user) || !emailConfigured() || !(await confirmedEmail(user))) {
+    await deleteChallenge(challenge);
+    return fail(response, 403, 'no_access');
+  }
+  await deleteChallenge(challenge);
+  await createSession(request, response, user, 'email');
+  await audit(request, { action: 'auth.signed_in', actorId: user.id, details: { method: 'email-link' } });
+  return ok(response);
+}
+
+// "email-send": a code and a link to the confirmed address.
+async function sendSignInEmail(request, response, challenge, user) {
+  if (!emailConfigured()) {
+    return fail(response, 400, 'email_off');
+  }
+  const address = await confirmedEmail(user);
+  if (!address) {
+    return fail(response, 400, 'email_not_confirmed');
+  }
+  if (await limited(request, response, 'emailSend', [`u:${user.id}`])) {
+    return;
+  }
+  try {
+    await sendEmailCode(request, response, challenge, { purpose: 'sign-in', account: user, address });
+  } catch (cause) {
+    console.error('[helloevents] sign-in email:', errorDetail(cause));
+    return fail(response, 502, 'email_send_failed');
+  }
+  return ok(response, { sent: true });
+}
 
 // Checks the second factor the person chose against the sign-in challenge
 // from /api/auth/login, and signs them in when it is right.
@@ -32,6 +90,10 @@ export default route('auth/verify', async (request, response) => {
   }
   const body = await readJson(request, response);
   if (!body) {
+    return;
+  }
+  if (body.method === 'email-link') {
+    await signInWithLink(request, response, body);
     return;
   }
   let typedChallenge = '';
@@ -86,6 +148,14 @@ export default route('auth/verify', async (request, response) => {
     }
     case 'passkey':
       passed = await finishAuthentication(user.id, body.response);
+      break;
+    case 'email-send':
+      await sendSignInEmail(request, response, challenge, user);
+      return;
+    case 'email':
+      if (emailConfigured() && (await confirmedEmail(user))) {
+        passed = await emailCodeOk(challenge, body.code);
+      }
       break;
     default:
       return fail(response, 400, 'bad_request');

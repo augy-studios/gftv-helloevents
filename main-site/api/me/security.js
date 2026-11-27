@@ -11,6 +11,10 @@
 // POST { action: "telegram-link" }              -> { url }
 // POST { action: "telegram-unlink", password }
 // POST { action: "backup-regenerate", password } -> { codes }
+// POST { action: "email-start", password }      -> { setup }  emails a code
+//      and a link to the account's address (migrations/028)
+// POST { action: "email-confirm", setup, code } | { link }  confirms it
+// POST { action: "email-remove", password }
 // POST { action: "delete-account", password }   public accounts only
 //
 // The password is asked for again before anything that adds or removes a way
@@ -20,7 +24,7 @@
 // The authenticator app set up on gftv.asia is shown but not changed here;
 // it lives with the shared staff account.
 
-import { route, guard, readJson, ok, fail } from '../_lib/http.js';
+import { route, guard, readJson, ok, fail, errorDetail } from '../_lib/http.js';
 import { verifyPassword, encryptSecret, decryptSecret } from '../_lib/crypto.js';
 import { limited, audit } from '../_lib/guards.js';
 import { database, TABLES } from '../_lib/supabase.js';
@@ -35,6 +39,8 @@ import { deletePaymentFiles, proofPaths, registrationPhotoPaths } from '../_lib/
 import { helloidPhotoPaths } from '../_lib/helloid-checks.js';
 import { accountStickerFiles, deleteStickerFiles } from '../_lib/stickers.js';
 import { passkeyView } from '../_lib/serialize.js';
+import { emailConfigured } from '../_lib/email.js';
+import { confirmedEmail, saveConfirmedEmail, removeConfirmedEmail, maskEmail, sendEmailCode, emailCodeOk, challengeForLink } from '../_lib/email-factor.js';
 import { LIMITS } from '../_lib/event-rules.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,11 +49,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // its Remove buttons send.
 async function summary(userId) {
   const user = await loadAccount(userId, { withSecrets: true });
-  const [passkeys, chat, backupLeft, localTotp] = await Promise.all([
+  const [passkeys, chat, backupLeft, localTotp, confirmed] = await Promise.all([
     listPasskeys(userId),
     linkedChat(userId),
     localBackupCount(userId),
     hasLocalTotp(userId),
+    confirmedEmail(user),
   ]);
   // The handle, so the person can tell which chat it is. Never the chat id.
   let telegramUsername = null;
@@ -62,6 +69,12 @@ async function summary(userId) {
       available: telegramConfigured(),
       linked: Boolean(chat),
       username: telegramUsername,
+    },
+    // The address only masked ("o***r@example.com"), never whole.
+    emailCodes: {
+      available: emailConfigured(),
+      confirmed: Boolean(confirmed),
+      address: maskEmail(user.email),
     },
     backupCodesLeft: backupLeft,
   };
@@ -253,6 +266,72 @@ async function unlinkTelegram(context) {
   return ok(response, await summary(userId));
 }
 
+// "email-start": a code and a link to the account's address, to confirm it.
+// -> { setup }, the token "email-confirm" sends back with the code.
+async function startEmail(context) {
+  const { request, response, userId, user } = context;
+  if (!emailConfigured()) {
+    return fail(response, 400, 'email_off');
+  }
+  if (!user.email) {
+    return fail(response, 400, 'email_missing');
+  }
+  if (!(await passwordConfirmed(context))) {
+    return;
+  }
+  if (await limited(request, response, 'emailSend', [`u:${userId}`])) {
+    return;
+  }
+  const setup = await createChallenge({ purpose: 'email-setup', userId, account: user });
+  const challenge = await findChallenge(setup, 'email-setup');
+  try {
+    await sendEmailCode(request, response, challenge, { purpose: 'confirm', account: user, address: user.email });
+  } catch (cause) {
+    await deleteChallenge(challenge);
+    console.error('[helloevents] confirm email:', errorDetail(cause));
+    return fail(response, 502, 'email_send_failed');
+  }
+  return ok(response, { setup });
+}
+
+// "email-confirm": the emailed code with the setup token, or the emailed
+// link (opened while signed in to the same account) confirms the address.
+async function confirmEmail({ request, response, body, userId, user }) {
+  let challenge;
+  if (body.link !== undefined) {
+    challenge = await challengeForLink(body.link, 'email-setup');
+  } else {
+    challenge = await findChallenge(body.setup, 'email-setup');
+  }
+  if (!challenge || challenge.user_id !== userId) {
+    return fail(response, 400, 'email_link_expired');
+  }
+  if (body.link === undefined && !(await emailCodeOk(challenge, body.code))) {
+    await failChallengeAttempt(challenge);
+    return fail(response, 401, 'code_wrong');
+  }
+  if (!user.email) {
+    await deleteChallenge(challenge);
+    return fail(response, 400, 'email_missing');
+  }
+  await saveConfirmedEmail(user);
+  await deleteChallenge(challenge);
+  await audit(request, { action: 'security.email_confirmed', actorId: userId });
+  return ok(response, await summary(userId));
+}
+
+// "email-remove": email codes stop; nothing else changes, since email never
+// counts towards having 2FA.
+async function removeEmail(context) {
+  const { request, response, userId } = context;
+  if (!(await passwordConfirmed(context))) {
+    return;
+  }
+  await removeConfirmedEmail(userId);
+  await audit(request, { action: 'security.email_removed', actorId: userId });
+  return ok(response, await summary(userId));
+}
+
 // "backup-regenerate": ten new backup codes, replacing the old ones, shown once.
 async function regenerateBackupCodes(context) {
   const { request, response, userId } = context;
@@ -302,6 +381,9 @@ const STEPS = new Map([
   ['telegram-link', linkTelegram],
   ['telegram-unlink', unlinkTelegram],
   ['backup-regenerate', regenerateBackupCodes],
+  ['email-start', startEmail],
+  ['email-confirm', confirmEmail],
+  ['email-remove', removeEmail],
   ['delete-account', deleteAccount],
 ]);
 

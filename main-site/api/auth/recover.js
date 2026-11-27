@@ -1,18 +1,21 @@
 // POST /api/auth/recover { action, ... }  A forgotten password, public
-// accounts only. Staff reset theirs on gftv.asia. No email is ever sent.
+// accounts only. Staff reset theirs on gftv.asia.
 //
-// Three ways back in, any one of which resets the password:
+// Four ways back in, any one of which resets the password:
 //
 //   telegram    a code sent to the chat linked on the account page, plus the
 //               second factor when 2FA is on (as on OneLink GFTV);
+//   email       a code (or link) emailed to the address confirmed on the
+//               account page (migrations/028), plus the second factor when
+//               2FA is on;
 //   backup      one of the account's backup codes, for an account with 2FA
 //               (every account that turns 2FA on is given ten);
 //   staff-code  a one-time code an admin made in /manage for someone with
-//               neither Telegram nor 2FA (migrations/003), after checking
-//               who they are some other way.
+//               none of these (migrations/003), after checking who they are
+//               some other way.
 //
 //   start            { identifier, "cf-turnstile-response"? }
-//                       -> { found: true, challenge, telegram, backup, factor }
+//                       -> { found: true, challenge, telegram, emailCodes, backup, factor }
 //                          for a public account that may sign in, and
 //                          exactly { found: false } for anything else: an
 //                          unknown name, a suspended account, and a staff
@@ -22,10 +25,17 @@
 //                    Turnstile, action "reset" (turnstile.js). Every later
 //                    step needs the challenge this hands out, so one check
 //                    covers each reset, whichever way it goes.
-//   send             { challenge }                       Telegram code
-//   passkey-options  { challenge, telegramCode }  -> { options }
+//   send             { challenge, channel? }   a Telegram code, or with
+//                                              channel "email" an emailed one
+//   email-link       { link }   the emailed link, from /reset#email=, in the
+//                    browser that asked for it: the email way is proven, and
+//                    -> what "start" answers, with a new challenge (the old
+//                    one stops working) and emailVerified: true
+//   passkey-options  { challenge, method?, telegramCode | emailCode }  -> { options }
 //   finish           { challenge, method, newPassword, ... }
 //      method "telegram":   telegramCode, and factor + code/response when 2FA is on
+//      method "email":      emailCode (none after the link), and factor +
+//                           code/response when 2FA is on
 //      method "backup":     code
 //      method "staff-code": resetCode
 //
@@ -43,6 +53,8 @@ import { telegramConfigured, sendTelegram, linkedChat } from '../_lib/telegram.j
 import { authenticationOptions, finishAuthentication } from '../_lib/webauthn.js';
 import { methodsFor, hasSecondFactor, totpOk, spendBackupCode, sendTelegramCode, telegramCodeOk } from '../_lib/factors.js';
 import { checkPassword } from '../_lib/account-rules.js';
+import { emailConfigured, sendEmail, resetNoticeEmail } from '../_lib/email.js';
+import { confirmedEmail, sendEmailCode, emailCodeOk, challengeForLink, linkToken, sameBrowser } from '../_lib/email-factor.js';
 import { findForLogin, loadAccount, canSignIn } from '../_lib/users.js';
 import {
   createChallenge,
@@ -51,6 +63,7 @@ import {
   deleteChallenge,
   createSession,
   endOtherSessions,
+  renewChallenge,
 } from '../_lib/session.js';
 
 // A staff-issued reset code, spent if it is live for this account.
@@ -99,6 +112,13 @@ async function startRecovery(request, response, body) {
   if (!member || !canSignIn(member)) {
     return ok(response, { found: false });
   }
+  const challenge = await createChallenge({ purpose: 'recover', userId: member.id });
+  return ok(response, await waysBackIn(member, challenge));
+}
+
+// What "start" (and "email-link") answers: the challenge, the ways back in
+// the account has, and its second factors.
+async function waysBackIn(member, challenge) {
   const methods = await methodsFor(member);
   const twoFactor = hasSecondFactor(methods, member);
   // Telegram is a way back in only when the bot is set up and a chat is linked.
@@ -106,19 +126,45 @@ async function startRecovery(request, response, body) {
   if (telegramConfigured()) {
     telegram = Boolean(await linkedChat(member.id));
   }
-  const challenge = await createChallenge({ purpose: 'recover', userId: member.id });
   // A backup code is a way back in only when 2FA is on.
   let backup = false;
   if (twoFactor) {
     backup = methods.backup;
   }
-  return ok(response, {
+  return {
     found: true,
     challenge,
     telegram,
+    emailCodes: methods.emailCodes,
     backup,
     factor: { totp: methods.totp, passkey: methods.passkey, backup: methods.backup, required: twoFactor },
-  });
+  };
+}
+
+// Step "email-link": the emailed link, opened in the browser that asked for
+// it, proves the email way. That tab carries on with a new challenge, which
+// remembers the email is proven; anywhere else, the link is refused.
+async function followEmailLink(request, response, body) {
+  const link = linkToken(body.link);
+  if (await limited(request, response, 'secondFactor', [`l:${sha256(String(link))}`])) {
+    return;
+  }
+  const challenge = await challengeForLink(link, 'recover');
+  if (!challenge) {
+    return fail(response, 401, 'email_link_expired');
+  }
+  if (!sameBrowser(request, challenge)) {
+    await failChallengeAttempt(challenge);
+    await audit(request, { action: 'recover.failed', actorId: challenge.user_id, details: { method: 'email-link', reason: 'other_browser' } });
+    return fail(response, 401, 'email_link_other_browser');
+  }
+  const account = await loadAccount(challenge.user_id, { withSecrets: true });
+  if (!account || account.kind !== 'public' || !canSignIn(account) || !emailConfigured() || !(await confirmedEmail(account))) {
+    await deleteChallenge(challenge);
+    return fail(response, 401, 'challenge_expired');
+  }
+  const renewed = await renewChallenge(challenge, { email_verified_at: new Date().toISOString(), email_link_hash: null });
+  return ok(response, { ...(await waysBackIn(account, renewed)), emailVerified: true });
 }
 
 // The challenge "start" handed out, and the account it belongs to, or null
@@ -139,8 +185,12 @@ async function loadRecovery(response, body) {
   return { challenge, account };
 }
 
-// Step "send": a reset code to the linked Telegram chat.
-async function sendResetCode(request, response, { challenge, account, chat }) {
+// Step "send": a reset code to the linked Telegram chat, or (channel
+// "email") a code and link to the confirmed address.
+async function sendResetCode(request, response, body, { challenge, account, chat }) {
+  if (body.channel === 'email') {
+    return sendResetEmail(request, response, { challenge, account });
+  }
   if (!chat) {
     return fail(response, 400, 'telegram_not_linked');
   }
@@ -151,13 +201,61 @@ async function sendResetCode(request, response, { challenge, account, chat }) {
   return ok(response, { sent: true });
 }
 
+async function sendResetEmail(request, response, { challenge, account }) {
+  if (!emailConfigured()) {
+    return fail(response, 400, 'email_off');
+  }
+  const address = await confirmedEmail(account);
+  if (!address) {
+    return fail(response, 400, 'email_not_confirmed');
+  }
+  if (await limited(request, response, 'emailSend', [`u:${account.id}`])) {
+    return;
+  }
+  try {
+    await sendEmailCode(request, response, challenge, { purpose: 'reset', account, address });
+  } catch (cause) {
+    console.error('[helloevents] reset email:', errorDetail(cause));
+    return fail(response, 502, 'email_send_failed');
+  }
+  return ok(response, { sent: true });
+}
+
+// Whether the email way is proven: the link was followed in this browser
+// (email_verified_at, set by "email-link"), or the emailed code is right.
+async function emailProven(challenge, account, typed) {
+  if (!emailConfigured() || !(await confirmedEmail(account))) {
+    return false;
+  }
+  if (challenge.email_verified_at) {
+    return true;
+  }
+  return emailCodeOk(challenge, typed);
+}
+
+// The first proof of the Telegram or email way: its code (or followed link).
+async function firstProofPassed(method, body, { challenge, account, chat }) {
+  if (method === 'email') {
+    return emailProven(challenge, account, body.emailCode);
+  }
+  if (!chat) {
+    return false;
+  }
+  return telegramCodeOk(challenge, body.telegramCode);
+}
+
 // Step "passkey-options": the passkey ceremony for an account with 2FA,
-// handed out only once the Telegram code is right.
-async function passkeyOptions(request, response, body, { challenge, account, chat }) {
+// handed out only once the Telegram or email way is proven.
+async function passkeyOptions(request, response, body, recovery) {
+  const { challenge, account } = recovery;
   if (await limited(request, response, 'secondFactor', [`c:${challenge.id}`])) {
     return;
   }
-  if (!chat || !(await telegramCodeOk(challenge, body.telegramCode))) {
+  let method = 'telegram';
+  if (body.method === 'email') {
+    method = 'email';
+  }
+  if (!(await firstProofPassed(method, body, recovery))) {
     await failChallengeAttempt(challenge);
     return fail(response, 401, 'code_wrong');
   }
@@ -168,8 +266,8 @@ async function passkeyOptions(request, response, body, { challenge, account, cha
   return ok(response, { options });
 }
 
-// The second factor sent with a right Telegram code, when 2FA is on: an
-// authenticator code, a backup code or a passkey.
+// The second factor sent with a right Telegram or email code, when 2FA is
+// on: an authenticator code, a backup code or a passkey.
 async function secondFactorPassed(body, account) {
   if (body.factor === 'totp') {
     return totpOk(account, body.code);
@@ -184,15 +282,13 @@ async function secondFactorPassed(body, account) {
 }
 
 // Whether the proof sent with "finish" is right for the way back in chosen.
-async function proofPassed(body, method, { challenge, account, chat, twoFactor }) {
-  if (method === 'telegram') {
-    // Telegram first, so a wrong Telegram code never spends a backup code.
-    let passed = false;
-    if (chat) {
-      passed = await telegramCodeOk(challenge, body.telegramCode);
-    }
+async function proofPassed(body, method, recovery) {
+  const { account, twoFactor } = recovery;
+  if (method === 'telegram' || method === 'email') {
+    // Telegram or email first, so a wrong code never spends a backup code.
+    const passed = await firstProofPassed(method, body, recovery);
     if (passed && twoFactor) {
-      passed = await secondFactorPassed(body, account);
+      return secondFactorPassed(body, account);
     }
     return passed;
   }
@@ -220,14 +316,14 @@ async function saveNewPassword(accountId, newPassword) {
 }
 
 // What the new session records as its second step: the factor sent with the
-// Telegram code when 2FA is on, otherwise the way back in itself ("password"
-// for a staff code).
+// Telegram or email code when 2FA is on, otherwise the way back in itself
+// ("password" for a staff code).
 function sessionFactor(method, twoFactor, body) {
-  if (method === 'telegram') {
+  if (method === 'telegram' || method === 'email') {
     if (twoFactor) {
       return body.factor;
     }
-    return 'telegram';
+    return method;
   }
   if (method === 'backup') {
     return 'backup';
@@ -242,6 +338,13 @@ function sendResetNotice(chat, account) {
     chat.chat_id,
     `The password for your GFTV HelloEvents account ${account.username} was just reset, and every other device was signed out.`
   ).catch((cause) => console.warn('[helloevents] reset notice not sent:', errorDetail(cause)));
+}
+
+// Tells the confirmed address the same, the same way: not waited for.
+function sendResetNoticeEmail(address, account) {
+  sendEmail({ to: address, ...resetNoticeEmail({ username: account.username }) }).catch((cause) =>
+    console.warn('[helloevents] reset notice email not sent:', errorDetail(cause))
+  );
 }
 
 // Step "finish": checks the proof, sets the new password, signs every other
@@ -261,7 +364,7 @@ async function finishRecovery(request, response, body, recovery) {
   const methods = await methodsFor(account);
   const twoFactor = hasSecondFactor(methods, account);
   let method = 'telegram';
-  if (['telegram', 'backup', 'staff-code'].includes(body.method)) {
+  if (['telegram', 'email', 'backup', 'staff-code'].includes(body.method)) {
     method = body.method;
   }
   const passed = await proofPassed(body, method, { challenge, account, chat, twoFactor });
@@ -288,10 +391,14 @@ async function finishRecovery(request, response, body, recovery) {
   if (chat) {
     sendResetNotice(chat, account);
   }
+  if (methods.emailCodes) {
+    sendResetNoticeEmail(account.email, account);
+  }
   return ok(response, { signedIn: signIn });
 }
 
-// Sends each action to its step. Every step after "start" needs the challenge
+// Sends each action to its step. Every step after "start" (and
+// "email-link", whose link names its own challenge) needs the challenge
 // "start" handed out, still live and for a public account that may sign in.
 export default route('auth/recover', async (request, response) => {
   if (guard(request, response, ['POST'])) {
@@ -304,6 +411,10 @@ export default route('auth/recover', async (request, response) => {
 
   if (body.action === 'start') {
     await startRecovery(request, response, body);
+    return;
+  }
+  if (body.action === 'email-link') {
+    await followEmailLink(request, response, body);
     return;
   }
 
@@ -319,7 +430,7 @@ export default route('auth/recover', async (request, response) => {
   const recovery = { challenge, account, chat };
 
   if (body.action === 'send') {
-    await sendResetCode(request, response, recovery);
+    await sendResetCode(request, response, body, recovery);
     return;
   }
   if (body.action === 'passkey-options') {

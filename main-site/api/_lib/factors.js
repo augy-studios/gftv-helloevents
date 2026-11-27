@@ -8,6 +8,10 @@
 //             (gftvevents_totp_secrets, AES-256-GCM encrypted).
 //   passkey   a passkey registered on this site.
 //   telegram  a Telegram chat linked on this site, when the bot is set up.
+//   email     a code or link emailed to the address the account confirmed
+//             (migrations/028, email-factor.js), when Resend is set up.
+//             Like Telegram for a public account, it never turns 2FA on by
+//             itself; once 2FA is on, it is accepted as the second step.
 //   backup    a one-time backup code: for staff, a shared one from
 //             gftvhello_backup_codes (either format other GFTV sites write);
 //             for anyone, one issued here. A
@@ -37,6 +41,7 @@ import { countPasskeys } from './webauthn.js';
 import { linkedChat, sendRichTelegram, telegramConfigured, CODE_MINUTES } from './telegram.js';
 import { codeMessage } from './telegram-messages.js';
 import { updateChallenge } from './session.js';
+import { emailUsable } from './email-factor.js';
 
 // Supabase answers data: null when a query returns nothing; read that as no
 // rows.
@@ -127,9 +132,9 @@ export async function localBackupCount(userId) {
   return countOrZero(count);
 }
 
-// { totp, passkey, telegram, backup } for the sign-in page. user is a
-// normalised account loaded with { withSecrets: true }, since the shared
-// secret is part of it. The five lookups run at the same time.
+// { totp, passkey, telegram, emailCodes, backup } for the sign-in page. user is
+// a normalised account loaded with { withSecrets: true }, since the shared
+// secret and the email are part of it. The lookups run at the same time.
 export async function methodsFor(user) {
   // A shared authenticator is enough, so this site's own is only looked up
   // when there is none.
@@ -146,13 +151,15 @@ export async function methodsFor(user) {
   }
   const sharedBackupLookup = sharedBackupCount(user);
   const localBackupLookup = localBackupCount(user.id);
+  const emailLookup = emailUsable(user);
 
-  const [hasLocal, passkeyCount, chat, sharedBackups, localBackups] = await Promise.all([
+  const [hasLocal, passkeyCount, chat, sharedBackups, localBackups, emailCodes] = await Promise.all([
     localTotpLookup,
     passkeyLookup,
     chatLookup,
     sharedBackupLookup,
     localBackupLookup,
+    emailLookup,
   ]);
 
   let hasTotp = false;
@@ -163,6 +170,7 @@ export async function methodsFor(user) {
     totp: hasTotp,
     passkey: passkeyCount > 0,
     telegram: Boolean(chat),
+    emailCodes,
     backup: sharedBackups + localBackups > 0,
   };
 }
@@ -171,7 +179,8 @@ export async function methodsFor(user) {
 // an authenticator or a passkey switches it on: a linked Telegram chat is
 // also how notices and password resets arrive, and linking it for those
 // should not start demanding a code at every sign-in. Once 2FA is on,
-// Telegram is accepted as the second step too.
+// Telegram is accepted as the second step too. Email (migrations/028) never
+// counts here, for either kind: it is only ever a backup second step.
 export function hasSecondFactor(methods, account = null) {
   if (account !== null && account !== undefined && account.kind === 'public') {
     if (methods.totp || methods.passkey) {

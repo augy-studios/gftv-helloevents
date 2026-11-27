@@ -21,7 +21,7 @@ import { SESSION_ACCOUNT_SELECT, normaliseAccount, ensureStaffAccount, canSignIn
 
 export const SESSION_COOKIE = '__Host-ghe_session';
 const SESSION_DAYS = 7;
-const FACTORS = new Set(['password', 'totp', 'passkey', 'telegram', 'backup']);
+const FACTORS = new Set(['password', 'totp', 'passkey', 'telegram', 'backup', 'email']);
 
 // account: a normalised account (users.js).
 export async function createSession(request, response, account, factor) {
@@ -145,16 +145,19 @@ export async function endOtherSessions(userId, exceptSessionId) {
 //   recover    a public account resetting a forgotten password (recover.js).
 //   totp-setup a signed-in account setting up an authenticator app; holds
 //              the pending secret until a first code proves it.
+//   email-setup a signed-in account confirming its email address for email
+//              codes (migrations/028, email-factor.js).
 //   enrol      no longer issued (round 3: staff set 2FA up on gftv.asia, as
 //              on OneLink GFTV); still allowed by the table.
 // ---------------------------------------------------------------------------
 
-const CHALLENGE_MINUTES = { login: 10, enrol: 30, recover: 15, 'totp-setup': 15 };
+const CHALLENGE_MINUTES = { login: 10, enrol: 30, recover: 15, 'totp-setup': 15, 'email-setup': 15 };
 export const CHALLENGE_ATTEMPTS = 5;
 
-const CHALLENGE_COLUMNS =
+export const CHALLENGE_COLUMNS =
   'id, user_id, purpose, attempts, pending_totp_secret, telegram_code_hash, telegram_code_expires_at, ' +
-  'pending_telegram_chat_id, pending_telegram_username, expires_at';
+  'pending_telegram_chat_id, pending_telegram_username, expires_at, ' +
+  'email_code_hash, email_code_expires_at, email_link_hash, email_browser_hash, email_verified_at';
 
 // account, when given, makes sure a staff member's accounts row exists
 // first, since challenges reference gftvevents_accounts.
@@ -223,6 +226,15 @@ export async function updateChallenge(challenge, fields) {
   if (error) {
     throw error;
   }
+}
+
+// Gives a challenge a new token, with fields changed at the same time, and
+// returns the token. The old token stops working. For a reset whose emailed
+// link was followed in a new tab: that tab carries on with the new token.
+export async function renewChallenge(challenge, fields) {
+  const token = randomToken(32);
+  await updateChallenge(challenge, { ...fields, token_hash: sha256(token) });
+  return token;
 }
 
 export async function deleteChallenge(challenge) {

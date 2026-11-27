@@ -67,6 +67,9 @@ export const TABLES = Object.freeze({
   // organisers' own entry QR codes (entry-codes.js).
   helloidChecks: 'gftvevents_helloid_checks',
   entryCodes: 'gftvevents_entry_codes',
+  // migrations/028: the email address each account confirmed, for email as a
+  // backup second step and for password resets (email-factor.js).
+  emailFactors: 'gftvevents_email_factors',
   // Owned by gftv.asia and shared by every GFTV site. Read here. The only
   // write is spending a shared backup code, which every GFTV site that
   // accepts them does (gftv-linktree api/admin/auth.js).

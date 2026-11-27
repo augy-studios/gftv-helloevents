@@ -1,6 +1,10 @@
 // Sign in: password, then the second factor when the account has one. Staff
 // must have one (set up on gftv.asia); for public accounts it is optional,
 // and the server answers step "done" straight after the password.
+//
+// An emailed sign-in link (migrations/028) lands here as /login#email=<token>:
+// the token is taken out of the address at once and sent to the server,
+// which signs in only the browser that asked for the email.
 
 import { session } from '../app.js';
 import { t as translate, onChange } from '../../assets/i18n/i18n.js';
@@ -90,11 +94,11 @@ byId('passwordForm').addEventListener('submit', (event) => {
 // Step two: the second factor
 // ---------------------------------------------------------------------------
 
-const HELP_KEYS = { totp: 'login.help-totp', passkey: 'login.help-passkey', telegram: 'login.help-telegram', backup: 'login.help-backup' };
+const HELP_KEYS = { totp: 'login.help-totp', passkey: 'login.help-passkey', telegram: 'login.help-telegram', email: 'login.help-email', backup: 'login.help-backup' };
 
 // Shows the second step with a button for each method this account has (a
 // passkey only where the browser supports them), and picks the first of
-// authenticator, passkey, Telegram, backup code.
+// authenticator, passkey, Telegram, email, backup code.
 function showFactors(methods) {
   let passkeyUsable = methods.passkey;
   if (passkeyUsable) {
@@ -104,14 +108,15 @@ function showFactors(methods) {
     totp: methods.totp,
     passkey: passkeyUsable,
     telegram: methods.telegram,
+    email: methods.emailCodes === true,
     backup: methods.backup,
   };
   document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
     button.hidden = !usable[button.dataset.method];
   });
   show('stepFactor');
-  // Picking Telegram sends nothing by itself: the code goes out only when
-  // "Send me a code" is pressed.
+  // Picking Telegram or email sends nothing by itself: the code goes out only
+  // when "Send me a code" or "Email me a code" is pressed.
   let firstMethod = 'backup';
   if (usable.totp) {
     firstMethod = 'totp';
@@ -119,13 +124,16 @@ function showFactors(methods) {
     firstMethod = 'passkey';
   } else if (usable.telegram) {
     firstMethod = 'telegram';
+  } else if (usable.email) {
+    firstMethod = 'email';
   }
   pick(firstMethod);
 }
 
 // Switches the second step to one method: presses its button, sets the help
-// line, and shapes the code field for it (six digits for the authenticator
-// and Telegram, up to 16 characters for a backup code, none for a passkey).
+// line, and shapes the code field for it (six digits for the authenticator,
+// Telegram and email, up to 16 characters for a backup code, none for a
+// passkey).
 function pick(name) {
   method = name;
   document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
@@ -136,7 +144,7 @@ function pick(name) {
   codeInput.value = '';
   byId('codeError').textContent = '';
   let numeric = false;
-  if (name === 'totp' || name === 'telegram') {
+  if (name === 'totp' || name === 'telegram' || name === 'email') {
     numeric = true;
   }
   if (numeric) {
@@ -152,12 +160,15 @@ function pick(name) {
     labelKey = 'field.backup-code';
   } else if (name === 'telegram') {
     labelKey = 'field.telegram-code';
+  } else if (name === 'email') {
+    labelKey = 'field.email-code';
   }
   byId('codeLabel').textContent = translate(labelKey);
   byId('codeField').hidden = name === 'passkey';
   byId('codeSubmitRow').hidden = name === 'passkey';
   byId('passkeyRow').hidden = name !== 'passkey';
   byId('telegramSendRow').hidden = name !== 'telegram';
+  byId('emailSendRow').hidden = name !== 'email';
 }
 
 document.querySelectorAll('#methodPicker [data-method]').forEach((button) => {
@@ -193,6 +204,47 @@ byId('telegramSend').addEventListener('click', () => {
     byId('code').focus();
   });
 });
+
+byId('emailSend').addEventListener('click', () => {
+  withBusy(byId('emailSend'), byId('codeError'), async () => {
+    try {
+      await post('/api/auth/verify', { challenge, method: 'email-send' });
+    } catch (error) {
+      handleExpiry(error);
+      throw error;
+    }
+    toast(translate('email.sent'));
+    byId('code').focus();
+  });
+});
+
+// /login#email=<token>: the emailed link. The token leaves the address
+// before anything else, so it is not kept in the history or bookmarked.
+function emailLinkToken() {
+  const match = /^#email=([A-Za-z0-9_-]{32,64})$/.exec(location.hash);
+  if (!match) {
+    return null;
+  }
+  history.replaceState(null, '', location.pathname + location.search);
+  return match[1];
+}
+
+const linkFromEmail = emailLinkToken();
+if (linkFromEmail) {
+  const box = byId('passwordError');
+  withBusy(byId('passwordSubmit'), box, async () => {
+    // A plain note while it works; an error shows as one.
+    box.classList.remove('danger');
+    box.textContent = translate('login.email-link-busy');
+    try {
+      await post('/api/auth/verify', { method: 'email-link', link: linkFromEmail });
+    } catch (error) {
+      box.classList.add('danger');
+      throw error;
+    }
+    signedIn();
+  });
+}
 
 byId('passkeyUse').addEventListener('click', () => {
   withBusy(byId('passkeyUse'), byId('codeError'), async () => {

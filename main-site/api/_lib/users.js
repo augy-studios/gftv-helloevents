@@ -15,13 +15,14 @@
 //             delete events.
 //
 // The column lists are the only things that ever select from either table.
-// Emails are read for sign-in lookups only and never leave this module.
+// Emails are read for sign-in lookups and, with the secrets, for email codes
+// (email-factor.js); they are never sent to a page.
 
 import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
-const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret`;
+const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret, email`;
 const ACCOUNT_COLUMNS =
   'id, kind, username, display_name, status, notify_updates, notify_reminders, reminder_hours, notify_new_events, notify_telegram, country, ' +
   'legal_name, date_of_birth, emergency_name, emergency_phone, id_verified_providers, helloid_pending';
@@ -42,7 +43,9 @@ export function reminderHoursFrom(list) {
   }
   return REMINDER_HOURS.filter((hours) => list.some((each) => Number(each) === hours)).reverse();
 }
-const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash`;
+// email is loaded with the secrets only, for email codes (email-factor.js),
+// and never sent to a page.
+const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash, email`;
 
 // For a session lookup: the account row with its staff record embedded.
 export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${TABLES.users} ( ${STAFF_COLUMNS} )`;
@@ -76,6 +79,7 @@ function fromStaff(staff, account = null) {
     }
     normalised.password_hash = staff.password_hash;
     normalised.totp_secret = totpSecret;
+    normalised.email = emailOf(staff);
   }
   return normalised;
 }
@@ -99,8 +103,17 @@ function fromPublic(account) {
   if ('password_hash' in account) {
     normalised.password_hash = account.password_hash;
     normalised.totp_secret = null;
+    normalised.email = emailOf(account);
   }
   return normalised;
+}
+
+// A row's email, lowercased and trimmed, or null.
+function emailOf(row) {
+  if (typeof row.email !== 'string' || row.email.trim() === '') {
+    return null;
+  }
+  return row.email.trim().toLowerCase();
 }
 
 // The account's country of origin (migrations/015), a two-letter code, or

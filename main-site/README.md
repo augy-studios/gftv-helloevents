@@ -16,11 +16,11 @@ the functions with the service role key. No Supabase Auth, no request signing.
   - **Public**: anyone can sign up at `/signup` (username, display name, email, password, agreeing
     to the Terms of Use and Privacy Policy) to RSVP and get notifications. Passwords are bcrypt,
     cost 12. 2FA is optional: an authenticator app or a passkey switches it on, comes with ten
-    backup codes, and then Telegram codes and backup codes are accepted too. No email is ever sent
-    (emails are only for signing in and are not verified). A forgotten password is reset at
-    `/reset` in one of three ways: a code sent to the linked Telegram chat (plus the second factor
-    when 2FA is on), one backup code (when 2FA is on), or a one-time code an admin makes in
-    `/manage` for a member with neither, after checking who they are. A staff code on an account
+    backup codes, and then Telegram codes, email codes and backup codes are accepted too. A
+    forgotten password is reset at `/reset` in one of four ways: a code sent to the linked
+    Telegram chat or to the confirmed email (either plus the second factor when 2FA is on), one
+    backup code (when 2FA is on), or a one-time code an admin makes in `/manage` for a member with
+    none of these, after checking who they are. A staff code on an account
     with 2FA only sets the password; signing in still needs the second step.
   - **Names**: usernames and display names may not contain words that look like the team (staff,
     official, admin, GFTV, moderator, ...), compared after folding case, spacing, accents,
@@ -76,6 +76,17 @@ the functions with the service role key. No Supabase Auth, no request signing.
     (`/api/idcheck/webhook?provider=`) is checked against its signature. Neither is trusted: both
     only say which check to read again from the provider's API. Only the name, date of birth and a
     keyed hash of the document number are kept.
+- **Email codes** (migrations/028, `api/_lib/email.js`, `api/_lib/email-factor.js`). A member
+  confirms their email on the account page (a code, or a link opened while signed in). Once 2FA
+  is on, an email holding a code and a link is a second step at sign-in, as Telegram is; email
+  never turns 2FA on by itself. A confirmed email is also a way to reset a forgotten password
+  (plus the second step when 2FA is on), and gets a note when the password is reset. Codes are
+  bcrypt and links SHA-256 on the challenge, both expiring after 10 minutes. The link works only
+  in the browser that asked for the email (an HttpOnly cookie, `__Host-ghe_email_browser`), so a
+  forwarded link or a mail scanner does nothing; opening it only shows a page that then posts it.
+  A staff member's confirmation stops holding if their gftv.asia email changes. Sent through
+  Resend's free plan (`RESEND_API_KEY`, `EMAIL_FROM`), about 100 a day; past that, the page says
+  to use another way.
 - **Check-in** (migrations/027, `/checkin?id=`, `api/manage/checkin.js`). Someone going sees their
   check-in QR code on the event page (signed with `SIGNING_SECRET`, so it cannot be made up, and
   saved on the phone for when there is no connection). Organisers open the check-in page from the
@@ -403,7 +414,8 @@ the functions with the service role key. No Supabase Auth, no request signing.
   separated by commas or spaces): each new attendee as they join, each payment reported (to be
   checked) and confirmed, and each new event once it is published, sent once the editor stops
   saving (the same 45-second wait as change notices) or at its release time when that is later
-  (the cron sends any left over). On the same Organisers tab, an admin lists an event's organisers'
+  (the cron sends any left over), and each passed ID check as one line, "otter has HelloID" (or
+  Didit, Veriff), whether the checks or an admin approved it (`api/_lib/admin-chats.js`). On the same Organisers tab, an admin lists an event's organisers'
   chats (up to 10; **Send a test** checks each): they hear about the event's new attendees once each
   has given every detail it asks for (contact details by its rule, the registration form's answers;
   at once, or when they finish them later; once per attendee), and its payments once confirmed. An

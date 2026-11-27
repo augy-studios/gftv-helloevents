@@ -12,6 +12,9 @@ export const LIMITS = Object.freeze({
   secondFactor: [10, 900],
   enrol: [30, 1800],
   telegramSend: [3, 900],
+  // Emailed codes (migrations/028): Resend's free plan sends about 100 a
+  // day for the whole site, so few per account and per connection.
+  emailSend: [3, 900],
   reauth: [8, 900],
   rsvp: [30, 60],
   manageWrite: [120, 60],

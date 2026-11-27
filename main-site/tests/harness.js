@@ -59,7 +59,7 @@ export function browser() {
 // Every field name that must never reach a browser.
 export const SECRET_FIELDS = [
   'password_hash', 'totp_secret', 'telegram_chat_id', 'code_hash', 'token_hash',
-  'pending_totp_secret', 'telegram_code_hash', 'public_key', 'ip_hash', 'email', 'secret_enc',
+  'pending_totp_secret', 'telegram_code_hash', 'email_code_hash', 'email_link_hash', 'email_browser_hash', 'public_key', 'ip_hash', 'email', 'secret_enc',
   'chat_id', 'pending_telegram_chat_id', 'staff_notes', 'created_by', 'updated_by', 'user_id',
 ];
 

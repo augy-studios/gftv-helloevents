@@ -160,6 +160,24 @@
                     </div>
                 </div>
 
+                <div id="emailBox" hidden>
+                    <h3 class="section-label" data-i18n="factor.email">Email</h3>
+                    <p id="emailState" class="small"></p>
+                    <p class="small muted" data-i18n="security.email-note">A backup second step once you have an authenticator app or a passkey, and a way to reset a forgotten password.</p>
+                    <div class="actions inline">
+                        <button class="btn" type="button" id="emailAdd" hidden><span data-icon="mail"></span><span data-i18n="security.email-add">Confirm my email</span></button>
+                        <button class="btn btn-quiet" type="button" id="emailRemove" hidden><span data-i18n="security.email-remove">Stop email codes</span></button>
+                    </div>
+                    <form id="emailForm" novalidate hidden>
+                        <p class="small" id="emailSentNote"></p>
+                        <label class="field u-mt-1">
+                            <span data-i18n="field.email-code">Code from the email</span>
+                            <input class="code-input" id="emailCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
+                        </label>
+                        <div class="actions"><button class="btn btn-primary" type="submit" id="emailSubmit"><span data-i18n="setup.confirm">Confirm</span></button></div>
+                    </form>
+                </div>
+
                 <h3 class="section-label" data-i18n="factor.backup">Backup codes</h3>
                 <p id="backupState" class="small"></p>
                 <div class="actions inline"><button class="btn" type="button" id="backupNew"><span data-icon="refresh"></span><span data-i18n="security.backup-new">Make new backup codes</span></button></div>

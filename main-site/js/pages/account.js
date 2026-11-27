@@ -26,6 +26,7 @@ let rsvps = null;
 let notifications = null;
 let deviceOn = false;
 let totpSetup = null; // the set-up token while an authenticator is being added
+let emailSetup = null; // the set-up token while the email address is being confirmed
 // The action waiting on the password dialog.
 let pendingAction = null;
 startTabs(byId('accountTabs'));
@@ -272,17 +273,74 @@ function renderSecurity() {
   byId('telegramLink').hidden = security.telegram.linked;
   byId('telegramUnlink').hidden = !security.telegram.linked;
 
+  renderEmail();
+
   byId('backupState').textContent = translate('security.backup-left', { count: security.backupCodesLeft });
 }
 
 // Signed out: off to sign in, then back here. Signed in: the profile, RSVPs,
+// Email (migrations/028): offered when the site sends email. The address is
+// only ever shown masked.
+function renderEmail() {
+  const email = security.emailCodes;
+  byId('emailBox').hidden = !email.available;
+  let stateText;
+  if (!email.address) {
+    stateText = translate('security.email-missing');
+  } else if (email.confirmed) {
+    stateText = translate('security.email-confirmed', { address: email.address });
+  } else {
+    stateText = translate('security.email-none', { address: email.address });
+  }
+  byId('emailState').textContent = stateText;
+  let addHidden = false;
+  if (email.confirmed || !email.address || emailSetup !== null) {
+    addHidden = true;
+  }
+  byId('emailAdd').hidden = addHidden;
+  byId('emailRemove').hidden = !email.confirmed;
+  byId('emailForm').hidden = emailSetup === null;
+  if (emailSetup !== null) {
+    byId('emailSentNote').textContent = translate('security.email-sent', { address: email.address });
+  }
+}
+
+// /account?emailConfirm=<token>: the link in the confirming email, opened
+// while signed in. The token leaves the address at once.
+async function confirmEmailFromLink() {
+  const params = new URLSearchParams(location.search);
+  const link = params.get('emailConfirm');
+  if (!link) {
+    return;
+  }
+  params.delete('emailConfirm');
+  let rest = params.toString();
+  if (rest) {
+    rest = `?${rest}`;
+  }
+  history.replaceState(null, '', location.pathname + rest + location.hash);
+  await withBusy(null, byId('securityError'), async () => {
+    security = await post('/api/me/security', { action: 'email-confirm', link });
+    emailSetup = null;
+    renderSecurity();
+    toast(translate('security.email-done'));
+  });
+}
+
 // notifications and security are fetched together and drawn; if any of them
 // fails, the profile still shows with the error. Whether this device has
 // push switched on is checked last, after the page is drawn.
 async function load() {
   const currentSession = await session;
   if (!currentSession.signedIn) {
-    location.replace(`/login?next=${encodeURIComponent('/account')}`);
+    // An email-confirming link opened while signed out still works once
+    // signed in.
+    let back = '/account';
+    const pendingLink = new URLSearchParams(location.search).get('emailConfirm');
+    if (pendingLink && /^[A-Za-z0-9_-]{32,64}$/.test(pendingLink)) {
+      back += `?emailConfirm=${pendingLink}`;
+    }
+    location.replace(`/login?next=${encodeURIComponent(back)}`);
     return;
   }
   currentUser = currentSession.user;
@@ -301,6 +359,7 @@ async function load() {
   renderRsvps();
   renderNotify();
   renderSecurity();
+  confirmEmailFromLink();
   startAccountStickers(currentUser);
   startIdCheckSection(currentUser, {
     onUser(user) {
@@ -422,7 +481,8 @@ function showNewCodes(codes) {
 
 // The password dialog's submit: sends the password with the action waiting
 // on it (add or remove a passkey, unlink Telegram, new backup codes, add or
-// remove the authenticator, or delete the account), then closes the dialog
+// remove the authenticator, confirm or stop email codes, or delete the
+// account), then closes the dialog
 // and redraws the security section.
 byId('passwordModalForm').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -461,6 +521,12 @@ byId('passwordModalForm').addEventListener('submit', (event) => {
       byId('totpSecret').textContent = data.secret.replace(/(.{4})/g, '$1 ').trim();
     } else if (action.kind === 'totp-remove') {
       security = await post('/api/me/security', { action: 'totp-remove', password });
+    } else if (action.kind === 'email-add') {
+      const data = await post('/api/me/security', { action: 'email-start', password });
+      emailSetup = data.setup;
+      toast(translate('email.sent'));
+    } else if (action.kind === 'email-remove') {
+      security = await post('/api/me/security', { action: 'email-remove', password });
     } else if (action.kind === 'delete-account') {
       await post('/api/me/security', { action: 'delete-account', password });
       location.replace('/');
@@ -471,6 +537,20 @@ byId('passwordModalForm').addEventListener('submit', (event) => {
     if (action.kind === 'totp-add') {
       byId('totpCode').focus();
     }
+    if (action.kind === 'email-add') {
+      byId('emailCode').focus();
+    }
+  });
+});
+
+byId('emailForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  withBusy(byId('emailSubmit'), byId('securityError'), async () => {
+    security = await post('/api/me/security', { action: 'email-confirm', setup: emailSetup, code: byId('emailCode').value });
+    emailSetup = null;
+    byId('emailCode').value = '';
+    renderSecurity();
+    toast(translate('security.email-done'));
   });
 });
 
@@ -543,6 +623,8 @@ byId('totpRemove').addEventListener('click', () => askPassword({ kind: 'totp-rem
 byId('passkeyAdd').addEventListener('click', () => askPassword({ kind: 'passkey-add' }));
 byId('telegramUnlink').addEventListener('click', () => askPassword({ kind: 'telegram-unlink' }));
 byId('backupNew').addEventListener('click', () => askPassword({ kind: 'backup-new' }));
+byId('emailAdd').addEventListener('click', () => askPassword({ kind: 'email-add' }));
+byId('emailRemove').addEventListener('click', () => askPassword({ kind: 'email-remove' }));
 byId('deleteAccount').addEventListener('click', () => askPassword({ kind: 'delete-account' }));
 
 byId('telegramLink').addEventListener('click', () => {

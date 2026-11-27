@@ -17,15 +17,15 @@ value only where a step says so.
 
 - **Codes.** It sends six-digit codes to a member's linked chat: for signing in
   (when the account has 2FA on) and for resetting a forgotten password at
-  `/reset`. The site sends no email, so for members without 2FA, Telegram is
-  the main way back into an account.
+  `/reset`. For members without 2FA, Telegram and a confirmed email (section
+  8) are the ways back into an account.
 - **Event notices**, for members who tick "Also send these to my linked
   Telegram chat" on their account page: changes of time or place, reminders
   and, if they asked, new events.
 - **Alerts for admins and organisers** (migrations/026). The admins' chats,
   listed in `ADMIN_CHAT_IDS` (section 2), hear about each new attendee, each
-  payment reported (to be checked) and confirmed, and each new event once it
-  is published. An event's organisers' chats, which an admin adds on the
+  payment reported (to be checked) and confirmed, each new event once it
+  is published, and each passed ID check ("otter has HelloID"). An event's organisers' chats, which an admin adds on the
   event's **Organisers** tab in Manage, hear about its new attendees (once
   each has given every detail the event asks for, with their contact
   details) and its payments once confirmed. A chat can be a person's or a
@@ -309,3 +309,39 @@ with no keys.
 Veriff) appears, opens the provider's page, and coming back shows how the
 check stands. The webhook answers 401 to anything not signed with its
 secret.
+
+## 8. Email codes with Resend (optional, free plan)
+
+Members can confirm their email on the account page's **Security** tab. Once
+2FA is on (an authenticator app or a passkey), a code or link by email is
+accepted as the second step, as Telegram is, and a confirmed email can reset
+a forgotten password at `/reset`. Email alone never turns 2FA on. Neither
+Vercel nor Supabase sends this site's email: it goes through
+[Resend](https://resend.com), whose free plan allows about 100 emails a day
+(3,000 a month) and one domain. Past the daily cap, emails are refused and the
+page says to use another way; nobody is billed. Run
+`migrations/028_email_factor.sql` first.
+
+1. Sign up at resend.com (free plan) and go to **Domains > Add domain**. Use a
+   sending subdomain such as `events.globalfurry.tv`, so the main domain's mail
+   is left alone, and pick a region close to Singapore (Tokyo).
+2. Resend lists DNS records (a DKIM TXT record, and an MX and an SPF TXT record
+   on `send.events`). Add each, exactly as shown, wherever globalfurry.tv's DNS
+   is managed, then press **Verify DNS Records** and wait until the domain says
+   **Verified**.
+3. **API Keys > Create API Key**: permission **Sending access**, limited to
+   that domain. Copy it (it is shown once).
+4. In Vercel, Production, set:
+
+   | Variable | Value |
+   | --- | --- |
+   | `RESEND_API_KEY` | the key. Tick **Sensitive**. |
+   | `EMAIL_FROM` | the sender, on the verified domain, for example `GFTV HelloEvents <no-reply@events.globalfurry.tv>` |
+
+   Redeploy. With either blank, nothing offers email.
+
+**Check:** on the account page, the Security tab shows **Email** with
+**Confirm my email**. Confirm, then turn on an authenticator; signing in again
+offers **Email** as a second step, and **Email me a code** sends one. The
+email's button works only in the browser that asked for it; on another device,
+type the code.

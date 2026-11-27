@@ -246,3 +246,57 @@ test('/chatid answers with the chat\'s id, in a group too', async () => {
   await browser().call(webhook, { method: 'POST', headers: HOOK, body: { message: { chat: { id: -100555, type: 'group' }, text: '/help' } } });
   assert.equal(sent.length, 0);
 });
+
+test('a passed ID check tells the admins "username has way", however it was approved', async () => {
+  const helloidChecks = await import('../api/_lib/helloid-checks.js');
+  const idChecks = await import('../api/_lib/id-checks.js');
+  const { idVerifiedText } = await import('../api/_lib/admin-chats.js');
+  assert.equal(idVerifiedText('otter', 'helloid'), 'otter has HelloID');
+  assert.equal(idVerifiedText('otter', 'didit'), 'otter has Didit');
+  assert.equal(idVerifiedText('otter', 'veriff'), 'otter has Veriff');
+
+  const plainSent = () => sent.filter((s) => s.url.endsWith('/sendMessage')).map((s) => `${s.body.chat_id}: ${s.body.text}`).sort();
+  const account = (username) => db.table('gftvevents_accounts').find((row) => row.username === username);
+
+  // HelloID, approved by its own checks.
+  await member('otter');
+  sent = [];
+  await helloidChecks.saveHelloid(account('otter').id, { status: 'approved', decided_auto: true, verified_name: 'Otter Tan', verified_birth: '2000-01-02' });
+  assert.deepEqual(plainSent(), ['-100111: otter has HelloID', '222: otter has HelloID']);
+
+  // HelloID waiting for the admins: nothing until one approves it.
+  await member('fox');
+  sent = [];
+  const waiting = await helloidChecks.saveHelloid(account('fox').id, { status: 'pending', verified_name: 'Fox', verified_birth: '2001-01-01' });
+  assert.deepEqual(plainSent(), []);
+  await helloidChecks.decideHelloid(waiting, { approved: false, reviewerId: crypto.randomUUID(), reason: 'Blurry.' });
+  assert.deepEqual(plainSent(), [], 'not for a decline');
+  const again = await helloidChecks.saveHelloid(account('fox').id, { status: 'pending', verified_name: 'Fox', verified_birth: '2001-01-01' });
+  await helloidChecks.decideHelloid(again, { approved: true, reviewerId: crypto.randomUUID(), reason: null });
+  assert.deepEqual(plainSent(), ['-100111: fox has HelloID', '222: fox has HelloID']);
+
+  // An outside provider's approval, read once: a second read tells nobody.
+  process.env.DIDIT_API_KEY = 'didit-key';
+  process.env.DIDIT_WORKFLOW_ID = 'workflow-1';
+  await member('wolf');
+  const wolfId = account('wolf').id;
+  await db.from('gftvevents_id_checks').insert({ id: crypto.randomUUID(), account_id: wolfId, provider: 'didit', provider_session_id: 'sess-w', status: 'started', created_at: new Date().toISOString() });
+  const check = db.table('gftvevents_id_checks')[0];
+  const telegramFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (/didit\.me/.test(String(url))) {
+      return new Response(JSON.stringify({ status: 'Approved', vendor_data: wolfId, id_verifications: [{ full_name: 'Wolf Lee', document_number: 'W1', issuing_state: 'SGP' }] }), { status: 200 });
+    }
+    return telegramFetch(url, init);
+  };
+  try {
+    sent = [];
+    await idChecks.refreshCheck(check);
+    await idChecks.refreshCheck(check);
+  } finally {
+    globalThis.fetch = telegramFetch;
+    delete process.env.DIDIT_API_KEY;
+    delete process.env.DIDIT_WORKFLOW_ID;
+  }
+  assert.deepEqual(plainSent(), ['-100111: wolf has Didit', '222: wolf has Didit']);
+});

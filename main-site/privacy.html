@@ -44,7 +44,8 @@
             <ul>
                 <li>No ads, and nothing about you is sold or used for advertising.</li>
                 <li>You can look at events without an account. To RSVP you need one: a username, a
-                    display name, an email address (only to sign in: we send no email) and a password.</li>
+                    display name, an email address (to sign in, and for sign-in codes only if you turn them
+                    on) and a password.</li>
                 <li>Organisers see what their event asks you for (such as a phone number or a
                     registration form), and never your email address.</li>
                 <li>ID checks are only for events that ask for one. HelloID, GFTV's own, deletes your
@@ -91,7 +92,9 @@
             is run by GFTV separately. Anyone else signs up here, and we keep:</p>
         <ul>
             <li><strong>Your username, display name and email address.</strong> The email address
-                is only used to sign in. It isn't checked, we send no email, and nobody else sees it.</li>
+                is used to sign in, and nobody else sees it. We email you only if you confirm your
+                address on your account page (section 8), and then only sign-in and password reset
+                codes and a note when your password is reset. Never news or adverts.</li>
             <li><strong>Your password</strong>, only in a scrambled form (a bcrypt hash), which
                 can't be turned back into the password.</li>
             <li><strong>Your country of origin</strong>, which cross-border events need.</li>
@@ -197,6 +200,10 @@
                 store only a scrambled form of it.</li>
             <li><strong>Two-step sign-in</strong>, if you set it up: an authenticator app's secret
                 (encrypted), passkeys (their public keys only), and backup codes (scrambled).</li>
+            <li><strong>Email codes</strong>, if you confirm your address: which address you confirmed
+                and when. Each code and link is kept only in a scrambled form and expires after 10
+                minutes. A sign-in link also sets a cookie for 30 minutes, so it works only in the
+                browser that asked for it.</li>
             <li><strong>Cloudflare Turnstile</strong> checks that a person, not a bot, is signing in,
                 signing up or resetting a password.</li>
             <li><strong>Misuse limits and the audit log</strong>: to slow down attacks and keep a record
@@ -250,6 +257,11 @@
                         <td data-label="Who"><a href="https://telegram.org/privacy">Telegram</a></td>
                         <td data-label="What for">Sign-in codes, notices, and alerts to admins and organisers</td>
                         <td data-label="What it handles">Your chat ID and the messages (sections 4 and 7)</td>
+                    </tr>
+                    <tr>
+                        <td data-label="Who"><a href="https://resend.com/legal/privacy-policy">Resend</a></td>
+                        <td data-label="What for">Sends sign-in and password reset codes by email, only if you confirm your address</td>
+                        <td data-label="What it handles">Your email address and the emails (section 8)</td>
                     </tr>
                     <tr>
                         <td data-label="Who"><a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a></td>

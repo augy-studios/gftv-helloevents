@@ -9,6 +9,8 @@
 //     - each new event, once it is published: sent once the editor stops
 //       saving, the same wait as change notices (notify.js changeNotice), or
 //       at its release time when that is later (queueAdminEventNotice)
+//     - each passed ID check, as "otter has HelloID" (admin-chats.js
+//       alertIdVerified, from id-checks.js and helloid-checks.js)
 //   Organisers (organiser_chat_ids on the event, set by an admin on the edit
 //   form's Organisers tab) hear about:
 //     - each new attendee, once they have given everything the event asks
@@ -26,20 +28,21 @@
 // never pressed Start) is logged and skipped; it never stops the others.
 
 import { database, TABLES } from './supabase.js';
-import { optionalEnv, siteUrl } from './env.js';
-import { botTokenSet, sendRichTelegram } from './telegram.js';
+import { siteUrl } from './env.js';
+import { parseChatIds, adminChatIds, sendToChats } from './admin-chats.js';
 import { attendeeView } from './serialize.js';
 import { PAYMENT_COLUMNS } from './events.js';
 import { isReleased, storedMeals, heldRegistrationFields } from './event-rules.js';
 import { whenText, placeText } from './event-text.js';
 import { staffAlertMessage } from './telegram-messages.js';
-import { errorDetail } from './http.js';
 import { changeNotice } from './notify.js';
 import { storedContactFields, storedContactRule, storedContact, contactComplete, contactText } from '../../js/contact-fields.js';
 import { storedAnswers, answersComplete } from '../../js/registration-fields.js';
 
-// A Telegram chat id: a person's (digits) or a group's (a "-" then digits).
-const CHAT_ID = /^-?\d{1,20}$/;
+// The chat helpers live in admin-chats.js (the ID check modules use them
+// too); re-exported for the routes and tests that import them from here.
+export { parseChatIds, adminChatIds, sendToChats };
+
 // The most chats one event may name.
 export const MAX_ORGANISER_CHATS = 10;
 
@@ -50,53 +53,12 @@ const KIND_NAMES = { furmeet: 'Furmeet', convention: 'Convention', other: 'Other
 // contact.field.* has them.
 const PRESET_NAMES = { phone: 'Phone number', telegram: 'Telegram username', discord: 'Discord username' };
 
-// The chat ids in a list or in text ("123, -100456 789"): each a valid id,
-// once, in order. Anything that is not one is left out.
-export function parseChatIds(input) {
-  let parts = [];
-  if (Array.isArray(input)) {
-    parts = input.map((part) => String(part));
-  } else if (typeof input === 'string') {
-    parts = input.split(/[\s,;]+/);
-  }
-  const ids = [];
-  for (const part of parts) {
-    const id = part.trim();
-    if (CHAT_ID.test(id) && !ids.includes(id)) {
-      ids.push(id);
-    }
-  }
-  return ids;
-}
-
-// The admins' chats, from ADMIN_CHAT_IDS.
-export function adminChatIds() {
-  return parseChatIds(optionalEnv('ADMIN_CHAT_IDS'));
-}
-
 // An event's organisers' chats, as stored.
 export function organiserChatIds(row) {
   if (!row) {
     return [];
   }
   return parseChatIds(row.organiser_chat_ids).slice(0, MAX_ORGANISER_CHATS);
-}
-
-// Sends a message to each chat; returns the ids it could not reach.
-export async function sendToChats(chatIds, message) {
-  const failed = [];
-  if (!botTokenSet()) {
-    return [...chatIds];
-  }
-  for (const chatId of chatIds) {
-    try {
-      await sendRichTelegram(chatId, message);
-    } catch (cause) {
-      failed.push(chatId);
-      console.warn('[helloevents] staff alert:', chatId, errorDetail(cause));
-    }
-  }
-  return failed;
 }
 
 // One attendee's row, with their account, as the attendee list reads it.

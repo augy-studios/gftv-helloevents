@@ -13,6 +13,7 @@
 import { database, TABLES } from './supabase.js';
 import { deletePaymentFiles } from './payments.js';
 import { encryptSecret, decryptSecret } from './crypto.js';
+import { alertIdVerified } from './admin-chats.js';
 
 const COLUMNS =
   'id, account_id, status, decided_auto, reviewed_by, id_photo_path, selfie_path, findings, verified_name, verified_birth, ' +
@@ -184,6 +185,9 @@ async function applyApproval(check) {
   if (saveError) {
     throw saveError;
   }
+  // Approved by the checks at once or by an admin's review: the admins hear
+  // either way.
+  await alertIdVerified(account.id, 'helloid');
 }
 
 // Stores a new try. Any try of this account still pending is dropped, with

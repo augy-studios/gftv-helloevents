@@ -16,8 +16,9 @@
 // admins' own list), so nobody can sign up looking like the team.
 // The password is bcrypt, cost 12 (crypto.js).
 //
-// No email is sent: there is no email sender yet, so the address is not
-// verified. It is used to sign in, and never shown to anyone else.
+// No email is sent here, so the address is not verified at sign-up. It is
+// used to sign in, and never shown to anyone else. The account page can
+// confirm it later, for email codes (migrations/028, email-factor.js).
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
 import { database, TABLES } from '../_lib/supabase.js';

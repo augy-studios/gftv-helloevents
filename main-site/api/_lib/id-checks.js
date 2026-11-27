@@ -36,6 +36,7 @@ import { keyedHash, safeEqual } from './crypto.js';
 import { errorDetail } from './http.js';
 import { ensureStaffAccount } from './users.js';
 import { audit } from './guards.js';
+import { alertIdVerified } from './admin-chats.js';
 import { ID_CHECK_PROVIDERS } from './event-rules.js';
 import { personName, birthDate } from '../../js/registration-fields.js';
 
@@ -538,6 +539,7 @@ export async function refreshCheck(check) {
   if (changes.status === 'approved') {
     await applyApproved(check, outcome);
     await audit(null, { action: 'idcheck.approved', actorId: check.account_id, details: { provider: check.provider } });
+    await alertIdVerified(check.account_id, check.provider);
   } else if (changes.failure === 'document_used') {
     await audit(null, { action: 'idcheck.document_used', actorId: check.account_id, details: { provider: check.provider } });
   }
