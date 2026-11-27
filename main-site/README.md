@@ -68,8 +68,8 @@ the functions with the service role key. No Supabase Auth, no request signing.
     approved check keeps a face template (encrypted with `crypto.js encryptSecret`), a keyed hash of
     the document number and of the device. A website cannot read passport chips (NFC), and no web
     check can prove a document genuine. The thresholds at the top of `helloid.js` are a first
-    setting, to tune on real checks. `vercel.json` gives `api/me/helloid.js` 60 s, 3009 MB and the
-    model files.
+    setting, to tune on real checks. `vercel.json` gives `api/me/helloid.js` 60 s and the model
+    files.
   - **Didit and Veriff** (`api/_lib/id-checks.js`), outside providers, paid per check, each on when
     its keys are set (`.env.example`, SETUP.md). The account page sends the person to the
     provider's page, which sends them back through `/api/idcheck/return`; the provider's webhook

@@ -5,7 +5,7 @@
   "description": "GFTV HelloEvents at events.globalfurry.tv: CE furmeets and furry conventions. Static frontend with no build step, plus Vercel serverless functions under api/.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.1.1",

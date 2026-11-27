@@ -274,7 +274,7 @@ An event can require the people going to verify their ID (the edit form's
 **ID verification** tab). Run `migrations/027_id_checks_checkin.sql` first.
 
 **HelloID** is GFTV's own check and needs nothing set up: it runs on Vercel
-(`api/me/helloid.js`, given 60 seconds and 3009 MB in `vercel.json`). Checks
+(`api/me/helloid.js`, given 60 seconds in `vercel.json`). Checks
 it cannot clear on its own wait on `/manage`'s **ID reviews** tab, for
 admins. Optionally set `SIGNING_SECRET` in Vercel (a new
 `openssl rand -hex 32`, **Sensitive**); without it, `IP_HASH_SALT` signs the
