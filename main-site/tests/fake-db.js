@@ -14,7 +14,7 @@ const DEFAULTS = {
     email_verified_at: null, password_changed_at: null, status: 'active', notify_updates: true, notify_reminders: true, reminder_hours: [24],
     notify_new_events: false, notify_telegram: false, updated_at: now(), last_sign_in_at: null, country: null,
     legal_name: null, date_of_birth: null, emergency_name: null, emergency_phone: null,
-    id_verified_providers: [], id_verified_at: null, helloid_pending: false,
+    id_verified_providers: [], id_verified_at: null, helloid_pending: false, locale: null,
   }),
   gftvhello_users: () => ({ is_admin: false, is_editor: false, is_approved: false, totp_secret: null, avatar_url: null }),
   gftvevents_sessions: () => ({ last_seen_at: now(), ip_hash: null }),
@@ -157,7 +157,10 @@ function likeToRegex(pattern, flags) {
   return new RegExp(`^${escaped}$`, flags);
 }
 
-export function createFakeDb() {
+// withoutLocale: the database as it is before migrations/029, with no
+// gftvevents_accounts.locale: reading it fails as Postgres does (42703),
+// writing it as PostgREST does (PGRST204).
+export function createFakeDb({ withoutLocale = false } = {}) {
   const tables = {};
   // Views (migrations/009), read-only, worked out from their table.
   const VIEWS = {
@@ -301,6 +304,14 @@ export function createFakeDb() {
     }
     run() {
       const name = this.name;
+      if (withoutLocale) {
+        const read = [this.columns, this.returning].filter((columns) => typeof columns === 'string').join(',');
+        if (/\blocale\b/.test(read)) return { data: null, error: { code: '42703', message: 'column gftvevents_accounts.locale does not exist' } };
+        const written = [].concat(this.values ?? [], this.fields ?? []);
+        if (name === 'gftvevents_accounts' && written.some((values) => 'locale' in values)) {
+          return { data: null, error: { code: 'PGRST204', message: "Could not find the 'locale' column of 'gftvevents_accounts' in the schema cache" } };
+        }
+      }
       if (this.op === 'select') {
         let rows = this.matches();
         if (this.sort) {

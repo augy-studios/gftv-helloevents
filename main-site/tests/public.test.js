@@ -19,6 +19,7 @@ process.env.VAPID_PRIVATE_KEY = 'test-private-key';
 process.env.SUPABASE_URL = 'https://project.supabase.co';
 
 const { useTestClient } = await import('../api/_lib/supabase.js');
+const { resetLocaleColumn } = await import('../api/_lib/locale-column.js');
 const { useTestRedis } = await import('../api/_lib/redis.js');
 const { useTestPushSender } = await import('../api/_lib/push.js');
 const { settle, changeNotice, flushDueChanges } = await import('../api/_lib/notify.js');
@@ -39,6 +40,7 @@ const manage = await route('manage/events');
 const cover = await route('manage/cover');
 const security = await route('me/security');
 const notifications = await route('me/notifications');
+const profile = await route('me/profile');
 const webhook = await route('telegram/webhook');
 const cronNotify = await route('cron/notify');
 
@@ -130,7 +132,7 @@ test('signing up makes a public account with a bcrypt cost 12 password, and sign
   const r = await b.call(signup, { method: 'POST', body: join({ username: 'Otter', email: ' Otter@Example.com ' }) });
   assert.equal(r.status, 200);
   // The answer is only ok (help desk #18); the session says who it is.
-  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
+  assert.deepEqual((await b.call(sessionRoute)).json.user, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [], locale: null });
   assert.deepEqual(leaks(r.json), []);
   const row = db.table('gftvevents_accounts')[0];
   assert.equal(row.kind, 'public');
@@ -469,6 +471,10 @@ test('autosaving one change field by field tells the people going once, and a ch
   // even when the whole suite runs at once and each save is slow (with 60 ms
   // the first save's wait could end before the third save, now and then).
   changeNotice.waitMs = 1500;
+  // And a grace, as in production: with none, the last save's background
+  // send can wake the millisecond its notice falls due, read it as not due
+  // yet by a rounding, and send nothing.
+  changeNotice.graceMs = 100;
   try {
     // A new place, then a new start time, then the title: three saves, one notice.
     const moved = [{ ...current.locations[0], venueName: 'New Hall' }];
@@ -495,6 +501,7 @@ test('autosaving one change field by field tells the people going once, and a ch
     assert.equal(pushes.length, 0);
   } finally {
     changeNotice.waitMs = 0;
+    changeNotice.graceMs = 0;
   }
 });
 
@@ -642,6 +649,116 @@ test('the cron reminds people going at the times they picked, once each, with ev
   assert.deepEqual(pushes.map((p) => p.payload.title), ['New event: Brand New Meet']);
   pushes = [];
   assert.equal((await run()).json.announced, 0);
+});
+
+test('the bot, its codes and every notice speak the language the account uses the site in', async () => {
+  const at = (minutes) => new Date(Date.now() + minutes * 60_000 + 20_000).toISOString();
+  addEvent({ slug: 'lantern-meet', title: 'Lantern Meet', starts_at: at(50), venue_name: 'Gardens', city: 'Singapore' });
+  const hook = (chatId, text, from = {}) => browser().call(webhook, {
+    method: 'POST', headers: HOOK, body: { message: { chat: { id: chatId, type: 'private' }, from, text } },
+  });
+  const plainTo = (chatId) => sent.filter((s) => s.url.endsWith('/sendMessage') && s.body.chat_id === chatId).map((s) => s.body.text);
+  const richTo = (chatId) => sent.filter((s) => s.url.endsWith('/sendRichMessage') && s.body.chat_id === chatId).map((s) => s.body.rich_message.markdown);
+
+  // The site saves the language in use; only the site's codes are taken.
+  const m = await member();
+  assert.equal((await m.call(sessionRoute)).json.user.locale, null, 'none saved yet');
+  assert.equal((await m.call(profile, { method: 'POST', body: { locale: 'fr' } })).json.error, 'bad_request');
+  const saved = await m.call(profile, { method: 'POST', body: { locale: 'zh-sg' } });
+  assert.equal(saved.json.user.locale, 'zh-SG');
+  assert.equal((await m.call(sessionRoute)).json.user.locale, 'zh-SG');
+
+  // Linking answers in the account's language, and so does everything after.
+  await linkTelegram(m, 801);
+  assert.match(plainTo(801).at(-1), /^已绑定至 events\.globalfurry\.tv 上的账户 otter。/);
+  await hook(801, 'hello', { language_code: 'en' });
+  assert.match(richTo(801).at(-1), /^# GFTV HelloEvents\n\n此机器人为/, 'the account wins over the Telegram app');
+  await m.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription() } });
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true, reminderHours: [1] } });
+  sent = [];
+  pushes = [];
+  await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'telegram' } });
+  assert.match(richTo(801).at(-1), /^## 测试\n\n\*\*GFTV HelloEvents\*\*\n\n此聊天可以正常接收通知。/);
+  await m.call(notifications, { method: 'POST', body: { action: 'test', channel: 'device' } });
+  assert.deepEqual(pushes.map((p) => [p.payload.title, p.payload.body]), [['测试: GFTV HelloEvents', '此设备可以正常接收通知。']]);
+
+  // Someone else, in Malay, going to the same event.
+  const kancil = await member(browser(), { username: 'kancil', email: 'kancil@example.com' });
+  await kancil.call(profile, { method: 'POST', body: { locale: 'ms' } });
+  await kancil.call(notifications, { method: 'POST', body: { action: 'subscribe', subscription: subscription('https://fcm.googleapis.com/fcm/send/kancil') } });
+  await linkTelegram(kancil, 802);
+  assert.match(plainTo(802).at(-1), /^Dipautkan ke akaun kancil/);
+  await kancil.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true, reminderHours: [1] } });
+
+  // Joining, then the reminder: each in their own language.
+  sent = [];
+  for (const b of [m, kancil]) {
+    await b.call(rsvp, { method: 'POST', body: { slug: 'lantern-meet', going: true } });
+  }
+  await settle();
+  assert.match(richTo(801)[0], /^## 你已报名\n\n\*\*Lantern Meet\*\*/);
+  assert.match(richTo(802)[0], /^## Anda akan hadir\n\n\*\*Lantern Meet\*\*/);
+  for (const row of db.table('gftvevents_attendees')) {
+    row.created_at = new Date(Date.now() - 20 * 86400_000).toISOString();
+  }
+  sent = [];
+  pushes = [];
+  const run = await browser().call(cronNotify, { headers: { authorization: 'Bearer cron-test' } });
+  assert.equal(run.json.reminded, 2);
+  assert.match(richTo(801)[0], /^## 50 分钟后开始\n\n\*\*Lantern Meet\*\*/);
+  assert.ok(richTo(801)[0].includes('| 时间 |'));
+  assert.match(richTo(802)[0], /^## Bermula dalam 50 minit\n\n\*\*Lantern Meet\*\*/);
+  assert.deepEqual(pushes.map((p) => p.payload.title).sort(), ['50 分钟后开始: Lantern Meet', 'Bermula dalam 50 minit: Lantern Meet']);
+
+  // Changing the language on the site changes the bot's at once.
+  await m.call(profile, { method: 'POST', body: { locale: 'ta' } });
+  sent = [];
+  await hook(801, '/unlink');
+  assert.deepEqual(plainTo(801), ['இணைப்பு துண்டிக்கப்பட்டது. இந்த அரட்டைக்கு இனி குறியீடுகள் வராது.']);
+
+  // A chat linked to no account: its Telegram app's language, if the site
+  // has it, else English.
+  sent = [];
+  await hook(803, 'hi', { language_code: 'zh-hans' });
+  await hook(804, 'hi', { language_code: 'de' });
+  await hook(805, '/unlink', { language_code: 'ms' });
+  assert.match(richTo(803)[0], /此机器人为/);
+  assert.match(richTo(804)[0], /This bot sends sign-in codes/);
+  assert.deepEqual(plainTo(805), ['Sembang ini tidak dipautkan ke mana-mana akaun.']);
+});
+
+test('deployed before migrations/029, everything works in English and the language waits for the column', async (t) => {
+  db = createFakeDb({ withoutLocale: true });
+  useTestClient(db);
+  resetLocaleColumn();
+  t.after(resetLocaleColumn);
+  const warnings = [];
+  t.mock.method(console, 'warn', (...parts) => warnings.push(parts.join(' ')));
+  addEvent({ slug: 'early-meet', title: 'Early Meet', venue_name: 'Hall' });
+
+  // Sign-up, the session and signing in again all work.
+  const m = await member();
+  assert.equal((await m.call(sessionRoute)).json.user.locale, null);
+  assert.equal((await browser().call(login, { method: 'POST', body: { identifier: 'otter', password: PASSWORD } })).status, 200);
+  // The page's language save is taken and left for later; anything sent
+  // with it is still saved.
+  const saved = await m.call(profile, { method: 'POST', body: { locale: 'zh-SG' } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.user.locale, null);
+  const renamed = await m.call(profile, { method: 'POST', body: { displayName: 'River Otter', locale: 'ms' } });
+  assert.equal(renamed.json.user.displayName, 'River Otter');
+
+  // The bot and the notices go out, in English.
+  await linkTelegram(m, 901);
+  const linked = sent.filter((s) => s.url.endsWith('/sendMessage') && s.body.chat_id === 901).at(-1);
+  assert.match(linked.body.text, /^Linked to the account otter/);
+  await m.call(notifications, { method: 'POST', body: { action: 'prefs', telegram: true } });
+  sent = [];
+  await m.call(rsvp, { method: 'POST', body: { slug: 'early-meet', going: true } });
+  await settle();
+  const going = sent.find((s) => s.url.endsWith('/sendRichMessage') && s.body.chat_id === 901);
+  assert.match(going.body.rich_message.markdown, /^## You're going\n\n\*\*Early Meet\*\*/);
+  assert.equal(warnings.filter((line) => line.includes('migrations/029_account_locale.sql')).length, 1, 'said once');
 });
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,8 @@ import { database, TABLES } from './supabase.js';
 import { editsAnyEvent } from './event-editors.js';
 import { randomToken, sha256, hashIp } from './crypto.js';
 import { readCookie, setCookie, clearCookie, fail, clientIp } from './http.js';
-import { SESSION_ACCOUNT_SELECT, normaliseAccount, ensureStaffAccount, canSignIn, canManage, isAdmin } from './users.js';
+import { sessionAccountSelect, normaliseAccount, ensureStaffAccount, canSignIn, canManage, isAdmin } from './users.js';
+import { withLocaleColumn } from './locale-column.js';
 
 export const SESSION_COOKIE = '__Host-ghe_session';
 const SESSION_DAYS = 7;
@@ -59,11 +60,11 @@ export async function currentSession(request) {
     return null;
   }
 
-  const { data, error } = await database()
+  const { data, error } = await withLocaleColumn((withLocale) => database()
     .from(TABLES.sessions)
-    .select(`id, expires_at, last_seen_at, account:${TABLES.accounts} ( ${SESSION_ACCOUNT_SELECT} )`)
+    .select(`id, expires_at, last_seen_at, account:${TABLES.accounts} ( ${sessionAccountSelect(withLocale)} )`)
     .eq('token_hash', sha256(token))
-    .maybeSingle();
+    .maybeSingle());
 
   if (error) {
     throw error;

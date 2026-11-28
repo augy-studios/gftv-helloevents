@@ -409,7 +409,7 @@ test('the event list, the edit form and the staff tools are tabs, and the open t
   // stay hidden for them.)
   await openManage(page, ADMIN.username);
   const tabs = page.locator('#manageTabs');
-  await expect(tabs.getByRole('tab')).toHaveText(['Event list', 'Manage event', 'ID reviews', 'Name filter', 'Password resets']);
+  await expect(tabs.getByRole('tab')).toHaveText(['Event list', 'Manage event', 'ID reviews', 'HelloID tuning', 'Name filter', 'Password resets']);
   await expect(page.locator('#filterBox')).toBeHidden();
   await expect(page.locator('#editorEmpty')).toBeHidden();
 
@@ -427,8 +427,12 @@ test('the event list, the edit form and the staff tools are tabs, and the open t
   // The arrow keys move between the tabs. With no event open, the edit tab
   // says so.
   await page.keyboard.press('ArrowLeft');
+  await expect(tabs.getByRole('tab', { name: 'HelloID tuning' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#tuningBox')).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
   await expect(tabs.getByRole('tab', { name: 'ID reviews' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#idReviewsBox')).toBeVisible();
+  await expect(page.locator('#tuningBox')).toBeHidden();
   await page.keyboard.press('ArrowLeft');
   await expect(tabs.getByRole('tab', { name: 'Manage event' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#editorEmpty')).toBeVisible();

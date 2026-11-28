@@ -12,3 +12,8 @@ main-site/tests/e2e/output/
 .env
 .env.*
 !.env.example
+
+# HelloID: face models fetched for the bake-off (scripts/fetch-face-models.js),
+# and the bake-off's photos of people, which never belong in the repository.
+main-site/.face-models/
+helloid-bakeoff*/

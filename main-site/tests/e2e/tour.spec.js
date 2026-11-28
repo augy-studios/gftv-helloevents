@@ -132,12 +132,12 @@ test('the Manage tour covers the tabs each role has', async ({ page }) => {
   expect(await seen(page)).toEqual(['manage', 'hint', 'manage.events', 'manage.editor', 'editor.basics']);
 });
 
-test('an admin is also shown the ID reviews, Name filter and Password resets tabs', async ({ page }) => {
+test('an admin is also shown the ID reviews, HelloID tuning, Name filter and Password resets tabs', async ({ page }) => {
   await page.goto('/login?next=/manage');
   await signInAsStaff(page, ADMIN.username);
   await page.waitForURL(`${serverOrigin()}/manage`);
   await expect(text(page)).toHaveText('Event list: every event, drafts and ones not released yet included.');
-  await expect(dots(page)).toHaveCount(7);
+  await expect(dots(page)).toHaveCount(8);
   await page.keyboard.press('Escape');
   // Skip quiets the rest until another tab opens.
   await page.waitForTimeout(1500);

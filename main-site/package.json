@@ -13,7 +13,6 @@
     "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "@tensorflow/tfjs-converter": "4.22.0",
     "@tensorflow/tfjs-core": "4.22.0",
-    "@tesseract.js-data/eng": "1.0.0",
     "@upstash/redis": "^1.40.0",
     "@vercel/functions": "^2.2.13",
     "@vladmandic/human": "3.3.6",
@@ -27,6 +26,10 @@
   "scripts": {
     "check-i18n": "node assets/i18n/check-keys.js --scan",
     "check-sw": "node scripts/check-sw.js",
+    "helloid:calibrate": "node scripts/helloid-calibrate.js",
+    "helloid:bakeoff": "node scripts/helloid-face-bakeoff.js",
+    "helloid:face-models": "node scripts/fetch-face-models.js",
+    "helloid:mrz-bench": "node tests/live/helloid-mrz-bench.js",
     "lint": "eslint .",
     "test": "node --test \"tests/**/*.test.js\"",
     "test:e2e": "playwright test"

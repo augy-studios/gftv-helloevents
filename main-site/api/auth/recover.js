@@ -56,6 +56,7 @@ import { checkPassword } from '../_lib/account-rules.js';
 import { emailConfigured, sendEmail, resetNoticeEmail } from '../_lib/email.js';
 import { confirmedEmail, sendEmailCode, emailCodeOk, challengeForLink, linkToken, sameBrowser } from '../_lib/email-factor.js';
 import { findForLogin, loadAccount, canSignIn } from '../_lib/users.js';
+import { botT } from '../_lib/bot-text.js';
 import {
   createChallenge,
   findChallenge,
@@ -197,7 +198,7 @@ async function sendResetCode(request, response, body, { challenge, account, chat
   if (await limited(request, response, 'telegramSend', [`u:${account.id}`])) {
     return;
   }
-  await sendTelegramCode(challenge, chat.chat_id, { purpose: 'reset', username: account.username });
+  await sendTelegramCode(challenge, chat.chat_id, { purpose: 'reset', username: account.username, locale: account.locale });
   return ok(response, { sent: true });
 }
 
@@ -331,18 +332,18 @@ function sessionFactor(method, twoFactor, body) {
   return 'password';
 }
 
-// Tells the linked chat the password was reset. Not waited for: a notice
-// that fails is logged, and the reset still stands.
+// Tells the linked chat the password was reset, in the account's language.
+// Not waited for: a notice that fails is logged, and the reset still stands.
 function sendResetNotice(chat, account) {
   sendTelegram(
     chat.chat_id,
-    `The password for your GFTV HelloEvents account ${account.username} was just reset, and every other device was signed out.`
+    botT(account.locale, 'bot.password-reset', { username: account.username })
   ).catch((cause) => console.warn('[helloevents] reset notice not sent:', errorDetail(cause)));
 }
 
 // Tells the confirmed address the same, the same way: not waited for.
 function sendResetNoticeEmail(address, account) {
-  sendEmail({ to: address, ...resetNoticeEmail({ username: account.username }) }).catch((cause) =>
+  sendEmail({ to: address, ...resetNoticeEmail({ username: account.username, locale: account.locale }) }).catch((cause) =>
     console.warn('[helloevents] reset notice email not sent:', errorDetail(cause))
   );
 }

@@ -1,9 +1,10 @@
 // Shared page wiring for every page: i18n, theme, icons, dialogs, the update
-// bar, the sticky header, the header's sign-in links and the footer year.
+// bar, the sticky header, the header's sign-in links, the footer year, and
+// saving the language in use to the signed-in account.
 // Each page's own module imports this first. Adapted from gftv-linktree.
 
 import '../assets/i18n/boot.js';
-import { t as translate, onChange } from '../assets/i18n/i18n.js';
+import { t as translate, onChange, getLocale, setLocale } from '../assets/i18n/i18n.js';
 import {
   COLOR_THEMES,
   initTheme,
@@ -19,7 +20,7 @@ import { icon, hydrateIcons } from './icons.js';
 import { openModal, wireModals } from './ui.js';
 import { initUpdateBar } from './update-bar.js';
 import { initializePasswordToggles } from './password-toggle.js';
-import { api } from './api.js';
+import { api, post } from './api.js';
 
 // "09:00" for 9.
 function hourLabel(hour) {
@@ -210,6 +211,47 @@ function wireHeaderLinks() {
   });
 }
 
+// The language this browser picked in the switcher, or null when it has
+// only detected one: i18n.js keeps a pick, and only a pick, under "locale".
+function pickedLocale() {
+  try {
+    return localStorage.getItem('locale');
+  } catch {
+    return null;
+  }
+}
+
+// The Telegram bot, reminders and every other notice are written in the
+// account's language (migrations/029). Signed in, the page saves the
+// language in use to the account whenever the two differ, so the last one
+// picked anywhere wins; a browser that never picked one takes the
+// account's instead. A save that fails is tried again at the next change or
+// page.
+function wireAccountLanguage() {
+  session.then((currentSession) => {
+    if (!currentSession.signedIn || !currentSession.user) {
+      return;
+    }
+    let saved = currentSession.user.locale;
+    const save = (code) => {
+      if (code === saved) {
+        return;
+      }
+      const before = saved;
+      saved = code;
+      post('/api/me/profile', { locale: code }).catch(() => {
+        saved = before;
+      });
+    };
+    if (saved && !pickedLocale() && saved !== getLocale()) {
+      setLocale(saved);
+    } else {
+      save(getLocale());
+    }
+    onChange(save);
+  });
+}
+
 initTheme();
 hydrateIcons();
 wireModals();
@@ -217,5 +259,6 @@ wireTheme();
 wireStickyHeader();
 wireFooterYear();
 wireHeaderLinks();
+wireAccountLanguage();
 initializePasswordToggles();
 initUpdateBar();

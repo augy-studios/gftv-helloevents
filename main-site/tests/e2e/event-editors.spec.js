@@ -15,6 +15,11 @@ test('an admin makes a member the editor of one event, and they edit it alone', 
   await signInWithBackupCode(page, PASSKEY_MEMBER.username, BACKUP_CODES[0]);
   await page.waitForURL(`${serverOrigin()}/account`);
   await expect(page.locator('header [data-when="manager"]')).toBeHidden();
+  // The account page loads its ID check section (and saves the language in
+  // use) after it shows: let those requests finish before signing out, or
+  // they come back 401 and the browser logs an error.
+  await expect(page.locator('#accountView')).toBeVisible();
+  await page.waitForLoadState('networkidle');
 
   // The admin: the event's Organisers tab, picked from the active accounts.
   await context.clearCookies();

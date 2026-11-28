@@ -136,7 +136,7 @@ export async function sendEmailCode(request, response, challenge, { purpose, acc
   }
   await updateChallenge(challenge, fields);
   const link = `${siteUrl()}${LINK_PATHS[purpose](token)}`;
-  await sendEmail({ to: address, ...codeEmail({ purpose, username: account.username, code, link, minutes: EMAIL_CODE_MINUTES }) });
+  await sendEmail({ to: address, ...codeEmail({ purpose, username: account.username, code, link, minutes: EMAIL_CODE_MINUTES, locale: account.locale }) });
 }
 
 function emailUnexpired(challenge) {

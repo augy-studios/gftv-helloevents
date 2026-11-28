@@ -29,7 +29,8 @@
 // and these findings in front of them. HelloID never declines on its own.
 //
 // It cannot tell whether the document itself is genuine; no web page can.
-// The thresholds below are a first setting, to be tuned on real checks.
+// The thresholds below are a first setting, to be tuned on real checks
+// with the HelloID tuning report (/manage, helloid-calibration.js).
 
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
@@ -37,18 +38,79 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { keyedHash, safeEqual, randomToken } from './crypto.js';
+import { repairTd3, findZone, blackAndWhite, bottomOfPhoto, FULL_SCORE } from './mrz-read.js';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const modules = path.join(here, '..', '..', 'node_modules');
 
+// The face models HelloID can make its face templates with (Human's
+// face description), and the files each needs. FaceRes is Human's own and
+// the default. The others come from @vladmandic/human-models (MIT), fetched
+// with scripts/fetch-face-models.js, compared on photos of real people with
+// scripts/helloid-face-bakeoff.js, and kept in models/face/ once chosen.
+// Each model scores on its own scale: one picked with HELLOID_FACE_MODEL
+// needs its own HELLOID_FACE_MATCH and HELLOID_SAME_PERSON (from the
+// bake-off), or HelloID keeps to FaceRes and says why in the logs.
+export const FACE_MODELS = Object.freeze({
+  faceres: { human: {}, files: ['faceres'], faceMatch: 0.55, samePerson: 0.45 },
+  'faceres-deep': { human: { description: { enabled: true, modelPath: 'faceres-deep.json' } }, files: ['faceres-deep'] },
+  mobilefacenet: { human: { mobilefacenet: { enabled: true, modelPath: 'mobilefacenet.json' } }, files: ['faceres', 'mobilefacenet'] },
+});
+
+// The model and its two face thresholds, from the environment:
+// { model, faceMatch, samePerson, problem }.
+export function faceSetup(env = process.env) {
+  const fallback = { model: 'faceres', faceMatch: FACE_MODELS.faceres.faceMatch, samePerson: FACE_MODELS.faceres.samePerson, problem: null };
+  let name = 'faceres';
+  if (typeof env.HELLOID_FACE_MODEL === 'string') {
+    name = env.HELLOID_FACE_MODEL.trim();
+  }
+  if (name === 'faceres' || name === '') {
+    return fallback;
+  }
+  if (!Object.prototype.hasOwnProperty.call(FACE_MODELS, name)) {
+    return { ...fallback, problem: `HELLOID_FACE_MODEL "${name}" is not one of ${Object.keys(FACE_MODELS).join(', ')}` };
+  }
+  const faceMatch = Number(env.HELLOID_FACE_MATCH);
+  const samePerson = Number(env.HELLOID_SAME_PERSON);
+  const inRange = (value) => [Number.isFinite(value), value > 0, value < 1].every(Boolean);
+  if (!inRange(faceMatch) || !inRange(samePerson)) {
+    return { ...fallback, problem: `HELLOID_FACE_MODEL "${name}" needs HELLOID_FACE_MATCH and HELLOID_SAME_PERSON between 0 and 1, from scripts/helloid-face-bakeoff.js` };
+  }
+  return { model: name, faceMatch, samePerson, problem: null };
+}
+
+const FACE = faceSetup();
+if (FACE.problem) {
+  console.error(`[helloevents] helloid: ${FACE.problem}; using faceres`);
+}
+export const FACE_MODEL = FACE.model;
+
 // Thresholds (first settings).
 const TURN_YAW_DEGREES = 15;
 const TURN_PITCH_DEGREES = 10;
 const FLASHES_NEEDED = 5;
-const FACE_MATCH = 0.55;
-const SAME_PERSON = 0.45;
+const FACE_MATCH = FACE.faceMatch;
+const SAME_PERSON = FACE.samePerson;
 const CHALLENGE_SECONDS = 600;
+
+// The settings above, for the HelloID tuning report to report against.
+export const CURRENT_THRESHOLDS = Object.freeze({
+  model: FACE_MODEL,
+  faceMatch: FACE_MATCH,
+  samePerson: SAME_PERSON,
+  turnYaw: TURN_YAW_DEGREES,
+  turnPitch: TURN_PITCH_DEGREES,
+  flashes: FLASHES_NEEDED,
+});
+
+// For tests: stand-ins for the slow parts, the face models and the OCR
+// ({ analyse, readMrz }, either), so a route can be driven without them.
+let testStandIns = null;
+export function useTestChecks(standIns) {
+  testStandIns = standIns;
+}
 
 export const TURNS = Object.freeze(['left', 'right', 'up', 'down']);
 const FLASH_COLOURS = Object.freeze(['red', 'green', 'blue']);
@@ -237,11 +299,33 @@ export async function storedPictures(submission) {
 // Face models (Human), loaded once per function instance
 // ---------------------------------------------------------------------------
 
-// Human loads its models through fetch; this address is answered from the
-// files in node_modules, so nothing is fetched from anywhere.
+// Human loads its models through fetch; this address is answered from
+// files on disk, so nothing is fetched from anywhere: models/face/ (a face
+// model chosen for this site), then each folder in modelFolders (the
+// bake-off's fetched models), then Human's own.
 const MODEL_ORIGIN = 'https://helloid-models.invalid/';
-const MODELS = ['blazeface', 'facemesh', 'faceres', 'antispoof', 'liveness'];
+const BASE_MODELS = ['blazeface', 'facemesh', 'antispoof', 'liveness'];
+const MODEL_NAME = /^[a-z][a-z0-9-]{1,40}\.(json|bin)$/;
+const modelFolders = [path.join(here, 'models', 'face')];
 let humanReady = null;
+
+// More folders to look for model files in (scripts/helloid-face-bakeoff.js).
+export function addModelFolder(folder) {
+  if (!modelFolders.includes(folder)) {
+    modelFolders.push(folder);
+  }
+}
+
+async function modelFile(name) {
+  for (const folder of [...modelFolders, path.join(modules, '@vladmandic', 'human', 'models')]) {
+    try {
+      return await readFile(path.join(folder, name));
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
 function serveModelsFromDisk() {
   const passOn = globalThis.fetch;
@@ -252,11 +336,16 @@ function serveModelsFromDisk() {
     const text = String(url);
     if (text.startsWith(MODEL_ORIGIN)) {
       const name = text.slice(MODEL_ORIGIN.length);
-      const known = MODELS.some((model) => [`${model}.json`, `${model}.bin`].includes(name));
-      if (!known) {
+      const allowed = [...BASE_MODELS, ...Object.values(FACE_MODELS).flatMap((model) => model.files)];
+      const known = allowed.some((model) => [`${model}.json`, `${model}.bin`].includes(name));
+      let bytes = null;
+      if (known && MODEL_NAME.test(name)) {
+        bytes = await modelFile(name);
+      }
+      if (bytes === null) {
         return new Response('not found', { status: 404 });
       }
-      return new Response(await readFile(path.join(modules, '@vladmandic', 'human', 'models', name)));
+      return new Response(bytes);
     }
     return passOn(url, init);
   };
@@ -264,7 +353,8 @@ function serveModelsFromDisk() {
   globalThis.fetch = answer;
 }
 
-async function loadHuman() {
+// A Human set up for HelloID, its face templates made with faceModel.
+export async function loadHuman(faceModel = FACE_MODEL) {
   serveModelsFromDisk();
   // The WebAssembly build, by its file: the package's exports leave it out.
   const { Human } = require('../../node_modules/@vladmandic/human/dist/human.node-wasm.js');
@@ -285,6 +375,7 @@ async function loadHuman() {
       emotion: { enabled: false },
       antispoof: { enabled: true },
       liveness: { enabled: true },
+      ...FACE_MODELS[faceModel].human,
     },
     body: { enabled: false },
     hand: { enabled: false },
@@ -310,9 +401,12 @@ function human() {
 const DEGREES = 180 / Math.PI;
 
 // The faces in a picture: { faces: [{ box, yaw, pitch, embedding, real,
-// live }], width, height, data }.
-async function facesIn(bytes, side) {
-  const model = await human();
+// live }], width, height, data }. model: a Human from loadHuman (the
+// bake-off's), else HelloID's own.
+export async function facesIn(bytes, side, model = null) {
+  if (model === null) {
+    model = await human();
+  }
   const image = await pixels(bytes, side);
   const tensor = model.tf.tensor3d(new Uint8Array(image.data), [image.height, image.width, 3], 'int32');
   let result;
@@ -388,10 +482,12 @@ function round(value, places = 2) {
 
 let ocrReady = null;
 
+// Tesseract with the MRZ-trained model (models/README.md): capitals, digits
+// and "<" only, read as a block of lines.
 async function loadOcr() {
   const { createWorker } = require('tesseract.js');
-  const worker = await createWorker('eng', 1, {
-    langPath: path.join(modules, '@tesseract.js-data', 'eng', '4.0.0_best_int'),
+  const worker = await createWorker('mrz', 1, {
+    langPath: path.join(here, 'models'),
     gzip: true,
     cacheMethod: 'none',
   });
@@ -496,73 +592,114 @@ function mrzDate(text, kind, now = new Date()) {
   return `${century + yy}-${text.slice(2, 4)}-${text.slice(4, 6)}`;
 }
 
-// The MRZ on a side of an ID, read and checked: { found, ...fields } where
-// found is false when there is none to read.
-export async function readMrz(bytes) {
-  const { parse } = await import('mrz');
-  const worker = await ocr();
-  // The MRZ is in the lower part of a passport's photo page.
-  const meta = await sharp(bytes).rotate().metadata();
-  let height = meta.height;
-  let width = meta.width;
-  if ([5, 6, 7, 8].includes(meta.orientation)) {
-    height = meta.width;
-    width = meta.height;
-  }
-  const top = Math.floor(height * 0.55);
-  const prepared = await sharp(bytes)
-    .rotate()
-    .extract({ left: 0, top, width, height: height - top })
-    .grayscale()
-    .normalise()
-    .resize({ width: 1600 })
-    .png()
-    .toBuffer();
-  const { data } = await worker.recognize(prepared);
-  const lines = data.text.split('\n').map((line) => line.replace(/\s+/g, '')).filter((line) => [line.length >= 28, line.includes('<')].every(Boolean));
-  // The last two lines of 44 (a passport), 36, or three of 30 (an ID card).
-  const attempts = [];
-  for (const [count, length] of [[2, 44], [2, 36], [3, 30]]) {
-    const near = lines.filter((line) => Math.abs(line.length - length) <= 2).slice(-count);
-    if (near.length === count) {
-      attempts.push(near.map((line) => line.padEnd(length, '<').slice(0, length)));
+// The lines of a read that could be an MRZ's: long, with filler.
+function zoneLines(text) {
+  return text.split('\n').map((line) => line.replace(/\s+/g, '')).filter((line) => [line.length >= 28, line.includes('<')].every(Boolean));
+}
+
+// One picture's reading, parsed: a passport's (TD3) two lines repaired
+// (mrz-read.js repairTd3), or an ID card's three lines of 30 or a travel
+// document's two of 36 as read. -> { lines, result, score, cost, ambiguous }
+// or null.
+function parsedReading(parse, lines) {
+  const passport = lines.filter((line) => Math.abs(line.length - 44) <= 3).slice(-2);
+  if (passport.length === 2) {
+    const repaired = repairTd3(passport);
+    try {
+      return { ...repaired, result: parse(repaired.lines, { autocorrect: true }) };
+    } catch {
+      // Not a passport after all: the other formats below.
     }
   }
-  for (const attempt of attempts) {
-    let result;
+  for (const [count, length] of [[2, 36], [3, 30]]) {
+    const near = lines.filter((line) => Math.abs(line.length - length) <= 2).slice(-count);
+    if (near.length !== count) {
+      continue;
+    }
+    const attempt = near.map((line) => line.padEnd(length, '<').slice(0, length));
     try {
-      result = parse(attempt, { autocorrect: true });
+      return { lines: attempt, result: parse(attempt, { autocorrect: true }), score: 0, cost: 0, ambiguous: false };
     } catch {
       continue;
     }
-    const valid = (name) => {
-      const detail = result.details.find((each) => each.field === name);
-      if (!detail) {
-        return false;
-      }
-      return detail.valid === true;
-    };
-    let nameField = '';
-    if (result.format === 'TD3' || result.format === 'TD2') {
-      nameField = attempt[0].slice(5);
-    } else if (result.format === 'TD1') {
-      nameField = attempt[2];
-    }
-    return {
-      found: true,
-      format: result.format,
-      nameField,
-      name: [result.fields.firstName, result.fields.lastName].filter((part) => part).join(' '),
-      birth: mrzDate(result.fields.birthDate, 'birth'),
-      birthChecked: [valid('birthDate'), valid('birthDateCheckDigit')].every(Boolean),
-      expiry: mrzDate(result.fields.expirationDate, 'expiry'),
-      expiryChecked: [valid('expirationDate'), valid('expirationDateCheckDigit')].every(Boolean),
-      documentChecked: [valid('documentNumber'), valid('documentNumberCheckDigit')].every(Boolean),
-      documentNumber: result.fields.documentNumber,
-      issuingState: result.fields.issuingState,
-    };
   }
-  return { found: false };
+  return null;
+}
+
+// The MRZ on a side of an ID, read and checked: { found, ...fields } where
+// found is false when there is none to read. The zone, found and cropped,
+// is read first, then as black and white, then the bottom of the photo
+// (mrz-read.js), stopping at a passport read whole with every check digit
+// right. A repaired reading counts only when another picture's agrees
+// (mrz-read.js says why); otherwise its document number is left unchecked.
+export async function readMrz(bytes) {
+  if (testStandIns && testStandIns.readMrz) {
+    return testStandIns.readMrz(bytes);
+  }
+  const { parse } = await import('mrz');
+  const worker = await ocr();
+  const pictures = [];
+  const zone = await findZone(bytes).catch(() => null);
+  if (zone) {
+    pictures.push(() => zone, () => blackAndWhite(zone));
+  }
+  pictures.push(() => bottomOfPhoto(bytes));
+  const readings = [];
+  for (const picture of pictures) {
+    const { data } = await worker.recognize(await picture());
+    const reading = parsedReading(parse, zoneLines(data.text));
+    if (reading === null) {
+      continue;
+    }
+    readings.push(reading);
+    if (reading.score === FULL_SCORE && reading.cost === 0) {
+      break;
+    }
+  }
+  if (readings.length === 0) {
+    return { found: false };
+  }
+  let best = readings[0];
+  for (const reading of readings) {
+    if (reading.score > best.score || (reading.score === best.score && reading.cost < best.cost)) {
+      best = reading;
+    }
+  }
+  let ambiguous = best.ambiguous;
+  if (best.cost > 0 && !ambiguous) {
+    ambiguous = !readings.some((reading) => [reading !== best, reading.lines[1] === best.lines[1]].every(Boolean));
+  }
+  const { result, lines } = best;
+  const valid = (name) => {
+    const detail = result.details.find((each) => each.field === name);
+    if (!detail) {
+      return false;
+    }
+    return detail.valid === true;
+  };
+  let nameField = '';
+  if (result.format === 'TD3' || result.format === 'TD2') {
+    nameField = lines[0].slice(5);
+  } else if (result.format === 'TD1') {
+    nameField = lines[2];
+  }
+  return {
+    found: true,
+    format: result.format,
+    nameField,
+    name: [result.fields.firstName, result.fields.lastName].filter((part) => part).join(' '),
+    birth: mrzDate(result.fields.birthDate, 'birth'),
+    birthChecked: [valid('birthDate'), valid('birthDateCheckDigit')].every(Boolean),
+    expiry: mrzDate(result.fields.expirationDate, 'expiry'),
+    expiryChecked: [valid('expirationDate'), valid('expirationDateCheckDigit')].every(Boolean),
+    // The whole zone valid too (real country codes, every field's
+    // characters), and not ambiguous: a misread can pass two check digits
+    // by luck.
+    documentChecked: [valid('documentNumber'), valid('documentNumberCheckDigit'), result.valid === true, !ambiguous].every(Boolean),
+    ambiguous,
+    documentNumber: result.fields.documentNumber,
+    issuingState: result.fields.issuingState,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -577,7 +714,10 @@ export async function readMrz(bytes) {
 // side to read; personal: the { legalName, dateOfBirth } it is for.
 // -> { approve, findings, template, documentNumber, documentCountry }
 export async function analyse(submission, challenge, personal, document, now = new Date()) {
-  const findings = { checks: {}, notes: [] };
+  if (testStandIns && testStandIns.analyse) {
+    return testStandIns.analyse(submission, challenge, personal, document);
+  }
+  const findings = { checks: {}, notes: [], faceModel: FACE_MODEL };
   const fail = (check, note) => {
     findings.checks[check] = false;
     if (note) {
@@ -589,7 +729,7 @@ export async function analyse(submission, challenge, personal, document, now = n
   const neutral = await facesIn(submission.neutral, 640);
   if (neutral.faces.length !== 1) {
     fail('live', 'neutral_faces');
-    return { approve: false, findings };
+    return { approve: false, findings, template: null, faceModel: FACE_MODEL, documentNumber: null, documentCountry: null };
   }
   const live = neutral.faces[0];
   findings.real = round(live.real);
@@ -599,6 +739,16 @@ export async function analyse(submission, challenge, personal, document, now = n
   // turn's two frames.
   const turnResults = {};
   let samePerson = true;
+  // The least alike any frame was to the live face, kept in the findings
+  // for the HelloID tuning report (helloid-calibration.js) to set SAME_PERSON from.
+  let lowestLikeness = null;
+  const likeness = (face) => {
+    const score = similarity(face.embedding, live.embedding);
+    if (lowestLikeness === null || score < lowestLikeness) {
+      lowestLikeness = score;
+    }
+    return score;
+  };
   for (let index = 0; index < challenge.turns.length; index += 1) {
     const turn = challenge.turns[index];
     let best = null;
@@ -608,7 +758,7 @@ export async function analyse(submission, challenge, personal, document, now = n
         continue;
       }
       const face = found.faces[0];
-      if (similarity(face.embedding, live.embedding) < SAME_PERSON * 0.7) {
+      if (likeness(face) < SAME_PERSON * 0.7) {
         samePerson = false;
       }
       const delta = { yaw: face.yaw - live.yaw, pitch: face.pitch - live.pitch };
@@ -661,7 +811,7 @@ export async function analyse(submission, challenge, personal, document, now = n
       chromas.push(null);
       continue;
     }
-    if (similarity(found.faces[0].embedding, live.embedding) < SAME_PERSON) {
+    if (likeness(found.faces[0]) < SAME_PERSON) {
       samePerson = false;
     }
     chromas.push(faceChroma(found, found.faces[0].box));
@@ -689,6 +839,9 @@ export async function analyse(submission, challenge, personal, document, now = n
   findings.flashes = { matched: flashMatches, of: FLASH_COUNT };
   findings.checks.flashes = flashMatches >= FLASHES_NEEDED;
   findings.checks.samePerson = samePerson;
+  if (lowestLikeness !== null) {
+    findings.framesLowest = round(lowestLikeness);
+  }
 
   // The face on the ID: the largest one on the photo.
   const id = await facesIn(submission.idPhoto, 1280);
@@ -724,6 +877,9 @@ export async function analyse(submission, challenge, personal, document, now = n
     fail('mrz', note);
   } else {
     findings.mrz = { name: mrz.name, birth: mrz.birth, expiry: mrz.expiry, format: mrz.format };
+    if (mrz.ambiguous) {
+      findings.notes.push('mrz_ambiguous');
+    }
     const today = now.toISOString().slice(0, 10);
     const notExpired = [mrz.expiryChecked, mrz.expiry !== null, mrz.expiry >= today].every(Boolean);
     const birthMatches = [mrz.birthChecked, mrz.birth !== null, mrz.birth === personal.dateOfBirth].every(Boolean);
@@ -741,7 +897,7 @@ export async function analyse(submission, challenge, personal, document, now = n
     documentNumber = mrz.documentNumber;
     documentCountry = mrz.issuingState;
   }
-  return { approve, findings, template: Array.from(live.embedding), documentNumber, documentCountry };
+  return { approve, findings, template: Array.from(live.embedding), faceModel: FACE_MODEL, documentNumber, documentCountry };
 }
 
 // How alike two face templates are, from -1 to 1 (at SAME_FACE or above:

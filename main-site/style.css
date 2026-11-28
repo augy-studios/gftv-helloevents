@@ -810,6 +810,9 @@ button.text-link { padding: 0; }
 .callout.warn { background: var(--callout-warn-bg); color: var(--warn); }
 .callout:empty { display: none; }
 .callout + .callout, * + .callout { margin-top: 0.85rem; }
+/* HelloID's tips (screen brightness): a sun beside the text. */
+.helloid-tip { display: flex; gap: 0.6rem; align-items: flex-start; }
+.helloid-tip > .icon { margin-top: 0.15rem; color: var(--warn); }
 
 /* Cloudflare Turnstile (js/turnstile.js). Takes no room until it is drawn,
    and its iframe fills the form's width. */
@@ -2367,6 +2370,15 @@ body.legal { padding: 32px 16px 48px; }
 .legal-table { overflow-x: auto; margin: 0 0 12px; }
 .legal-table table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
 .legal-table th, .legal-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+/* /manage's HelloID tuning report. */
+.tuning-table { overflow-x: auto; margin: 0.75rem 0; }
+.tuning-table table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.tuning-table th, .tuning-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.tuning-table td + td, .tuning-table th + th { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tuning-table .changed { font-weight: 600; color: var(--brand-text); }
+#tuningReport { margin-top: 0.75rem; }
+#tuningReport h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }
+#tuningReport ul { padding-left: 1.25rem; }
 .legal-back { margin-top: 32px; }
 @media (max-width: 600px) {
   .legal-page { padding: 24px 18px; }

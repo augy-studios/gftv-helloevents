@@ -727,7 +727,7 @@ form.addEventListener('change', (event) => {
     event.target.value = tidySlug(event.target.value);
     showSlugTaken(null);
   }
-  // A currency typed as a code or a name shows as "SGD — Singapore Dollar"
+  // A currency typed as a code or a name shows as "SGD · Singapore Dollar"
   // (the event's, or a tier's own).
   if (event.target.id === 'f-currency' || (event.target.dataset.key === 'currency' && event.target.closest('.tier-edit-card'))) {
     const code = currencyCodeFrom(event.target.value);

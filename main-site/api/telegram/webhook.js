@@ -11,6 +11,10 @@
 //   /unlink          unlink this chat from every account it is linked to
 //   anything else    the help message, as a rich message
 //
+// Every reply is in the language of the account the chat is linked to, as
+// the site saved it (bot-text.js); for a chat linked to none, the language
+// of the person's Telegram app when the site offers it, else English.
+//
 // Private chats only: a code must never land in a group.
 // Always answers 200 once the secret matches, so Telegram does not retry an
 // update that was understood and refused.
@@ -20,9 +24,29 @@ import { database, TABLES } from '../_lib/supabase.js';
 import { optionalEnv, siteHost } from '../_lib/env.js';
 import { safeEqual } from '../_lib/crypto.js';
 import { audit } from '../_lib/guards.js';
-import { sendTelegram, sendRichTelegram, spendLinkToken, saveLink } from '../_lib/telegram.js';
+import { sendTelegram, sendRichTelegram, spendLinkToken, saveLink, linkedLocale } from '../_lib/telegram.js';
 import { helpMessage } from '../_lib/telegram-messages.js';
 import { loadAccount, canSignIn } from '../_lib/users.js';
+import { botT, botLocale, localeFromTelegram } from '../_lib/bot-text.js';
+
+// The language to answer a chat in: its linked account's, or the sender's
+// Telegram app's (from.language_code). A lookup that fails falls back to
+// the app's language, so the reply still goes.
+async function chatLanguage(chat, from) {
+  let languageCode = '';
+  if (from !== null && from !== undefined && typeof from.language_code === 'string') {
+    languageCode = from.language_code;
+  }
+  try {
+    const linked = await linkedLocale(chat.id);
+    if (linked) {
+      return linked;
+    }
+  } catch (cause) {
+    console.warn('[helloevents] telegram language:', errorDetail(cause));
+  }
+  return localeFromTelegram(languageCode);
+}
 
 // Whether the call really comes from Telegram: the secret token header must
 // match TELEGRAM_WEBHOOK_SECRET. Answers 401 (and logs why) when it does not.
@@ -50,8 +74,9 @@ function refusedSecret(request, response) {
 }
 
 // "/start <token>": links this chat to the account that made the token on
-// its account page, while signed in.
-async function linkChat(chat, linkToken, telegramUsername, reply) {
+// its account page, while signed in. The reply is in that account's
+// language once it is known; locale is the chat's until then.
+async function linkChat(chat, linkToken, telegramUsername, reply, locale) {
   const token = await spendLinkToken(linkToken);
   let user = null;
   if (token) {
@@ -60,20 +85,24 @@ async function linkChat(chat, linkToken, telegramUsername, reply) {
   // Tokens made during the old first-time set-up (challengeId set) are no
   // longer issued and are refused like an expired one.
   if (!token || token.challengeId || !user || !canSignIn(user)) {
-    await reply('That link has expired or was already used. Make a new one from your account page.');
+    await reply(botT(locale, 'bot.link-expired'));
     return;
   }
 
   // From the account page, by someone already signed in.
   await saveLink(user.id, chat.id, telegramUsername);
   await audit(null, { action: 'security.telegram_linked', actorId: user.id });
-  await reply(
-    `Linked to the account ${user.username} on ${siteHost()}. Sign-in codes will arrive here, and event notices if you switch them on in your account.`
-  );
+  let accountLocale = locale;
+  if (user.locale) {
+    accountLocale = botLocale(user.locale);
+  }
+  await reply(botT(accountLocale, 'bot.linked', { username: user.username, site: siteHost() }));
 }
 
 // "/unlink": unlinks this chat from every account it is linked to.
-async function unlinkChat(chat, reply) {
+// The reply is in the language of the chat (chatLanguage, read before the
+// link goes).
+async function unlinkChat(chat, reply, locale) {
   const { data, error } = await database().from(TABLES.telegram).delete().eq('chat_id', chat.id).select('user_id');
   if (error) {
     throw error;
@@ -85,9 +114,9 @@ async function unlinkChat(chat, reply) {
   for (const row of unlinkedRows) {
     await audit(null, { action: 'security.telegram_unlinked', actorId: row.user_id, details: { via: 'bot' } });
   }
-  let answer = 'This chat is not linked to any account.';
+  let answer = botT(locale, 'bot.not-linked');
   if (unlinkedRows.length > 0) {
-    answer = 'Unlinked. This chat will not receive codes any more.';
+    answer = botT(locale, 'bot.unlinked');
   }
   await reply(answer);
 }
@@ -118,7 +147,14 @@ export default route('telegram/webhook', async (request, response) => {
     }
   }
   if (chat && /^\/chatid(?:@\w+)?$/.test(text) && ['private', 'group', 'supergroup'].includes(chat.type)) {
-    await sendTelegram(chat.id, `This chat's ID is ${chat.id}. Give it to an admin to receive event alerts here.`)
+    // In a group, the language of whoever asked.
+    let locale = 'en';
+    if (chat.type === 'private') {
+      locale = await chatLanguage(chat, message.from);
+    } else if (message.from !== null && message.from !== undefined) {
+      locale = localeFromTelegram(message.from.language_code);
+    }
+    await sendTelegram(chat.id, botT(locale, 'bot.chat-id', { id: chat.id }))
       .catch((cause) => console.warn('[helloevents] telegram reply:', errorDetail(cause)));
     return send(response, 200, { ok: true });
   }
@@ -134,18 +170,20 @@ export default route('telegram/webhook', async (request, response) => {
     telegramUsername = message.from.username.slice(0, 64);
   }
 
+  const locale = await chatLanguage(chat, message.from);
+
   const startCommand = text.match(/^\/start(?:@\w+)?(?:\s+(\S+))?$/);
   if (startCommand && startCommand[1]) {
-    await linkChat(chat, startCommand[1], telegramUsername, reply);
+    await linkChat(chat, startCommand[1], telegramUsername, reply, locale);
     return send(response, 200, { ok: true });
   }
 
   if (/^\/unlink(?:@\w+)?$/.test(text)) {
-    await unlinkChat(chat, reply);
+    await unlinkChat(chat, reply, locale);
     return send(response, 200, { ok: true });
   }
 
-  await sendRichTelegram(chat.id, helpMessage()).catch((cause) =>
+  await sendRichTelegram(chat.id, helpMessage(locale)).catch((cause) =>
     console.warn('[helloevents] telegram help:', errorDetail(cause))
   );
   send(response, 200, { ok: true });

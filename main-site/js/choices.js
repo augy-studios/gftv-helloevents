@@ -5,7 +5,7 @@
 //
 // The currency field works like the currency converter's
 // (currency-converter/main-site/script.js): a search box with a list of
-// "SGD — Singapore Dollar" suggestions, read back by its three-letter code.
+// "SGD · Singapore Dollar" suggestions, read back by its three-letter code.
 
 import { t as translate, getLocale } from '../assets/i18n/i18n.js';
 import { createElement } from './ui.js';
@@ -213,7 +213,7 @@ function currencyCodes() {
   return [...PINNED_CURRENCIES, ...codes.filter((code) => !PINNED_CURRENCIES.includes(code))];
 }
 
-// "SGD — Singapore Dollar", as the search box shows a currency.
+// "SGD · Singapore Dollar", as the search box shows a currency.
 export function currencyLabel(code) {
   if (!code) {
     return '';
@@ -226,7 +226,7 @@ export function currencyLabel(code) {
   if (!name || name === code) {
     return code;
   }
-  return `${code} — ${name}`;
+  return `${code} · ${name}`;
 }
 
 // Fills the currency suggestions (a <datalist>): Singapore dollar, ringgit
@@ -235,7 +235,7 @@ export function fillCurrencyList(datalist) {
   datalist.replaceChildren(...currencyCodes().map((code) => createElement('option', { value: currencyLabel(code) })));
 }
 
-// The three-letter code in what was typed or picked ("SGD — Singapore
+// The three-letter code in what was typed or picked ("SGD · Singapore
 // Dollar", "sgd", "Singapore Dollar" are all "SGD"); otherwise what was
 // typed, so the server can name the field.
 export function currencyCodeFrom(text) {

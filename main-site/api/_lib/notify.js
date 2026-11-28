@@ -32,6 +32,12 @@
 // place with its street address and map link (the meeting point, a meal held
 // somewhere else), and the online link. Their push notifications, which can
 // show on a locked screen, stay to the public venue names and cities.
+//
+// Every notice, push and Telegram alike, is written in the language of the
+// account it goes to (gftvevents_accounts.locale, migrations/029, saved by
+// the site as the person uses it): deliver builds each notice once per
+// language among the accounts it tells. Event titles, venue names and
+// addresses are the editors' own words and go as typed.
 
 import { waitUntil } from '@vercel/functions';
 import { database, TABLES } from './supabase.js';
@@ -43,6 +49,8 @@ import { reminderHoursFrom } from './users.js';
 import { isReleased, datesAnnounced, storedLocations, storedMeals, storedTimetable } from './event-rules.js';
 import { whenText, endText, placeText, countryText, untilText, startDateText, startTimeText } from './event-text.js';
 import { embedImageUrl } from './covers.js';
+import { botLocale, translator, joinList, DEFAULT_LOCALE } from './bot-text.js';
+import { withLocaleColumn, localeSelect } from './locale-column.js';
 import { errorDetail } from './http.js';
 
 const CONCURRENCY = 8;
@@ -86,29 +94,31 @@ export async function settle() {
 // notification's body (when and where, on one line); details are the date,
 // time and place, each on a line of its own in the Telegram message, with
 // the cover picture (image, a JPEG address, or null) under the link.
-export function noticeFor(kind, row) {
+// locale: the language to write it in (bot-text.js).
+export function noticeFor(kind, row, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
   const url = `${siteUrl()}/e/${row.slug}`;
-  const lines = [whenText(row), placeText(row)].filter(Boolean);
-  const details = [['Date', startDateText(row)]];
-  const time = startTimeText(row);
+  const lines = [whenText(row, locale), placeText(row, locale)].filter(Boolean);
+  const details = [[say('notice.date'), startDateText(row, locale)]];
+  const time = startTimeText(row, locale);
   if (time) {
-    details.push(['Time', time]);
+    details.push([say('notice.time'), time]);
   }
-  details.push(['Location', placeText(row) || 'To be announced']);
-  const notice = { title: row.title, lines, intro: '', details, url, image: embedImageUrl(row) };
+  details.push([say('notice.location'), placeText(row, locale) || say('when.to-be-announced')]);
+  const notice = { locale: botLocale(locale), title: row.title, lines, intro: '', details, url, image: embedImageUrl(row) };
   if (kind === 'cancelled') {
-    const message = 'This event will not go ahead.';
-    return { ...notice, heading: 'Event cancelled', lines: [message], intro: message, tag: `event-${row.slug}` };
+    const message = say('notice.cancelled-text');
+    return { ...notice, heading: say('notice.cancelled'), lines: [message], intro: message, tag: `event-${row.slug}` };
   }
   if (kind === 'timetable') {
-    const message = 'The timetable changed. See the event page for the latest.';
-    return { ...notice, heading: 'Timetable updated', lines: [message], intro: message, tag: `event-${row.slug}` };
+    const message = say('notice.timetable-text');
+    return { ...notice, heading: say('notice.timetable'), lines: [message], intro: message, tag: `event-${row.slug}` };
   }
   if (kind === 'paid') {
-    const message = 'Your payment is confirmed. See you there.';
-    return { ...notice, heading: 'Payment confirmed', lines: [message], intro: message, tag: `paid-${row.slug}` };
+    const message = say('notice.paid-text');
+    return { ...notice, heading: say('notice.paid'), lines: [message], intro: message, tag: `paid-${row.slug}` };
   }
-  return { ...notice, heading: 'New event', tag: `new-${row.slug}` };
+  return { ...notice, heading: say('notice.new'), tag: `new-${row.slug}` };
 }
 
 // Tells one person an editor confirmed their payment (migrations/016), by
@@ -116,7 +126,7 @@ export function noticeFor(kind, row) {
 // their notice choices, as they are waiting for it; an account that is not
 // active hears nothing. row: the event, with what noticeFor reads.
 export async function sendPaymentConfirmed(row, accountId) {
-  return deliverToOne(accountId, noticeFor('paid', row));
+  return deliverToOne(accountId, (locale) => noticeFor('paid', row, locale));
 }
 
 // Tells one person GFTV's admins decided their HelloID check
@@ -124,14 +134,19 @@ export async function sendPaymentConfirmed(row, accountId) {
 // are on their account page). Sent whatever their notice choices, like a
 // payment confirmed.
 export async function sendHelloidDecision(accountId, approved) {
-  let heading = 'ID check not approved';
-  let message = 'HelloID could not verify your ID. See why on your account page, and try again.';
-  if (approved) {
-    heading = 'ID verified';
-    message = 'Your HelloID check is approved. Events that ask for an ID check now take your RSVP.';
-  }
-  const notice = { title: 'HelloID', heading, lines: [message], intro: message, details: [], url: `${siteUrl()}/account#profile`, image: null, tag: 'helloid' };
-  return deliverToOne(accountId, notice);
+  return deliverToOne(accountId, (locale) => {
+    const say = translator(locale);
+    let heading = say('notice.helloid-declined');
+    let message = say('notice.helloid-declined-text');
+    if (approved) {
+      heading = say('notice.helloid-approved');
+      message = say('notice.helloid-approved-text');
+    }
+    return {
+      locale: botLocale(locale), title: 'HelloID', heading, lines: [message], intro: message, details: [],
+      url: `${siteUrl()}/account#profile`, image: null, tag: 'helloid',
+    };
+  });
 }
 
 // Tells one person they are now going to an event, with everything they
@@ -139,17 +154,17 @@ export async function sendHelloidDecision(accountId, approved) {
 // confirmed. row: the event, with what reminderNotice reads; meals: the
 // meals they are coming for (empty for the whole event).
 export async function sendJoined(row, accountId, meals = []) {
-  return deliverToOne(accountId, joinNotice(row, meals));
+  return deliverToOne(accountId, (locale) => joinNotice(row, meals, locale));
 }
 
 // One account's notice, by push and (when it asked) Telegram; nothing for
-// an account that is not active.
+// an account that is not active. notice: as deliver takes it.
 async function deliverToOne(accountId, notice) {
-  const { data, error } = await database()
+  const { data, error } = await withLocaleColumn((withLocale) => database()
     .from(TABLES.accounts)
-    .select('id, status, notify_telegram')
+    .select(`id, status, notify_telegram${localeSelect(withLocale)}`)
     .eq('id', accountId)
-    .maybeSingle();
+    .maybeSingle());
   if (error) {
     throw error;
   }
@@ -172,28 +187,51 @@ async function telegramChats(accountIds) {
   return new Map(rowsOf(data).map((link) => [link.user_id, link.chat_id]));
 }
 
-// accounts: [{ id, notify_telegram }]. Returns how many accounts were reached.
-// Each account gets the notice by push, and by Telegram when it asked for
-// that and has a linked chat; it counts as reached when either got through.
-// CONCURRENCY workers share one queue, so a slow account holds up only one.
+// Each language's notice, built once, the first time an account in that
+// language needs it: its push payload and its Telegram message. build: a
+// function of the locale giving the notice (noticeFor, reminderNotice, ...),
+// or one notice for everyone.
+function noticesByLocale(build) {
+  const built = new Map();
+  return (account) => {
+    const locale = botLocale(account.locale);
+    if (!built.has(locale)) {
+      let notice = build;
+      if (typeof build === 'function') {
+        notice = build(locale);
+      }
+      const payload = { title: `${notice.heading}: ${notice.title}`, body: notice.lines.join(' · '), url: notice.url, tag: notice.tag };
+      // A reminder, a change or joining brings its own, fuller message
+      // (fullNoticeMessage).
+      let message = notice.rich;
+      if (!message) {
+        message = eventNoticeMessage(notice);
+      }
+      built.set(locale, { payload, message });
+    }
+    return built.get(locale);
+  };
+}
+
+// accounts: [{ id, notify_telegram, locale }]. notice: a function of the
+// locale giving the notice in that language, or one notice for everyone.
+// Returns how many accounts were reached. Each account gets the notice in
+// its own language by push, and by Telegram when it asked for that and has
+// a linked chat; it counts as reached when either got through. CONCURRENCY
+// workers share one queue, so a slow account holds up only one.
 export async function deliver(accounts, notice) {
   const telegramAccountIds = accounts.filter((account) => account.notify_telegram).map((account) => account.id);
   const chats = await telegramChats(telegramAccountIds);
-  const payload = { title: `${notice.heading}: ${notice.title}`, body: notice.lines.join(' · '), url: notice.url, tag: notice.tag };
+  const inLanguage = noticesByLocale(notice);
   let reached = 0;
   const queue = [...accounts];
   async function worker() {
     while (queue.length) {
       const account = queue.shift();
+      const { payload, message } = inLanguage(account);
       let reachedAccount = (await pushToAccount(account.id, payload)) > 0;
       const chat = chats.get(account.id);
       if (chat) {
-        // A reminder, a change or joining brings its own, fuller message
-        // (fullNoticeMessage).
-        let message = notice.rich;
-        if (!message) {
-          message = eventNoticeMessage(notice);
-        }
         try {
           await sendRichTelegram(chat, message);
           reachedAccount = true;
@@ -221,10 +259,10 @@ function wantsNotice(account, preference) {
 
 // The accounts going to an event that want this kind of notice.
 async function attendeeAccounts(eventId, preference) {
-  const { data, error } = await database()
+  const { data, error } = await withLocaleColumn((withLocale) => database()
     .from(TABLES.attendees)
-    .select(`user_id, account:${TABLES.accounts}!user_id ( id, status, notify_updates, notify_reminders, notify_telegram )`)
-    .eq('event_id', eventId);
+    .select(`user_id, account:${TABLES.accounts}!user_id ( id, status, notify_updates, notify_reminders, notify_telegram${localeSelect(withLocale)} )`)
+    .eq('event_id', eventId));
   if (error) {
     throw error;
   }
@@ -448,9 +486,9 @@ export async function flushEventChange(eventId, now = Date.now()) {
   }
   const accounts = await attendeeAccounts(eventId, 'notify_updates');
   if (kind === 'updated') {
-    return deliver(accounts, updateNotice(row.notice_base, row));
+    return deliver(accounts, (locale) => updateNotice(row.notice_base, row, locale));
   }
-  return deliver(accounts, noticeFor(kind, row));
+  return deliver(accounts, (locale) => noticeFor(kind, row, locale));
 }
 
 // Hourly (cron/notify.js): queued changes whose background send never ran,
@@ -512,9 +550,12 @@ export function dueReminder({ startsAt, timeTbc = false, chosen, sent, rsvpAt = 
 }
 
 // A meal by name: the editor's, or breakfast, lunch or dinner.
-function mealName(meal) {
+function mealName(meal, locale = DEFAULT_LOCALE) {
   if (meal.label) {
     return meal.label;
+  }
+  if (['breakfast', 'lunch', 'dinner'].includes(meal.id)) {
+    return translator(locale)(`meal.${meal.id}`);
   }
   return meal.id.charAt(0).toUpperCase() + meal.id.slice(1);
 }
@@ -522,10 +563,11 @@ function mealName(meal) {
 // What a place is: "Event location", "Meeting location" or the editor's
 // own label; for one of a meal's places, the meal's name, with the label
 // when it is not where the meal itself is ("Dinner · Meeting location").
-function placeHeading(location, meal = null) {
-  let label = 'Event location';
+function placeHeading(location, meal = null, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
+  let label = say('place.event');
   if (location.label === 'meeting') {
-    label = 'Meeting location';
+    label = say('place.meeting');
   } else if (location.label === 'custom' && location.custom_label) {
     label = location.custom_label;
   }
@@ -533,22 +575,23 @@ function placeHeading(location, meal = null) {
     return label;
   }
   if (location.label === 'meal') {
-    return mealName(meal);
+    return mealName(meal, locale);
   }
-  return `${mealName(meal)} · ${label}`;
+  return say('place.with-label', { meal: mealName(meal, locale), label });
 }
 
 // A place's details, as [label, value] rows, blanks left out.
-function placeRows(location) {
+function placeRows(location, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
   const rows = [
-    ['Venue', location.venue_name],
-    ['Address', location.venue_address],
-    ['City', location.city],
-    ['Country', countryText(location.country)],
-    ['Map', location.maps_url],
+    [say('row.venue'), location.venue_name],
+    [say('row.address'), location.venue_address],
+    [say('row.city'), location.city],
+    [say('row.country'), countryText(location.country, locale)],
+    [say('row.map'), location.maps_url],
   ].filter(([, value]) => value);
   if (rows.length === 0) {
-    return [['Place', 'To be announced']];
+    return [[say('row.place'), say('when.to-be-announced')]];
   }
   return rows;
 }
@@ -560,32 +603,34 @@ function placeRows(location) {
 // places (every place of the event with its address and map link), online
 // (an online-only event, with no places), and mealPlaces under mealsHeading
 // (each meal held somewhere else; just their meals, when they are coming
-// only for those).
-function eventTables(row, chosen = [], { comingFor = true } = {}) {
+// only for those). locale: the language to write it in.
+function eventTables(row, chosen = [], { comingFor = true, locale = DEFAULT_LOCALE } = {}) {
+  const say = translator(locale);
   const meals = storedMeals(row);
   let picked = [];
   if (Array.isArray(chosen)) {
     picked = meals.filter((meal) => chosen.includes(meal.id));
   }
-  const details = whenRows(row);
+  const details = whenRows(row, locale);
   if (comingFor && picked.length) {
-    details.push(['Coming for', `${picked.map(mealName).join(', ')} only`]);
+    const names = joinList(locale, picked.map((meal) => mealName(meal, locale)));
+    details.push([say('row.coming-for'), say('row.coming-for-meals', { meals: names })]);
   } else if (comingFor && meals.length) {
-    details.push(['Coming for', 'The whole event']);
+    details.push([say('row.coming-for'), say('row.whole-event')]);
   }
   if (row.is_online && row.online_url) {
-    details.push(['Online link', row.online_url]);
+    details.push([say('row.online-link'), row.online_url]);
   }
-  const places = storedLocations(row).map((location) => ({ heading: placeHeading(location), rows: placeRows(location) }));
+  const places = storedLocations(row).map((location) => ({ heading: placeHeading(location, null, locale), rows: placeRows(location, locale) }));
   let mealsShown = meals;
-  let mealsHeading = 'Meals held elsewhere';
+  let mealsHeading = say('meals.elsewhere');
   if (picked.length) {
     mealsShown = picked;
-    mealsHeading = 'Your meals';
+    mealsHeading = say('meals.yours');
   }
   const mealPlaces = mealsShown.flatMap((meal) => meal.locations.map((location) => ({
-    heading: placeHeading(location, meal),
-    rows: placeRows(location),
+    heading: placeHeading(location, meal, locale),
+    rows: placeRows(location, locale),
   })));
   let online = false;
   if (row.is_online === true && places.length === 0) {
@@ -595,11 +640,12 @@ function eventTables(row, chosen = [], { comingFor = true } = {}) {
 }
 
 // When an event starts and ends, as [label, value] rows.
-function whenRows(row) {
-  const rows = [['When', whenText(row)]];
-  const ends = endText(row);
+function whenRows(row, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
+  const rows = [[say('row.when'), whenText(row, locale)]];
+  const ends = endText(row, locale);
   if (ends) {
-    rows.push(['Ends', ends]);
+    rows.push([say('row.ends'), ends]);
   }
   return rows;
 }
@@ -608,14 +654,15 @@ function whenRows(row) {
 // (chosen empty) or just for those meals. It is a notice (heading, title,
 // lines, url, tag) whose push notification says only when and where, plus
 // eventTables for its Telegram message (rich).
-export function reminderNotice(row, chosen = [], now = Date.now()) {
+export function reminderNotice(row, chosen = [], now = Date.now(), locale = DEFAULT_LOCALE) {
   const notice = {
-    heading: `Starting in ${untilText(Date.parse(row.starts_at) - now)}`,
+    locale: botLocale(locale),
+    heading: translator(locale)('notice.starting-in', { time: untilText(Date.parse(row.starts_at) - now, locale) }),
     title: row.title,
-    lines: [whenText(row), placeText(row)].filter(Boolean),
+    lines: [whenText(row, locale), placeText(row, locale)].filter(Boolean),
     url: `${siteUrl()}/e/${row.slug}`,
     tag: `reminder-${row.slug}`,
-    ...eventTables(row, chosen),
+    ...eventTables(row, chosen, { locale }),
   };
   notice.rich = fullNoticeMessage(notice);
   return notice;
@@ -624,14 +671,15 @@ export function reminderNotice(row, chosen = [], now = Date.now()) {
 // The notice for someone who has just joined an event, like a reminder: the
 // push says when and where, and the Telegram message has every place, the
 // meals they are coming for, and the online link.
-export function joinNotice(row, chosen = []) {
+export function joinNotice(row, chosen = [], locale = DEFAULT_LOCALE) {
   const notice = {
-    heading: "You're going",
+    locale: botLocale(locale),
+    heading: translator(locale)('notice.going'),
     title: row.title,
-    lines: [whenText(row), placeText(row)].filter(Boolean),
+    lines: [whenText(row, locale), placeText(row, locale)].filter(Boolean),
     url: `${siteUrl()}/e/${row.slug}`,
     tag: `going-${row.slug}`,
-    ...eventTables(row, chosen),
+    ...eventTables(row, chosen, { locale }),
   };
   notice.rich = fullNoticeMessage(notice);
   return notice;
@@ -639,10 +687,10 @@ export function joinNotice(row, chosen = []) {
 
 // A place in a push notification, which can show on a locked screen: its
 // public venue name and city, never its street address.
-function publicPlace(location) {
+function publicPlace(location, locale = DEFAULT_LOCALE) {
   const parts = [location.venue_name, location.city].filter(Boolean);
   if (parts.length === 0) {
-    return 'to be announced';
+    return translator(locale)('where.to-be-announced');
   }
   return parts.join(', ');
 }
@@ -669,31 +717,37 @@ function placesByKind(locations) {
 
 // What a place is called in a change: "Meeting location", "Tea room",
 // "Dinner location", "Dinner · Meeting location".
-function changedPlaceName(location, meal) {
+function changedPlaceName(location, meal, locale = DEFAULT_LOCALE) {
   if (meal && location.label === 'meal') {
-    return `${mealName(meal)} location`;
+    return translator(locale)('place.meal-location', { meal: mealName(meal, locale) });
   }
-  return placeHeading(location, meal);
+  return placeHeading(location, meal, locale);
 }
 
 // The changes between two lists of places (the event's, or one meal's):
 // each one changed, added or removed, by name.
-function placeChanges(beforeList, afterList, meal = null) {
+function placeChanges(beforeList, afterList, meal = null, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
   const old = placesByKind(beforeList);
   const now = placesByKind(afterList);
   const changes = [];
   for (const [key, location] of now) {
-    const name = changedPlaceName(location, meal);
+    const name = changedPlaceName(location, meal, locale);
+    const place = publicPlace(location, locale);
     if (!old.has(key)) {
-      changes.push({ heading: `${name} added`, before: null, after: placeRows(location), summary: `${name} added: ${publicPlace(location)}` });
+      changes.push({ heading: say('change.added', { name }), before: null, after: placeRows(location, locale), summary: say('change.added-summary', { name, place }) });
     } else if (JSON.stringify(old.get(key)) !== JSON.stringify(location)) {
-      changes.push({ heading: `${name} changed`, before: placeRows(old.get(key)), after: placeRows(location), summary: `${name} changed: ${publicPlace(location)}` });
+      changes.push({
+        heading: say('change.changed', { name }), before: placeRows(old.get(key), locale), after: placeRows(location, locale),
+        summary: say('change.changed-summary', { name, place }),
+      });
     }
   }
   for (const [key, location] of old) {
     if (!now.has(key)) {
-      const name = changedPlaceName(location, meal);
-      changes.push({ heading: `${name} removed`, before: placeRows(location), after: null, summary: `${name} removed` });
+      const name = changedPlaceName(location, meal, locale);
+      const heading = say('change.removed', { name });
+      changes.push({ heading, before: placeRows(location, locale), after: null, summary: heading });
     }
   }
   return changes;
@@ -703,35 +757,36 @@ function placeChanges(beforeList, afterList, meal = null) {
 // event, in the order the event page shows them: { heading ("Meeting
 // location changed"), before and after ([label, value] rows, null for one
 // added or removed), summary (for the push: public names only) }.
-export function describeChanges(before, after) {
+export function describeChanges(before, after, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
   const changes = [];
-  const whenBefore = whenRows(before);
-  const whenAfter = whenRows(after);
+  const whenBefore = whenRows(before, locale);
+  const whenAfter = whenRows(after, locale);
   if (JSON.stringify(whenBefore) !== JSON.stringify(whenAfter)) {
-    let summary = `Now ${whenText(after)}`;
-    const ends = endText(after);
+    let summary = say('change.when-summary', { when: whenText(after, locale) });
+    const ends = endText(after, locale);
     if (ends) {
-      summary = `${summary} to ${ends}`;
+      summary = say('change.when-summary-ends', { when: whenText(after, locale), ends });
     }
-    changes.push({ heading: 'Date and time changed', before: whenBefore, after: whenAfter, summary });
+    changes.push({ heading: say('change.when'), before: whenBefore, after: whenAfter, summary });
   }
   if ((before.is_online === true) !== (after.is_online === true)) {
-    let heading = 'No longer online';
+    let heading = say('change.online-off');
     if (after.is_online === true) {
-      heading = 'Now online';
+      heading = say('change.online-on');
     }
     changes.push({ heading, before: null, after: null, summary: heading });
   } else if (after.is_online === true && 'online_url' in before && fieldChanged('online_url', before, after)) {
     const linkRow = (row) => {
-      let link = 'None';
+      let link = say('change.no-link');
       if (row.online_url) {
         link = row.online_url;
       }
-      return [['Online link', link]];
+      return [[say('row.online-link'), link]];
     };
-    changes.push({ heading: 'Online link changed', before: linkRow(before), after: linkRow(after), summary: 'Online link changed. See the event page.' });
+    changes.push({ heading: say('change.online-link'), before: linkRow(before), after: linkRow(after), summary: say('change.online-link-summary') });
   }
-  changes.push(...placeChanges(storedLocations(before), storedLocations(after)));
+  changes.push(...placeChanges(storedLocations(before), storedLocations(after), null, locale));
   if ('meal_options' in before && 'meal_options' in after) {
     const oldMeals = new Map(storedMeals(before).map((meal) => [meal.id, meal]));
     for (const meal of storedMeals(after)) {
@@ -740,10 +795,10 @@ export function describeChanges(before, after) {
         continue;
       }
       if (was.locations.length && !meal.locations.length) {
-        const heading = `${mealName(meal)} now at the event's location`;
-        changes.push({ heading, before: placeRows(was.locations[0]), after: [['Place', "Same as the event's"]], summary: heading });
+        const heading = say('change.meal-at-event', { meal: mealName(meal, locale) });
+        changes.push({ heading, before: placeRows(was.locations[0], locale), after: [[say('row.place'), say('change.same-place')]], summary: heading });
       } else {
-        changes.push(...placeChanges(was.locations, meal.locations, meal));
+        changes.push(...placeChanges(was.locations, meal.locations, meal, locale));
       }
     }
   }
@@ -756,24 +811,26 @@ export function describeChanges(before, after) {
 // updated" for several), and the push lists each with public names only.
 // The Telegram message (rich) has each change's before and now, then the
 // event's details and every place, like a reminder.
-export function updateNotice(before, row) {
-  const changes = describeChanges(before, row);
-  let heading = 'Event updated';
+export function updateNotice(before, row, locale = DEFAULT_LOCALE) {
+  const say = translator(locale);
+  const changes = describeChanges(before, row, locale);
+  let heading = say('notice.updated');
   if (changes.length === 1) {
     heading = changes[0].heading;
   }
   let lines = changes.map((change) => change.summary);
   if (lines.length === 0) {
-    lines = ['The time or place changed. See the event page.'];
+    lines = [say('notice.updated-text')];
   }
   const notice = {
+    locale: botLocale(locale),
     heading,
     title: row.title,
     lines,
     url: `${siteUrl()}/e/${row.slug}`,
     tag: `event-${row.slug}`,
     changes,
-    ...eventTables(row, [], { comingFor: false }),
+    ...eventTables(row, [], { comingFor: false, locale }),
   };
   notice.rich = fullNoticeMessage(notice);
   return notice;
@@ -806,10 +863,10 @@ export async function sendReminders(now = Date.now()) {
   let sent = 0;
   const releasedEvents = rowsOf(events).filter((candidate) => isReleased(candidate, now));
   for (const event of releasedEvents) {
-    const { data: rows, error: rowsError } = await database()
+    const { data: rows, error: rowsError } = await withLocaleColumn((withLocale) => database()
       .from(TABLES.attendees)
-      .select(`user_id, created_at, meals, reminders_sent, account:${TABLES.accounts}!user_id ( id, status, reminder_hours, notify_telegram )`)
-      .eq('event_id', event.id);
+      .select(`user_id, created_at, meals, reminders_sent, account:${TABLES.accounts}!user_id ( id, status, reminder_hours, notify_telegram${localeSelect(withLocale)} )`)
+      .eq('event_id', event.id));
     if (rowsError) {
       throw rowsError;
     }
@@ -854,7 +911,7 @@ export async function sendReminders(now = Date.now()) {
       groups.get(key).accounts.push(account);
     }
     for (const group of groups.values()) {
-      sent += await deliver(group.accounts, reminderNotice(event, group.meals, now));
+      sent += await deliver(group.accounts, (locale) => reminderNotice(event, group.meals, now, locale));
     }
   }
   return sent;
@@ -892,12 +949,12 @@ export async function announceNewEvents(now = Date.now()) {
   if (fresh.length === 0) {
     return 0;
   }
-  const { data: accounts, error: accountsError } = await database()
+  const { data: accounts, error: accountsError } = await withLocaleColumn((withLocale) => database()
     .from(TABLES.accounts)
-    .select('id, status, notify_telegram')
+    .select(`id, status, notify_telegram${localeSelect(withLocale)}`)
     .eq('notify_new_events', true)
     .eq('status', 'active')
-    .limit(MAX_ANNOUNCE);
+    .limit(MAX_ANNOUNCE));
   if (accountsError) {
     throw accountsError;
   }
@@ -908,7 +965,7 @@ export async function announceNewEvents(now = Date.now()) {
     if (markError) {
       throw markError;
     }
-    sent += await deliver(recipients, noticeFor('new', event));
+    sent += await deliver(recipients, (locale) => noticeFor('new', event, locale));
   }
   return sent;
 }

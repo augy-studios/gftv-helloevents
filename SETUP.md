@@ -35,6 +35,15 @@ value only where a step says so.
   in a private chat or a group, answers with that chat's ID, to put in
   `ADMIN_CHAT_IDS` or an event's organiser chats.
 
+- **Language.** The bot writes to each member in the language they use the
+  site in (English, Chinese, Malay or Tamil), which the site saves to their
+  account (`migrations/029_account_locale.sql`; until it has run, everything
+  is English). That covers codes, replies, help, reminders and every other
+  notice, and the emails too. A chat linked
+  to no account gets its Telegram app's language when the site has it, else
+  English. Admin and organiser alerts stay in English. The BotFather
+  description and command list stay in English (one text for everyone).
+
 Codes and members' notices only ever go to private chats. In a group, the bot
 answers `/chatid` and nothing else, and only sends the alerts above. It does
 not use inline mode or the Telegram Login Widget.
@@ -173,9 +182,12 @@ When done, close the terminal, or run `unset BOT_TOKEN HOOK_SECRET`.
    put the ID it answers in `ADMIN_CHAT_IDS` (redeploy), or on an event's
    **Organisers** tab in Manage, where **Send a test** checks the bot can
    reach each chat.
-6. **Unlink.** Send `/unlink` to the bot: it answers "Unlinked", and the
+6. **Language (optional).** Switch the site to 中文 with the language button,
+   then send the bot any message: the help comes back in Chinese. Switch back
+   to English the same way.
+7. **Unlink.** Send `/unlink` to the bot: it answers "Unlinked", and the
    account page shows "Not linked".
-7. Delete the test account afterwards from its account page.
+8. Delete the test account afterwards from its account page.
 
 The code and help messages are Telegram rich messages (Bot API 10.1, sent with
 `sendRichMessage`). There is nothing to switch on for them in BotFather. If

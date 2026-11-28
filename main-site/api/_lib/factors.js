@@ -311,14 +311,15 @@ export async function issueBackupCodes(userId) {
   return codes;
 }
 
-// Send a fresh Telegram code for a challenge, replacing any earlier one.
-export async function sendTelegramCode(challenge, chatId, { purpose, username }) {
+// Send a fresh Telegram code for a challenge, replacing any earlier one,
+// in the account's language (locale, as the site saved it).
+export async function sendTelegramCode(challenge, chatId, { purpose, username, locale }) {
   const code = randomDigits();
   await updateChallenge(challenge, {
     telegram_code_hash: await bcrypt.hash(code, 10),
     telegram_code_expires_at: new Date(Date.now() + CODE_MINUTES * 60_000).toISOString(),
   });
-  await sendRichTelegram(chatId, codeMessage({ purpose, username, code, minutes: CODE_MINUTES }));
+  await sendRichTelegram(chatId, codeMessage({ purpose, username, code, minutes: CODE_MINUTES, locale }));
 }
 
 // Whether typed is the challenge's Telegram code and it has not expired.

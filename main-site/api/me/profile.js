@@ -1,5 +1,6 @@
 // POST /api/me/profile { displayName?, country?, legalName?, dateOfBirth?,
-//                        emergencyName?, emergencyPhone? }  change the profile:
+//                        emergencyName?, emergencyPhone?, locale? }  change
+//                        the profile:
 //   displayName  a public account's display name. Staff names come from
 //                gftv.asia and are changed there. The same rules as sign-up:
 //                up to 60 characters, and no listed word (name-filter.js).
@@ -14,6 +15,10 @@
 //                tools), so nobody swaps who they are between events.
 //   emergencyName, emergencyPhone  an emergency contact, changed at any time
 //                (blank takes it away).
+//   locale       (migrations/029) the language the person uses the site in,
+//                one of the site's codes ("en", "zh-SG", "ms", "ta"), saved
+//                by the pages themselves (js/app.js) so the Telegram bot,
+//                reminders and every other notice come in it. Any account.
 // -> { user }
 
 import { route, guard, readJson, ok, fail } from '../_lib/http.js';
@@ -26,6 +31,8 @@ import { countryCode } from '../_lib/countries.js';
 import { refusedName } from '../_lib/name-filter.js';
 import { personName, birthDate, emergencyPhone } from '../../js/registration-fields.js';
 import { selfView } from '../_lib/serialize.js';
+import { knownLocale } from '../_lib/bot-text.js';
+import { withLocaleColumn } from '../_lib/locale-column.js';
 
 // The new display name, checked like sign-up does: { ok: true, value } or
 // { ok: false, response sent }.
@@ -66,7 +73,7 @@ export default route('me/profile', async (request, response) => {
     return;
   }
   const personalKeys = ['legalName', 'dateOfBirth', 'emergencyName', 'emergencyPhone'];
-  if (body.displayName === undefined && body.country === undefined && personalKeys.every((key) => body[key] === undefined)) {
+  if (body.displayName === undefined && body.country === undefined && body.locale === undefined && personalKeys.every((key) => body[key] === undefined)) {
     return fail(response, 400, 'bad_request');
   }
 
@@ -123,6 +130,13 @@ export default route('me/profile', async (request, response) => {
       changes.emergency_name = name.value;
     }
   }
+  if (body.locale !== undefined) {
+    const locale = knownLocale(body.locale);
+    if (!locale) {
+      return fail(response, 400, 'bad_request');
+    }
+    changes.locale = locale;
+  }
   if (body.emergencyPhone !== undefined) {
     const phone = emergencyPhone(body.emergencyPhone);
     if (!phone.ok) {
@@ -138,11 +152,18 @@ export default route('me/profile', async (request, response) => {
   if (user.kind === 'staff') {
     await ensureStaffAccount(user.id);
   }
-  const { error } = await database()
-    .from(TABLES.accounts)
-    .update(changes)
-    .eq('id', user.id)
-    .eq('kind', user.kind);
+  // Before migrations/029 there is no locale column: the rest is saved, and
+  // the language is left until it exists.
+  const { error } = await withLocaleColumn((withLocale) => {
+    const saved = { ...changes };
+    if (!withLocale) {
+      delete saved.locale;
+    }
+    if (Object.keys(saved).length === 0) {
+      return { data: null, error: null };
+    }
+    return database().from(TABLES.accounts).update(saved).eq('id', user.id).eq('kind', user.kind);
+  });
   if (error) {
     throw error;
   }

@@ -91,6 +91,7 @@
                 <li data-i18n="helloid.consent-keep">The photos are deleted as soon as the check is decided. If it passes, GFTV keeps a face template (numbers, not a picture) and a code made from your document's number, only so the same person cannot verify another account. They are deleted with your account.</li>
                 <li data-i18n="helloid.consent-review">If the checks are not sure, GFTV's admins look at the photos to decide.</li>
             </ul>
+            <div class="callout helloid-tip" id="brightnessTip"><span data-icon="sun"></span><span data-i18n="helloid.brightness-tip">Turn your screen brightness all the way up before you start. The face check flashes colours on your screen and watches them light up your face: a brighter screen makes it much more likely to pass.</span></div>
             <label class="check u-mt-1"><input type="checkbox" id="consentBox"><span data-i18n="helloid.consent-agree">I agree to HelloID checking my ID this way</span></label>
             <div class="actions inline"><button class="btn btn-primary" type="button" id="consentNext" disabled data-i18n="helloid.next">Continue</button></div>
         </section>
@@ -99,6 +100,14 @@
         <section class="glass-card page-card helloid-step" id="stepCapture" hidden aria-labelledby="captureTitle">
             <h1 id="captureTitle"></h1>
             <p class="muted" id="captureHint"></p>
+            <div class="callout warn" id="captureRetake" hidden>
+                <p data-i18n="helloid.retake-lede">HelloID could not read the lines of letters and &lt;&lt;&lt; at the bottom of your ID clearly. Take the photo again:</p>
+                <ul class="small">
+                    <li data-i18n="helloid.retake-flat">Lay the ID flat on a plain, dark surface.</li>
+                    <li data-i18n="helloid.retake-light">Use bright, even light, and tilt the ID or phone until there is no glare or shine on it.</li>
+                    <li data-i18n="helloid.retake-close">Hold the phone straight above it, close enough to fill the frame, and wait for it to focus.</li>
+                </ul>
+            </div>
             <div class="helloid-camera document">
                 <video id="docVideo" playsinline muted autoplay></video>
                 <img id="docPreview" alt="" hidden>
@@ -109,6 +118,7 @@
                 <button class="btn" type="button" id="docRetake" hidden><span data-icon="refresh"></span><span data-i18n="helloid.retake">Take it again</span></button>
                 <button class="btn btn-primary" type="button" id="docUse" hidden data-i18n="helloid.use-photo">Use this photo</button>
                 <label class="btn btn-quiet" id="docFileLabel" hidden><span data-icon="image"></span><span data-i18n="helloid.camera-fallback">Use the camera app instead</span><input type="file" id="docFile" accept="image/*" capture="environment" hidden></label>
+                <button class="btn btn-quiet" type="button" id="docSkip" hidden data-i18n="helloid.retake-skip">Continue with the last photo</button>
             </div>
             <div class="callout danger" id="captureError" role="alert"></div>
         </section>
@@ -139,7 +149,10 @@
                 <div class="helloid-oval" aria-hidden="true"></div>
                 <p class="helloid-prompt" id="livePrompt" aria-live="assertive"></p>
             </div>
-            <div class="actions inline"><button class="btn btn-primary" type="button" id="liveStart" data-i18n="helloid.live-start">Start</button></div>
+            <p class="field-hint helloid-tip"><span data-icon="eye"></span><span data-i18n="helloid.face-cover-tip">Take off hats, caps and other headwear, and your glasses unless your ID photo shows you wearing them. Never wear sunglasses. A religious head covering can stay on if your ID photo shows it, with your whole face in view.</span></p>
+            <div class="callout warn" id="liveRetry" hidden></div>
+            <label class="check helloid-tip u-mt-1"><input type="checkbox" id="liveBright"><span data-icon="sun"></span><span data-i18n="helloid.brightness-confirm">My screen brightness is turned all the way up</span></label>
+            <div class="actions inline"><button class="btn btn-primary" type="button" id="liveStart" disabled data-i18n="helloid.live-start">Start</button></div>
             <div class="callout danger" id="liveError" role="alert"></div>
         </section>
         <div class="helloid-flash" id="flash" hidden></div>

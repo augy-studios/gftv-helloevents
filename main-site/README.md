@@ -67,9 +67,47 @@ the functions with the service role key. No Supabase Auth, no request signing.
     told (and can try again). HelloID never declines on its own, except a document already used. An
     approved check keeps a face template (encrypted with `crypto.js encryptSecret`), a keyed hash of
     the document number and of the device. A website cannot read passport chips (NFC), and no web
-    check can prove a document genuine. The thresholds at the top of `helloid.js` are a first
-    setting, to tune on real checks. `vercel.json` gives `api/me/helloid.js` 60 s and the model
+    check can prove a document genuine. `vercel.json` gives `api/me/helloid.js` 60 s and the model
     files.
+  - **Reading the MRZ** (`api/_lib/mrz-read.js`). The zone is found on the photo (straightened,
+    cropped to its lines) and read with an MRZ-trained Tesseract model
+    (`api/_lib/models/mrz.traineddata.gz`, ISC, `api/_lib/models/README.md`); a passport's second
+    line is repaired by what each place may hold and by its check digits. A repaired reading counts
+    only when a second picture's reading agrees, and an unclear one goes to the admins
+    (`mrz_ambiguous`), as check digits catch only nine wrong readings in ten. On generated passport
+    photos it reads about two in three where the first version read one in ten, with no wrong
+    number passed as checked: `npm run helloid:mrz-bench` measures it. G and 6, and L and 1, are
+    10 apart in a check digit's sum, so the identity hash (`id-checks.js identityHashOf`, all
+    providers) folds G into 6 and L into 1; hashes kept before this, of numbers with a G or an L,
+    no longer match the same document's new ones.
+  - **Asking again before the admins.** When the zone is not read clearly (or not found), the page
+    asks for a clearer photo of its side, with tips, twice; then the person may carry on with the
+    last photo. The face check waits for a tick that the screen is at full brightness (the colour
+    check watches the screen's light on the face). When the face part does not pass (one face,
+    the same person, the turns, the flashes), or passes but the face does not match the ID photo
+    (asked once: headwear off, glasses off unless the ID photo shows them, a religious head
+    covering may stay), `api/me/helloid.js` keeps nothing and asks for it again with advice, up to
+    `MAX_FACE_TRIES` goes; the last is decided as always. The earlier goes travel as a signed record
+    (a forged or old one counts as none), the decided check keeps how many it took
+    (`findings.faceTries`) for ID reviews and the tuning tab, and each retry is audited as
+    `helloid.face_retry`.
+  - **Tuning HelloID.** Its models are trained already; what is tuned is where its thresholds sit
+    and which face model it uses, measured on real checks rather than guessed:
+    - **HelloID tuning**, a tab of its own on `/manage` (admins): reads every decided check's
+      scores and how it was decided, and the approved face templates (never a photo or a name),
+      and suggests the turn, flash, same-person and face match settings, with what each would have
+      done so far (`api/_lib/helloid-calibration.js`, `api/manage/helloid.js?tuning=1`). FACE_MATCH
+      is only ever raised. Wait for 30 or more approved checks. `npm run helloid:calibrate` prints
+      the same locally (with the production `SUPABASE_*` and `TOTP_ENCRYPTION_KEY`), with more
+      templates, `--json`, and `--list` for the pairs of accounts whose faces look alike.
+    - `npm run helloid:face-models`, then `npm run helloid:bakeoff -- <folder>`: compares FaceRes
+      (Human's own, the default) with FaceRes-Deep and MobileFaceNet on a folder of photos of
+      consenting people (one folder each, an `id…` photo and selfies; kept off this repository,
+      `.gitignore`), and prints the model to use with its thresholds. Another model is used by
+      setting `HELLOID_FACE_MODEL`, `HELLOID_FACE_MATCH` and `HELLOID_SAME_PERSON` in Vercel and
+      keeping its files in `api/_lib/models/face/` (`npm run helloid:face-models -- --into
+      api/_lib/models/face <model>`); without both thresholds HelloID keeps to FaceRes and logs why.
+      Face templates record their model, and only the same model's are compared.
   - **Didit and Veriff** (`api/_lib/id-checks.js`), outside providers, paid per check, each on when
     its keys are set (`.env.example`, SETUP.md). The account page sends the person to the
     provider's page, which sends them back through `/api/idcheck/return`; the provider's webhook
@@ -532,6 +570,18 @@ the functions with the service role key. No Supabase Auth, no request signing.
   place (event location, meeting location, custom ones) with its street address, country and map
   link, and each meal held somewhere else with its own places (just their meals, for someone
   coming only for some), then the event link.
+- **The bot and the notices speak the account's language** (migrations/029,
+  `api/_lib/bot-text.js`). The site saves the language someone uses it in (English, Chinese,
+  Malay or Tamil) to their account whenever it differs (`js/app.js`; the last one picked wins, and
+  a browser that never picked one takes the account's). Everything sent to the account then comes
+  in it: sign-in and password reset codes, the bot's replies and help in their linked chat,
+  every notice (reminders, changes, joining, payments, HelloID decisions, new events, tests) by
+  Telegram and by Web Push, and the emails (codes, confirming an address, a password reset), with
+  dates, times and countries written the way that language writes them. A chat linked to no account is answered in its Telegram app's language when the site has
+  it. Event titles and places go as the editors typed them, and the alerts to the admins' and
+  organisers' group chats stay in English. The bot's strings are in `api/_lib/bot-text/`,
+  `en.js` the source of truth; `tests/bot-text.test.js` checks every language has the same keys
+  and placeholders.
 
 ## Setup, in order
 
@@ -580,6 +630,10 @@ The Telegram bot (made with @BotFather) and Cloudflare Turnstile have their own 
    ID checks, check-in and entry codes: sign-in reads the account's new ID columns, the event
    pages, RSVPs, checkout, the edit form and the attendee list read the event and attendee ones,
    and it drops the venue sign-up allowances' table, which nothing reads any more.
+   `029_account_locale.sql` adds the account's language for the bot, notices and emails. It can
+   run before or after the deploy: until it has, everything works in English, the function logs
+   ask for it once, and the column is looked for again every five minutes
+   (`api/_lib/locale-column.js`).
    A migration is never edited after it has run; changes go in a new numbered file. 002 also
    creates the `gftvevents_covers` Storage bucket.
 2. **Environment variables.** In Vercel, set every name in `.env.example` (Production, and Preview

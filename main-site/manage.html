@@ -69,6 +69,7 @@
             <button class="tab" type="button" role="tab" id="tab-events" data-tab="events" aria-controls="panel-events" aria-selected="true"><span data-icon="calendar"></span><span data-i18n="manage.tab.events">Event list</span></button>
             <button class="tab" type="button" role="tab" id="tab-editor" data-tab="editor" aria-controls="panel-editor" aria-selected="false" tabindex="-1" hidden><span data-icon="edit"></span><span data-i18n="manage.tab.editor">Manage event</span></button>
             <button class="tab" type="button" role="tab" id="tab-idreviews" data-tab="idreviews" aria-controls="panel-idreviews" aria-selected="false" tabindex="-1" hidden><span data-icon="id"></span><span data-i18n="admin.idreviews-title">ID reviews</span><span class="list-count" id="idReviewCount"></span></button>
+            <button class="tab" type="button" role="tab" id="tab-tuning" data-tab="tuning" aria-controls="panel-tuning" aria-selected="false" tabindex="-1" hidden><span data-icon="settings"></span><span data-i18n="admin.tuning-title">HelloID tuning</span></button>
             <button class="tab" type="button" role="tab" id="tab-filter" data-tab="filter" aria-controls="panel-filter" aria-selected="false" tabindex="-1" hidden><span data-icon="alert"></span><span data-i18n="admin.filter-title">Name filter</span></button>
             <button class="tab" type="button" role="tab" id="tab-reset" data-tab="reset" aria-controls="panel-reset" aria-selected="false" tabindex="-1" hidden><span data-icon="key"></span><span data-i18n="manage.tab.reset">Password resets</span></button>
         </div>
@@ -855,6 +856,16 @@
                 <ul class="id-reviews" id="idReviewList"></ul>
                 <p class="muted" id="idReviewsNone" hidden data-i18n="admin.idreviews-none">Nothing waiting.</p>
                 <div class="callout danger" id="idReviewError" role="alert"></div>
+            </section>
+        </div>
+
+        <div class="tab-panel" role="tabpanel" id="panel-tuning" aria-labelledby="tab-tuning" hidden>
+            <section class="glass-card page-card admin-tools" id="tuningBox" aria-labelledby="tuningTitle">
+                <h2 id="tuningTitle" data-i18n="admin.tuning-title">HelloID tuning</h2>
+                <p class="muted small" data-i18n="admin.tuning-lede">Where HelloID's thresholds should sit, worked out from its own decided checks: how approved and declined checks scored, and how alike different people's faces are. Only scores are read, never photos or names. A developer applies a suggestion in helloid.js.</p>
+                <div class="actions inline"><button class="btn" type="button" id="tuningRun"><span data-icon="refresh"></span><span data-i18n="admin.tuning-run">Work it out</span></button></div>
+                <div id="tuningReport" aria-live="polite"></div>
+                <div class="callout danger" id="tuningError" role="alert"></div>
             </section>
         </div>
 

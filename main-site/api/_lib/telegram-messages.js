@@ -1,27 +1,40 @@
 // The bot's structured messages, each built as { markdown, fallback } for
 // sendRichTelegram. One-line notices are not here; they go out as plain text.
 // Every piece of data goes through escapeMd or a richTable cell.
+//
+// Each is written in the language of the account it goes to (bot-text.js):
+// a builder takes the locale, and a notice carries its own (notice.locale,
+// set by notify.js), English when it has none. The staff alerts for the
+// admins' and organisers' group chats stay in English.
 
 import { escapeMd, richTable } from './telegram.js';
 import { siteHost } from './env.js';
+import { translator, intlTag } from './bot-text.js';
+
+// A section heading in a plain fallback, in capitals where the language has
+// them ("WHAT CHANGED").
+function shout(text, locale) {
+  return text.toLocaleUpperCase(intlTag(locale));
+}
 
 // A six digit code. purpose: "sign-in" (a sign in with Telegram as the second
 // factor) or "reset" (resetting a forgotten password). The code is set on a
 // line of its own as inline code, so Telegram offers to copy it in one tap,
 // with a table of the site, account and expiry under it.
-export function codeMessage({ purpose, username, code, minutes }) {
+export function codeMessage({ purpose, username, code, minutes, locale }) {
+  const say = translator(locale);
   const site = siteHost();
   let reason;
   let heading;
   let action;
   if (purpose === 'reset') {
-    reason = `Someone asked to reset the password of the account ${username} on ${site}.`;
-    heading = 'Password reset code';
-    action = 'Type this code on the reset page.';
+    reason = say('code.reset-reason', { username, site });
+    heading = say('code.reset-heading');
+    action = say('code.reset-action');
   } else {
-    reason = `Someone is signing in to ${site} as ${username}.`;
-    heading = 'Sign-in code';
-    action = 'Type this code on the sign-in page.';
+    reason = say('code.sign-in-reason', { username, site });
+    heading = say('code.sign-in-heading');
+    action = say('code.sign-in-action');
   }
 
   const markdown = [
@@ -34,48 +47,51 @@ export function codeMessage({ purpose, username, code, minutes }) {
     '',
     escapeMd(action),
     '',
-    richTable(['Detail'], [
-      ['Site', site],
-      ['Account', username],
-      ['Expires', `in ${minutes} minutes`],
+    richTable([say('message.detail')], [
+      [say('code.site'), site],
+      [say('code.account'), username],
+      [say('code.expires'), say('code.expires-in', { count: minutes })],
     ]),
     '',
-    '*If this was not you, do not share the code, and change your password.*',
+    `*${escapeMd(say('code.not-you'))}*`,
   ].join('\n');
 
   const fallback =
-    `${reason}\n\nCode: ${code}\n\n${action} It expires in ${minutes} minutes.\n\n` +
-    'If this was not you, do not share the code, and change your password.';
+    `${reason}\n\n${say('code.code', { code })}\n\n${action} ${say('code.expires-sentence', { count: minutes })}\n\n` +
+    say('code.not-you');
   return { markdown, fallback, skipEntities: true };
 }
 
 // The bot's help: what it is for, its two commands, and how to link an
-// account from the site.
-export function helpMessage() {
+// account from the site, and that it speaks the language used there.
+export function helpMessage(locale) {
+  const say = translator(locale);
   const site = siteHost();
   const markdown = [
     '# GFTV HelloEvents',
     '',
-    escapeMd(`This bot sends sign-in codes for ${site}, the GFTV calendar of furmeets and furry conventions.`),
+    escapeMd(say('help.about', { site })),
     '',
-    '## Commands',
+    `## ${escapeMd(say('help.commands'))}`,
     '',
-    richTable(['What it does'], [
-      ['/start', 'Link this chat, from the link on the sign-in or account page'],
-      ['/unlink', 'Stop receiving codes in this chat'],
+    richTable([say('help.what-it-does')], [
+      ['/start', say('help.start')],
+      ['/unlink', say('help.unlink')],
     ]),
     '',
-    '## Link your account',
+    `## ${escapeMd(say('help.link-heading'))}`,
     '',
-    escapeMd(`1. Sign in at ${site}`),
-    '2. Open **Account**, then **Security**, and choose **Link Telegram**',
-    '3. Press Start here when Telegram opens',
+    escapeMd(say('help.step-sign-in', { site })),
+    // Written with its own **bold** markup; only the site is data.
+    say('help.step-open'),
+    say('help.step-start'),
+    '',
+    escapeMd(say('help.language', { site })),
   ].join('\n');
 
   const fallback =
-    `This bot sends sign-in codes for ${site}, the GFTV calendar of furmeets and furry conventions.\n\n` +
-    'To link your account, sign in, open Account, then Security, and choose Link Telegram. ' +
-    'Send /unlink here to stop receiving codes.';
+    `${say('help.about', { site })}\n\n${say('help.fallback-link')} ${say('help.fallback-unlink')}\n\n` +
+    say('help.language', { site });
   return { markdown, fallback };
 }
 
@@ -143,6 +159,8 @@ export function eventNoticeMessage(notice) {
 // [{ heading, before, after }] (before and after: [[label, value]] rows, or
 // null for something added or removed) }.
 export function fullNoticeMessage(notice) {
+  const locale = notice.locale;
+  const say = translator(locale);
   const markdown = [`## ${escapeMd(notice.heading)}`, '', `**${escapeMd(notice.title)}**`];
   const fallback = [notice.heading, '', notice.title];
 
@@ -151,21 +169,21 @@ export function fullNoticeMessage(notice) {
     changes = notice.changes;
   }
   if (changes.length) {
-    markdown.push('', '## What changed');
-    fallback.push('', 'WHAT CHANGED');
+    markdown.push('', `## ${escapeMd(say('message.what-changed'))}`);
+    fallback.push('', shout(say('message.what-changed'), locale));
     for (const change of changes) {
       markdown.push('', `### ${escapeMd(change.heading)}`);
       fallback.push('', change.heading);
-      const rows = beforeAndNow(change.before, change.after);
+      const rows = beforeAndNow(change.before, change.after, locale);
       if (rows.length) {
-        markdown.push('', richTable(['Before', 'Now'], rows));
+        markdown.push('', richTable([say('message.before'), say('message.now')], rows));
         fallback.push(...rows.map(([label, was, now]) => `${label}: ${was} → ${now}`));
       }
     }
-    markdown.push('', '## Event details');
-    fallback.push('', 'EVENT DETAILS');
+    markdown.push('', `## ${escapeMd(say('message.event-details'))}`);
+    fallback.push('', shout(say('message.event-details'), locale));
   }
-  markdown.push('', richTable(['Detail'], notice.details));
+  markdown.push('', richTable([say('message.detail')], notice.details));
   if (!changes.length) {
     fallback.push('');
   }
@@ -175,17 +193,17 @@ export function fullNoticeMessage(notice) {
   // details.
   const section = (heading, places) => {
     markdown.push('', `## ${escapeMd(heading)}`);
-    fallback.push('', heading.toUpperCase());
+    fallback.push('', shout(heading, locale));
     for (const place of places) {
-      markdown.push('', `### ${escapeMd(place.heading)}`, '', richTable(['Detail'], place.rows));
+      markdown.push('', `### ${escapeMd(place.heading)}`, '', richTable([say('message.detail')], place.rows));
       fallback.push('', place.heading, ...place.rows.map(([label, value]) => `${label}: ${value}`));
     }
   };
   if (notice.places.length) {
-    section('Where', notice.places);
+    section(say('message.where'), notice.places);
   } else if (notice.online) {
-    markdown.push('', '## Where', '', 'Online');
-    fallback.push('', 'WHERE', 'Online');
+    markdown.push('', `## ${escapeMd(say('message.where'))}`, '', escapeMd(say('message.online')));
+    fallback.push('', shout(say('message.where'), locale), say('message.online'));
   }
   if (notice.mealPlaces.length) {
     section(notice.mealsHeading, notice.mealPlaces);
@@ -198,8 +216,9 @@ export function fullNoticeMessage(notice) {
 
 // A change's rows side by side, [label, before, now]: each label whose value
 // differs (the rest are in the event's own tables below), a missing value
-// shown as "—"; empty when neither has any.
-function beforeAndNow(before, after) {
+// shown as "None" in the language of the notice; empty when neither has
+// any.
+function beforeAndNow(before, after, locale) {
   const rowsOrNone = (rows) => {
     if (Array.isArray(rows)) {
       return rows;
@@ -212,7 +231,7 @@ function beforeAndNow(before, after) {
     if (values.has(label)) {
       return values.get(label);
     }
-    return '—';
+    return translator(locale)('message.none');
   };
   const labels = [...new Set([...now.keys(), ...was.keys()])];
   return labels

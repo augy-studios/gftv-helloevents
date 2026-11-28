@@ -15,11 +15,15 @@
 //             delete events.
 //
 // The column lists are the only things that ever select from either table.
+// The locale column (migrations/029) is added to them through
+// locale-column.js, so they still work before that migration has run.
 // Emails are read for sign-in lookups and, with the secrets, for email codes
 // (email-factor.js); they are never sent to a page.
 
 import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
+import { knownLocale } from './bot-text.js';
+import { withLocaleColumn, localeSelect } from './locale-column.js';
 
 const STAFF_COLUMNS = 'id, username, display_name, avatar_url, is_admin, is_editor, is_approved';
 const STAFF_AUTH_COLUMNS = `${STAFF_COLUMNS}, password_hash, totp_secret, email`;
@@ -47,8 +51,11 @@ export function reminderHoursFrom(list) {
 // and never sent to a page.
 const ACCOUNT_AUTH_COLUMNS = `${ACCOUNT_COLUMNS}, password_hash, email`;
 
-// For a session lookup: the account row with its staff record embedded.
-export const SESSION_ACCOUNT_SELECT = `${ACCOUNT_COLUMNS}, staff:${TABLES.users} ( ${STAFF_COLUMNS} )`;
+// For a session lookup: the account row with its staff record embedded, and
+// its locale when withLocale (locale-column.js).
+export function sessionAccountSelect(withLocale) {
+  return `${ACCOUNT_COLUMNS}${localeSelect(withLocale)}, staff:${TABLES.users} ( ${STAFF_COLUMNS} )`;
+}
 
 // The one shape every route sees. password_hash and totp_secret are only
 // present when the account was loaded with { withSecrets: true }.
@@ -71,6 +78,7 @@ function fromStaff(staff, account = null) {
     idVerified: idVerifiedOf(account),
     helloidPending: helloidPendingOf(account),
     prefs: notificationPreferences(account),
+    locale: localeOf(account),
   };
   if ('password_hash' in staff) {
     let totpSecret = staff.totp_secret;
@@ -99,6 +107,7 @@ function fromPublic(account) {
     idVerified: idVerifiedOf(account),
     helloidPending: helloidPendingOf(account),
     prefs: notificationPreferences(account),
+    locale: localeOf(account),
   };
   if ('password_hash' in account) {
     normalised.password_hash = account.password_hash;
@@ -121,6 +130,16 @@ function emailOf(row) {
 function countryOf(account) {
   if (account && typeof account.country === 'string' && account.country !== '') {
     return account.country;
+  }
+  return null;
+}
+
+// The language the account uses the site in (migrations/029), one of the
+// site's codes, which the Telegram bot and the notices write in; null until
+// the site first saves one (and for a staff member with no accounts row).
+function localeOf(account) {
+  if (account) {
+    return knownLocale(account.locale);
   }
   return null;
 }
@@ -305,7 +324,12 @@ export async function findForLogin(identifier) {
   }
   const [staffResult, memberResult] = await Promise.all([
     database().from(TABLES.users).select(STAFF_AUTH_COLUMNS).eq(column, lookup).maybeSingle(),
-    database().from(TABLES.accounts).select(ACCOUNT_AUTH_COLUMNS).eq('kind', 'public').eq(column, lookup).maybeSingle(),
+    withLocaleColumn((withLocale) => database()
+      .from(TABLES.accounts)
+      .select(ACCOUNT_AUTH_COLUMNS + localeSelect(withLocale))
+      .eq('kind', 'public')
+      .eq(column, lookup)
+      .maybeSingle()),
   ]);
   if (staffResult.error) {
     throw staffResult.error;
@@ -352,11 +376,11 @@ export async function loadAccount(accountId, { withSecrets = false } = {}) {
     accountColumns = ACCOUNT_AUTH_COLUMNS;
     staffColumns = STAFF_AUTH_COLUMNS;
   }
-  const { data, error } = await database()
+  const { data, error } = await withLocaleColumn((withLocale) => database()
     .from(TABLES.accounts)
-    .select(accountColumns + ', staff_user_id')
+    .select(accountColumns + localeSelect(withLocale) + ', staff_user_id')
     .eq('id', accountId)
-    .maybeSingle();
+    .maybeSingle());
   if (error) {
     throw error;
   }

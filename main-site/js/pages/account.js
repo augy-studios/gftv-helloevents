@@ -54,7 +54,13 @@ function renderProfile() {
   byId('countryMissing').hidden = Boolean(currentUser.country);
   byId('profileMark').hidden = Boolean(currentUser.country);
   if (document.activeElement !== byId('countryInput')) {
-    fillCountrySelect(byId('countryInput'), currentUser.country);
+    // A country picked but not saved yet stays picked when the page draws
+    // the profile again (the ID check section loading after it, say).
+    let chosen = currentUser.country;
+    if (!chosen && byId('countryInput').value) {
+      chosen = byId('countryInput').value;
+    }
+    fillCountrySelect(byId('countryInput'), chosen);
   }
   renderPersonal();
   if (Array.isArray(currentUser.idVerified)) {

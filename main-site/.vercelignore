@@ -5,3 +5,4 @@ playwright.config.js
 eslint.config.js
 README.md
 .env*
+.face-models/

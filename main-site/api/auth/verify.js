@@ -133,7 +133,7 @@ export default route('auth/verify', async (request, response) => {
       if (await limited(request, response, 'telegramSend', [`u:${user.id}`])) {
         return;
       }
-      await sendTelegramCode(challenge, chat.chat_id, { purpose: 'sign-in', username: user.username });
+      await sendTelegramCode(challenge, chat.chat_id, { purpose: 'sign-in', username: user.username, locale: user.locale });
       return ok(response, { sent: true });
     }
     case 'telegram':

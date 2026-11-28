@@ -4,16 +4,30 @@
 // GET                -> { helloid }  where they stand, and the country to
 //                       start the document list on (the connection's)
 // GET ?challenge=1   -> { challenge }  the turns and flashes to do, signed
-// POST { action: "read", country, type, front, back? } -> { read }
+// POST { action: "read", country, type, front, back? } -> { read, zone }
 //        reads the ID's machine-readable zone before the challenge, so the
 //        page can show the name and date of birth to confirm: read is
-//        { name, birth } or null (none found), and whether a face is on it
+//        { name, birth } or null (none found). zone: "clear" (found, every
+//        check digit right, its number certain), "unclear" (found, but not
+//        all of that) or "none" (not found, or the document has none); the
+//        page asks for a clearer photo when it is not clear
 // POST { action: "submit", consent: true, country, type, front, back?,
-//        name?, birth?, challenge, neutral, turns, flashes, device }
-//        -> { helloid, user }
+//        name?, birth?, challenge, faceHistory?, neutral, turns, flashes,
+//        device }
+//        -> { helloid, user }, or { retry: { reason, tries, of, history } }
 //        the whole check. name and birth: the legal name and date of birth
 //        it is for, as confirmed or typed; only for an account without them
 //        (an account's own are locked and used as they are).
+//        When the face part does not pass (one face, the turns, the
+//        flashes, the same person), or it did but the face did not match
+//        the ID photo (glasses or headwear, most often; asked once), and fewer than
+//        MAX_FACE_TRIES goes were made, nothing is kept and retry says why
+//        ("face", "turns", "flashes" or "match"), for the page to have them
+//        do the face part again. history: the earlier goes' reasons,
+//        signed, which the page sends back as faceHistory; a missing,
+//        changed or old one counts as no earlier goes, as starting over
+//        would. The last go is decided as always, and keeps how many goes
+//        it took (findings.faceTries) for the admins.
 //
 // helloid: { verified, pending, latest: null or { status, reason, failure },
 // country, personal: { legalName, dateOfBirth } }.
@@ -25,6 +39,7 @@ import { loadAccount, ensureStaffAccount } from '../_lib/users.js';
 import { selfView } from '../_lib/serialize.js';
 import { countryCode } from '../_lib/countries.js';
 import { identityHashOf } from '../_lib/id-checks.js';
+import { keyedHash, safeEqual } from '../_lib/crypto.js';
 import { latestHelloid, helloidView, otherTemplates, sealTemplate, documentUsedElsewhere, deviceSeenElsewhere, saveHelloid } from '../_lib/helloid-checks.js';
 import { storeHelloidPicture } from '../_lib/payments.js';
 import { database, TABLES } from '../_lib/supabase.js';
@@ -34,6 +49,59 @@ import { personName, birthDate } from '../../js/registration-fields.js';
 // Everything a submission carries (photos and frames), with room to spare
 // under Vercel's 4.5 MB request limit.
 const MAX_SUBMISSION_BYTES = 4_400_000;
+
+// Goes at the face part before a check that does not pass it goes to the
+// admins. Asking again keeps nothing that starting over would not.
+export const MAX_FACE_TRIES = 3;
+const FACE_PART = ['live', 'samePerson', 'turns', 'flashes'];
+
+// How long a record of earlier goes holds: a person redoing the face part.
+const HISTORY_SECONDS = 1800;
+const RETRY_REASONS = ['face', 'turns', 'flashes', 'match'];
+
+// The earlier goes' reasons, signed for this account: "<payload>.<signature>".
+export function signHistory(accountId, reasons, now = Date.now()) {
+  const payload = Buffer.from(JSON.stringify({ a: accountId, r: reasons, t: now })).toString('base64url');
+  return `${payload}.${keyedHash('helloid-face-history', payload).slice(0, 22)}`;
+}
+
+// The reasons in a record from signHistory, or [] when there is none, or it
+// is another account's, changed, or old.
+export function readHistory(token, accountId, now = Date.now()) {
+  if (typeof token !== 'string' || token.length > 600) {
+    return [];
+  }
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature || !safeEqual(signature, keyedHash('helloid-face-history', payload).slice(0, 22))) {
+    return [];
+  }
+  let record;
+  try {
+    record = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return [];
+  }
+  if (!record || record.a !== accountId || !Array.isArray(record.r) || typeof record.t !== 'number') {
+    return [];
+  }
+  if (now - record.t > HISTORY_SECONDS * 1000 || record.t > now + 60_000) {
+    return [];
+  }
+  return record.r.filter((reason) => RETRY_REASONS.includes(reason)).slice(0, MAX_FACE_TRIES);
+}
+
+// Why the face part did not pass, for the page's advice: "face" (not one
+// face, or not the same person throughout: stay in view), "turns" (turn
+// further), "flashes" (more screen brightness).
+function retryReason(failed) {
+  if (failed.includes('live') || failed.includes('samePerson')) {
+    return 'face';
+  }
+  if (failed.includes('turns')) {
+    return 'turns';
+  }
+  return 'flashes';
+}
 
 // The checks themselves load the face models, so only when needed.
 function checks() {
@@ -121,9 +189,16 @@ async function readDocument(response, body) {
     side = pictures.back;
   }
   let read = null;
+  let zone = 'none';
   if (side) {
     try {
       const mrz = await readMrz(side);
+      if (mrz.found) {
+        zone = 'unclear';
+        if ([mrz.birthChecked, mrz.expiryChecked, mrz.documentChecked].every(Boolean)) {
+          zone = 'clear';
+        }
+      }
       if (mrz.found && mrz.birthChecked) {
         read = { name: titleCase(mrz.name), birth: mrz.birth };
       }
@@ -131,7 +206,7 @@ async function readDocument(response, body) {
       console.error('[helloevents] helloid read:', String(cause));
     }
   }
-  return ok(response, { read });
+  return ok(response, { read, zone });
 }
 
 // "ANNA MARIA ERIKSSON" as "Anna Maria Eriksson".
@@ -185,6 +260,10 @@ async function submit(request, response, user, body) {
   }
   let closest = { accountId: null, score: 0 };
   for (const other of await otherTemplates(user.id)) {
+    // Templates from another face model are on another scale.
+    if (other.model !== result.faceModel) {
+      continue;
+    }
     const score = helloid.templateSimilarity(result.template, other.template);
     if (score > closest.score) {
       closest = { accountId: other.accountId, score };
@@ -199,13 +278,33 @@ async function submit(request, response, user, body) {
   }
   findings.flags = flags;
 
+  // The face part did not pass, or the face did not match the ID photo:
+  // once more, with advice, before the admins. A weak match is asked about
+  // once (headwear and glasses off), and not when the ID photo shows no
+  // face at all.
+  const history = readHistory(body.faceHistory, user.id);
+  const goes = history.length + 1;
+  let failed = FACE_PART.filter((check) => findings.checks[check] === false);
+  let reason = null;
+  if (failed.length > 0) {
+    reason = retryReason(failed);
+  } else if (findings.checks.faceMatch === false && !findings.notes.includes('id_no_face') && !history.includes('match')) {
+    failed = ['faceMatch'];
+    reason = 'match';
+  }
+  if (!documentUsed && reason !== null && goes < MAX_FACE_TRIES) {
+    await audit(request, { action: 'helloid.face_retry', actorId: user.id, details: { failed, try: goes } });
+    return ok(response, { retry: { reason, tries: goes, of: MAX_FACE_TRIES, history: signHistory(user.id, [...history, reason]) } });
+  }
+  findings.faceTries = { count: goes, earlier: history };
+
   const fields = {
     findings,
     verified_name: personal.legalName,
     verified_birth: personal.dateOfBirth,
     identity_hash: identityHash,
     device_hash: device.hash,
-    face_template: sealTemplate(result.template),
+    face_template: sealTemplate(result.template, result.faceModel),
   };
   if (documentUsed) {
     fields.status = 'declined';

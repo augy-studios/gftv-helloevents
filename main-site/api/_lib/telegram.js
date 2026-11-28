@@ -12,6 +12,8 @@ import { database, TABLES } from './supabase.js';
 import { optionalEnv } from './env.js';
 import { randomToken, sha256 } from './crypto.js';
 import { errorDetail } from './http.js';
+import { knownLocale } from './bot-text.js';
+import { withLocaleColumn } from './locale-column.js';
 
 export const LINK_TOKEN_MINUTES = 10;
 export const CODE_MINUTES = 5;
@@ -273,4 +275,32 @@ export async function saveLink(userId, chatId, username) {
   if (error) {
     throw error;
   }
+}
+
+// The language of the account a chat is linked to (migrations/029), as the
+// site saved it, or null when the chat is linked to none or that account
+// never picked one (or before migrations/029 has run). A chat linked to
+// several accounts takes the first.
+export async function linkedLocale(chatId) {
+  const { data: links, error } = await database().from(TABLES.telegram).select('user_id').eq('chat_id', chatId).limit(1);
+  if (error) {
+    throw error;
+  }
+  if (!links || links.length === 0) {
+    return null;
+  }
+  const { data: account, error: accountError } = await withLocaleColumn((withLocale) => {
+    let columns = 'id';
+    if (withLocale) {
+      columns = 'id, locale';
+    }
+    return database().from(TABLES.accounts).select(columns).eq('id', links[0].user_id).maybeSingle();
+  });
+  if (accountError) {
+    throw accountError;
+  }
+  if (!account) {
+    return null;
+  }
+  return knownLocale(account.locale);
 }

@@ -5,6 +5,12 @@
 // GET ?check=<id>&photo=id|selfie  the ID photo (front and back) or the
 //                                  selfie of a check waiting for review;
 //                                  never cached, admins only
+// GET ?tuning=1                    -> { tuning }  the HelloID tuning report
+//                                  (helloid-calibration.js): each score's
+//                                  spread for approved and declined
+//                                  checks, how alike different people's
+//                                  faces score, and suggested thresholds.
+//                                  Scores only, never a photo or a name
 // POST { action: "approve", check }          -> { reviews }
 // POST { action: "decline", check, reason }  -> { reviews }
 //        the person is told either way (push and Telegram); a declined
@@ -72,6 +78,22 @@ async function reviews() {
   return (await pendingHelloids()).map(reviewView);
 }
 
+// The tuning report, as plain data (the pairs of accounts above FACE_MATCH
+// as a count only).
+async function tuning() {
+  const { CURRENT_THRESHOLDS } = await import('../_lib/helloid.js');
+  const { tuningReport, SERVER_TEMPLATES } = await import('../_lib/helloid-calibration.js');
+  const report = await tuningReport(CURRENT_THRESHOLDS, { maxTemplates: SERVER_TEMPLATES });
+  return {
+    counts: report.counts,
+    current: report.current,
+    suggestions: report.suggestions,
+    metrics: report.metrics,
+    face: report.face,
+    warnings: report.warnings,
+  };
+}
+
 async function photo(response, checkId, which) {
   response.setHeader('Cache-Control', 'no-store, private');
   const check = await helloidById(checkId);
@@ -109,6 +131,9 @@ export default route('manage/helloid', async (request, response) => {
         return fail(response, 400, 'bad_request');
       }
       return photo(response, checkId.toLowerCase(), which);
+    }
+    if (query(request, 'tuning') === '1') {
+      return ok(response, { tuning: await tuning() });
     }
     return ok(response, { reviews: await reviews() });
   }

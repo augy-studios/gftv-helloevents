@@ -25,9 +25,12 @@
         "api/manage/gallery.js": {
             "maxDuration": 60
         },
+        "api/manage/helloid.js": {
+            "maxDuration": 60
+        },
         "api/me/helloid.js": {
             "maxDuration": 60,
-            "includeFiles": "node_modules/{@vladmandic/human/{dist/human.node-wasm.js,models/*},@tensorflow/tfjs-backend-wasm/dist/*.wasm,@tesseract.js-data/eng/4.0.0_best_int/*,tesseract.js-core/*,tesseract.js/src/**,mrz/lib/**}"
+            "includeFiles": "{api/_lib/models/**,node_modules/{@vladmandic/human/{dist/human.node-wasm.js,models/*},@tensorflow/tfjs-backend-wasm/dist/*.wasm,tesseract.js-core/*,tesseract.js/src/**,mrz/lib/**}}"
         }
     },
     "crons": [

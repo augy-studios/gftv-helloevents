@@ -26,6 +26,7 @@ import { linkedChat, telegramConfigured, sendRichTelegram } from '../_lib/telegr
 import { pushConfigured, vapidPublicKey, deviceCount, checkSubscription, saveSubscription, removeSubscription, pushToAccount } from '../_lib/push.js';
 import { eventNoticeMessage } from '../_lib/telegram-messages.js';
 import { siteUrl } from '../_lib/env.js';
+import { botLocale, translator } from '../_lib/bot-text.js';
 
 // The notification settings the account page shows: the choices, whether
 // web push is on (with the key a browser subscribes with, and how many
@@ -169,10 +170,12 @@ export default route('me/notifications', async (request, response) => {
     if (!link) {
       return fail(response, 400, 'telegram_not_linked');
     }
+    const say = translator(user.locale);
     const message = eventNoticeMessage({
-      heading: 'Test',
+      locale: botLocale(user.locale),
+      heading: say('notice.test'),
       title: 'GFTV HelloEvents',
-      intro: 'Notifications work in this chat.',
+      intro: say('notice.test-telegram'),
       details: [],
       url: `${siteUrl()}/account`,
     });
@@ -185,9 +188,10 @@ export default route('me/notifications', async (request, response) => {
     return ok(response);
   }
   if (body.action === 'test' && (body.channel === undefined || body.channel === 'device')) {
+    const say = translator(user.locale);
     await pushToAccount(user.id, {
-      title: 'Test: GFTV HelloEvents',
-      body: 'Notifications work on this device.',
+      title: `${say('notice.test')}: GFTV HelloEvents`,
+      body: say('notice.test-device'),
       url: `${siteUrl()}/account`,
       tag: 'test',
     });

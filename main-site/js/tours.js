@@ -220,6 +220,7 @@ export const TOURS = [
       { el: '#tab-events', i18n: 'tour.manage.tab-events' },
       { el: '#tab-editor', i18n: 'tour.manage.tab-editor' },
       { el: '#tab-idreviews', i18n: 'tour.manage.tab-idreviews' },
+      { el: '#tab-tuning', i18n: 'tour.manage.tab-tuning' },
       { el: '#tab-filter', i18n: 'tour.manage.tab-filter' },
       { el: '#tab-reset', i18n: 'tour.manage.tab-reset' },
       { el: '#newEvent', i18n: 'tour.manage.new' },

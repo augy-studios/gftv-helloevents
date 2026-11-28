@@ -140,6 +140,8 @@ const USER = [
   ...nest('personal', ['legalName', 'dateOfBirth', 'emergencyName', 'emergencyPhone']),
   // The ID checks passed (migrations/027): the checkmark by the legal name.
   'idVerified',
+  // The language the bot and the notices use (migrations/029).
+  'locale',
 ];
 const METHODS = ['totp', 'passkey', 'telegram', 'emailCodes', 'backup'];
 const FACTOR = ['totp', 'passkey', 'backup', 'required'];

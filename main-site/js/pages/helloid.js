@@ -6,13 +6,20 @@
 //   2. Consent.
 //   3. A photo of the ID (front, then back for a card) with the camera, or
 //      the phone's camera app where the page cannot open the camera. The
-//      server reads a machine-readable zone when there is one.
+//      server reads a machine-readable zone when there is one; when it
+//      cannot read it clearly, the person is asked for a clearer photo of
+//      that side (MAX_RETAKES times, then they may carry on with it).
 //   4. The legal name and date of birth it is for: the account's own when
 //      set (locked), else what the zone gave (to confirm or correct), or
 //      typed.
-//   5. The live face check: a challenge from the server (turn left, right,
-//      up, down, in its order; then the screen flashes its colours), frames
-//      taken at set moments.
+//   5. The live face check, once they confirm their screen is at full
+//      brightness: a challenge from the server (turn left, right, up, down,
+//      in its order; then the screen flashes its colours), frames taken at
+//      set moments. When the face part does not pass (or the face does not
+//      match the ID photo), the server asks for it again (api/me/helloid.js,
+//      up to its own limit, with a signed record of the earlier goes the
+//      page sends back) and the page says what to do differently:
+//      brightness up, turn further, face in view, glasses off.
 //   6. Sending everything, and the result. A dropped connection keeps it
 //      all here and sends it again once the connection is back.
 
@@ -44,6 +51,10 @@ let docStream = null;
 let faceStream = null;
 let cameraLabel = '';
 let pending = null; // the submission, kept until it is sent
+let retakes = 0; // clearer photos asked for, this try
+let retaking = false; // taking the zone's side again
+let faceHistory = null; // the server's signed record of earlier goes
+const MAX_RETAKES = 2;
 
 function show(step) {
   for (const id of STEPS) {
@@ -99,6 +110,9 @@ function pickDocument(document) {
   sides = {};
   sideIndex = 0;
   read = null;
+  retakes = 0;
+  retaking = false;
+  faceHistory = null;
   byId('consentBox').checked = false;
   byId('consentNext').disabled = true;
   show('stepConsent');
@@ -165,7 +179,12 @@ function currentSide() {
   return picked.sides[sideIndex];
 }
 
-async function startCapture() {
+// retake: asking again for the side with the zone, which could not be
+// read clearly; the tips show, and they may carry on with the last photo.
+async function startCapture({ retake = false } = {}) {
+  retaking = retake;
+  byId('captureRetake').hidden = !retake;
+  byId('docSkip').hidden = !retake;
   const side = currentSide();
   byId('captureTitle').textContent = translate(`helloid.capture-${side}`, { document: translate(`helloid.document.${picked.type}`) });
   let hint = 'helloid.capture-hint';
@@ -181,6 +200,9 @@ async function startCapture() {
   byId('docUse').hidden = true;
   byId('docFileLabel').hidden = true;
   show('stepCapture');
+  if (retake) {
+    byId('captureRetake').scrollIntoView({ block: 'nearest' });
+  }
   if (!docStream) {
     try {
       docStream = await openCamera(byId('docVideo'), 'environment');
@@ -201,10 +223,12 @@ function showPreview(dataUrl) {
   byId('docShoot').hidden = true;
   byId('docRetake').hidden = false;
   byId('docUse').hidden = false;
+  byId('docSkip').hidden = true;
 }
 
 async function useSide() {
-  if (sideIndex + 1 < picked.sides.length) {
+  // A retake is of the zone's side alone.
+  if (!retaking && sideIndex + 1 < picked.sides.length) {
     sideIndex += 1;
     await startCapture();
     return;
@@ -215,7 +239,8 @@ async function useSide() {
 }
 
 // Reads the zone (when the document has one) for the name and date of
-// birth to confirm, then the details step.
+// birth to confirm, then the details step. A zone read but not clearly, or
+// not found, asks for a clearer photo of its side first.
 async function readDocument() {
   read = null;
   if (picked.mrz) {
@@ -223,16 +248,35 @@ async function readDocument() {
     for (const id of STEPS) {
       byId(id).hidden = true;
     }
+    let zone = 'clear';
     try {
       const body = { action: 'read', country, type: picked.type, front: sides.front };
       if (sides.back) {
         body.back = sides.back;
       }
-      read = (await post('/api/me/helloid', body)).read;
+      const answer = await post('/api/me/helloid', body);
+      read = answer.read;
+      zone = answer.zone;
     } catch {
+      // Not read (a dropped connection): the check reads it again.
       read = null;
     }
+    if (zone !== 'clear' && retakes < MAX_RETAKES) {
+      retakes += 1;
+      sideIndex = picked.sides.indexOf(picked.mrz);
+      await startCapture({ retake: true });
+      return;
+    }
   }
+  showDetails();
+}
+
+// Carrying on with a photo whose zone could not be read clearly: the
+// admins compare it by eye.
+async function skipRetake() {
+  retaking = false;
+  stopStream(docStream);
+  docStream = null;
   showDetails();
 }
 
@@ -241,6 +285,7 @@ async function readDocument() {
 // ---------------------------------------------------------------------------
 
 function showDetails() {
+  retaking = false;
   const personal = standing.personal;
   const name = byId('detailsName');
   const birth = byId('detailsBirth');
@@ -278,15 +323,32 @@ function prompt(key) {
   byId('livePrompt').textContent = translate(key);
 }
 
+// The face check's step, fresh (retry: the server's reason the last go did
+// not pass, shown with what to do about it). The brightness box is ticked
+// again each time.
+function showLive(retry = null) {
+  const notice = byId('liveRetry');
+  notice.hidden = retry === null;
+  if (retry !== null) {
+    notice.textContent = translate(`helloid.retry-${retry.reason}`, { count: retry.of - retry.tries });
+  }
+  byId('liveBright').checked = false;
+  byId('liveStart').disabled = true;
+  byId('liveError').textContent = '';
+  show('stepLive');
+}
+
 async function startLive() {
   byId('liveError').textContent = '';
   byId('liveStart').disabled = true;
+  let started = false;
   try {
     const { challenge } = await api('/api/me/helloid?challenge=1');
     if (!faceStream) {
       faceStream = await openCamera(byId('faceVideo'), 'user');
     }
     const video = byId('faceVideo');
+    started = true;
     prompt('helloid.prompt-straight');
     await wait(1800);
     const neutral = grab(video, FRAME_SIDE, 0.85);
@@ -330,6 +392,9 @@ async function startLive() {
     if (sides.back) {
       pending.back = sides.back;
     }
+    if (faceHistory) {
+      pending.faceHistory = faceHistory;
+    }
     if (!byId('detailsName').disabled) {
       pending.name = byId('detailsName').value;
     }
@@ -345,7 +410,10 @@ async function startLive() {
     }
     byId('liveError').textContent = text;
   } finally {
-    byId('liveStart').disabled = false;
+    byId('liveStart').disabled = !byId('liveBright').checked;
+    if (started) {
+      prompt('');
+    }
   }
 }
 
@@ -407,6 +475,11 @@ async function send() {
     return;
   }
   pending = null;
+  if (data.retry) {
+    faceHistory = data.retry.history;
+    showLive(data.retry);
+    return;
+  }
   standing = data.helloid;
   const latest = standing.latest;
   if (standing.verified) {
@@ -449,7 +522,7 @@ function wire() {
     }
     showPreview(grab(video, ID_SIDE, 0.9));
   });
-  byId('docRetake').addEventListener('click', startCapture);
+  byId('docRetake').addEventListener('click', () => startCapture({ retake: retaking }));
   byId('docUse').addEventListener('click', useSide);
   byId('docFile').addEventListener('change', async () => {
     const file = byId('docFile').files[0];
@@ -469,9 +542,13 @@ function wire() {
       byId('detailsError').textContent = translate('helloid.details-needed');
       return;
     }
-    show('stepLive');
+    showLive();
+  });
+  byId('liveBright').addEventListener('change', () => {
+    byId('liveStart').disabled = !byId('liveBright').checked;
   });
   byId('liveStart').addEventListener('click', startLive);
+  byId('docSkip').addEventListener('click', skipRetake);
   byId('resultRetry').addEventListener('click', () => {
     if (pending) {
       send();

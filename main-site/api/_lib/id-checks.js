@@ -436,9 +436,14 @@ async function documentUsedElsewhere(identityHash, accountId) {
 }
 
 // The document's country and number, folded, as a keyed hash; null when
-// the provider gave no number.
+// the provider gave no number. G is folded into 6 and L into 1: HelloID
+// reads the number off a photo, and no check digit can tell those apart
+// (each pair is 10 apart in its sum; mrz-read.js), so the same document
+// hashes the same however its G or L was read, here or by a provider.
+// Hashes kept before this fold, of numbers with a G or an L, no longer
+// match the same document's new ones.
 export function identityHashOf(outcome) {
-  const number = textOrEmpty(outcome.documentNumber).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const number = textOrEmpty(outcome.documentNumber).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/G/g, '6').replace(/L/g, '1');
   if (!number) {
     return null;
   }

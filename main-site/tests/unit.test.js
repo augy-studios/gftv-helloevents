@@ -590,9 +590,9 @@ test('the signed-in view of yourself has no secrets', () => {
     id: 'u1', kind: 'staff', username: 'fox', display_name: 'Fox', email: 'fox@example.com', password_hash: '$2a$', totp_secret: 'ABC',
     is_admin: false, is_editor: true, is_approved: true, avatar_url: 'http://insecure.example/a.png',
   });
-  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, editsEvents: false, country: null, personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
+  assert.deepEqual(view, { username: 'fox', displayName: 'Fox', avatarUrl: null, kind: 'staff', role: 'editor', canManage: true, editsEvents: false, country: null, personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [], locale: null });
   const member = ser.selfView({ id: 'p1', kind: 'public', username: 'otter', display_name: 'Otter', is_approved: true, password_hash: '$2a$', country: 'SG' });
-  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [] });
+  assert.deepEqual(member, { username: 'otter', displayName: 'Otter', avatarUrl: null, kind: 'public', role: 'member', canManage: false, editsEvents: false, country: 'SG', personal: { legalName: null, dateOfBirth: null, emergencyName: null, emergencyPhone: null }, idVerified: [], locale: null });
 });
 
 test('a public account can never manage events, whatever its row says', () => {

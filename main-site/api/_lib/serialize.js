@@ -153,6 +153,10 @@ export function selfView(user, { editsEvents = false } = {}) {
     // The ID checks the account passed (migrations/027): the checkmark by
     // the legal name.
     idVerified: idVerifiedList(user.idVerified),
+    // The language saved for the Telegram bot and the notices
+    // (migrations/029), or null before the site first saved one: the page
+    // saves its own when they differ (js/app.js).
+    locale: missingToNull(user.locale),
   };
 }
 

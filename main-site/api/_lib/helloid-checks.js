@@ -70,7 +70,8 @@ export function helloidView(check) {
 }
 
 // The face templates of the other accounts HelloID approved, decrypted:
-// [{ accountId, template }].
+// [{ accountId, template, model }]. model: the face model that made it
+// (helloid.js FACE_MODELS); a template kept as a bare list was FaceRes's.
 export async function otherTemplates(accountId) {
   const { data, error } = await database()
     .from(TABLES.helloidChecks)
@@ -90,17 +91,39 @@ export async function otherTemplates(accountId) {
     if (!plain) {
       continue;
     }
-    try {
-      templates.push({ accountId: row.account_id, template: JSON.parse(plain) });
-    } catch {
-      continue;
+    const opened = openTemplate(plain);
+    if (opened) {
+      templates.push({ accountId: row.account_id, ...opened });
     }
   }
   return templates;
 }
 
-export function sealTemplate(template) {
-  return encryptSecret(JSON.stringify(template.map((value) => Math.round(value * 10000) / 10000)));
+// A face template, rounded, with the model that made it, encrypted; null
+// when there is none (no single face on the first frame).
+export function sealTemplate(template, model = 'faceres') {
+  if (!Array.isArray(template)) {
+    return null;
+  }
+  return encryptSecret(JSON.stringify({ model, values: template.map((value) => Math.round(value * 10000) / 10000) }));
+}
+
+// A decrypted template: { template, model }, or null when it is neither
+// shape.
+export function openTemplate(plain) {
+  let parsed;
+  try {
+    parsed = JSON.parse(plain);
+  } catch {
+    return null;
+  }
+  if (Array.isArray(parsed)) {
+    return { template: parsed, model: 'faceres' };
+  }
+  if (parsed && typeof parsed.model === 'string' && Array.isArray(parsed.values)) {
+    return { template: parsed.values, model: parsed.model };
+  }
+  return null;
 }
 
 // Whether a document already verified another account, with HelloID or an
